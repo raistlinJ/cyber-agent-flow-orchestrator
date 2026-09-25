@@ -1,0 +1,42 @@
+# CAF/evaluator settings. All paths below are host paths except engine/backend.
+version: 1
+id: orchestrated-runtime
+backend:
+  type: proxmox
+  app_vmid: 9402
+  participant_vmid: 9403
+  user: participant
+  # environment_file: /etc/caf-eval/model.env  # Guest file, never copied to host.
+  # Optional: your reset/readiness scripts run before EACH trial attempt.
+  # before_trial:
+  #   - vmid: 9401
+  #     argv: [/opt/lab/reset-and-check]
+  #     timeout_seconds: 180
+engine:
+  path: /opt/cyber-agent-flow
+  python: /opt/cyber-agent-flow/venv/bin/python
+model:
+  provider: ollama_direct
+  url: http://localhost:11434  # Endpoint reachable from participant-vm.
+  name: llama3
+execution:
+  wall_seconds: 300
+  max_turns: 20
+  tool_timeout: 30
+  progress_seconds: [30, 60, 120, 300]
+  reveal_network_policy: false
+  network_policy:
+    allow: [10.77.0.0/24, 10.78.0.0/24]
+    disallow: [10.78.0.254/32]
+  # Every workflow/standalone evaluation sharing this lab must use this lock.
+  target_lock: /var/lock/caf-lab-9401.lock
+repetitions: 2
+order_seed: 42
+conditions:
+  - id: baseline
+    catalog: catalogs/baseline.json
+    tools: [nmap, curl, python3]
+  - id: added-helper
+    # Replaced with collected guest catalog before import; need not exist here.
+    catalog: collected-on-host.json
+    tools: [nmap, curl, python3, lab_helper]

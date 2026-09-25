@@ -1,0 +1,7 @@
+version: 1
+id: reuse-lab
+runtime: runtime.yaml
+scenarioforge:
+  mode: reuse_export
+  archive: /opt/scenarioforge/exports/lab-evaluation.zip
+max_readiness_age_seconds: 3600

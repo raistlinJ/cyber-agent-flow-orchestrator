@@ -1,0 +1,26 @@
+# A template: provide /opt/experiments/generate-lab-helper.py in participant-vm.
+# It calls your CAF generation workflow and exports a native tools JSON catalog.
+version: 1
+id: generated-artifact-study
+runtime: runtime-artifacts.yaml
+scenarioforge:
+  mode: reuse_export
+  archive: /opt/scenarioforge/exports/lab-evaluation.zip
+artifacts:
+  - id: generate
+    vmid: 9403
+    user: participant
+    cwd: /opt/cyber-agent-flow
+    argv: [/opt/cyber-agent-flow/venv/bin/python, /opt/experiments/generate-lab-helper.py]
+    timeout_seconds: 1800
+  - id: test
+    vmid: 9403
+    user: participant
+    cwd: /opt/cyber-agent-flow
+    argv: [/opt/cyber-agent-flow/venv/bin/python, gen-tool_tests.py, run, lab_helper]
+    timeout_seconds: 600
+collect:
+  added-helper:
+    catalog: /opt/experiments/catalogs/with-lab-helper.json
+    # guidance_files: [/opt/experiments/guidance/lab-helper.md]
+max_readiness_age_seconds: 7200

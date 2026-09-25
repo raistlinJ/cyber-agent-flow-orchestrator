@@ -1,0 +1,17 @@
+version: 1
+id: deploy-lab
+runtime: runtime.yaml
+scenarioforge:
+  mode: execute
+  xml: /opt/scenarioforge/scenarios/lab.xml
+  scenario: Lab
+  suite_id: lab-evaluation
+  output_root: /opt/scenarioforge/exports/orchestrated
+  repo: /opt/scenarioforge
+  python: /opt/scenarioforge/.venv/bin/python
+  user: scenarioforge
+  environment_file: /opt/scenarioforge/.scenarioforge.env
+  timeout_seconds: 1800
+  split: development
+  # tasks: /opt/scenarioforge/scenarios/reviewed-tasks.json
+max_readiness_age_seconds: 3600
