@@ -63,7 +63,7 @@ def test_login_cookie_dashboard_and_logout_revocation(server):
     for value in ('__Host-caf_session=', 'Secure', 'HttpOnly', 'SameSite=Strict', 'Path=/'):
         assert value in attributes
     code, headers, body = request(server, '/', cookie=cookie)
-    assert code == 200 and b'Your lab, at a glance.' in body
+    assert code == 200 and b'aria-label="Workspace pages"' in body
     assert "frame-ancestors 'none'" in headers['Content-Security-Policy']
     assert headers['Strict-Transport-Security'] == 'max-age=31536000'
     assert json.loads(request(server, '/api/status', cookie=cookie)[2])['vms'][0]['guest_access'] == 'reachable'

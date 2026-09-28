@@ -38,6 +38,7 @@ def main():
                         page.get_by_label('Username').fill(username)
                         page.get_by_label('Password', exact=True).fill(PASSWORD)
                         page.get_by_role('button', name='Sign in', exact=True).click()
+                        page.locator('[data-route=setup]').click()
                         page.wait_for_selector('#role-panel:not([hidden])')
                         return page
                     alice = login(first, 'operator@pve')

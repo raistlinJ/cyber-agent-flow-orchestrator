@@ -6,9 +6,30 @@ and download their CSV datasets. Use the CLI for full workflows, resume, recover
 and other exports. The page shows VM availability, application presence,
 process commands and elapsed time, unfinished workflow jobs, and saved run status.
 
-![Per-user VM selection with simulated lab data](images/user-vms-desktop.png)
+![Overview and persistent console with simulated lab data](images/workspace-overview.png)
 
 The screenshot uses simulated data for browser verification, not a live Proxmox run.
+
+## Pages and navigation
+
+- **Overview** (`/#overview`): VM power, guest-agent access, application processes,
+  elapsed time and unfinished workflow commands. Links lead to setup, experiments
+  and application maintenance.
+- **Experiments** (`/#experiments`): bundled samples, saved runs, condition summaries
+  and CSV downloads. Full result JSON is available under **Full result details**.
+- **Applications** (`/#applications`): version checks, Update with process-stop
+  confirmation, rollback and the latest maintenance outcome. Expand **Maintenance
+  history** for older jobs, transfer details and diagnostic records.
+- **Lab setup** (`/#setup`): saved per-user VM roles and automatic refresh preferences.
+  Local-account mode continues to use VM roles from the workflow configuration.
+
+Navigation stays available during loading and maintenance. Switching pages does
+not restart checks, submit changes, clear the console, or discard unsaved form
+selections. The current page supports bookmarks, reload and browser Back/Forward.
+Unsaved edits persist across page navigation, not a full browser reload. Loading
+and maintenance status stays visible across pages; mutation controls retain their
+existing busy and permission checks. Configure VM roles first, check application
+compatibility on Applications, then run samples on Experiments.
 
 ## Start it
 
@@ -72,7 +93,7 @@ HTTP requests and maintenance operations use an indeterminate indicator and thei
 current status because their total work is unknown. Maintenance details remain
 readable while an operation is active.
 
-Manual **Refresh view** starts fresh VM checks in PVE mode. **Automatic refresh**
+Manual **Refresh view** starts fresh VM checks in PVE mode. **Lab setup → Automatic refresh**
 offers Never or every 1, 2, 5, or 10 minutes, defaulting to 1 minute. The preference
 is saved in this browser and can be changed while a check is running. Never stops
 idle polling; it does not cancel a check or job already started. Active checks,
@@ -86,7 +107,7 @@ Experiment jobs continue in the background with their existing run controls.
 
 ## Application versions
 
-Use **Check version**, **Update** and **Roll back** for the selected CAF and
+On **Applications**, use **Check version**, **Update** and **Roll back** for the selected CAF and
 ScenarioForge VMs. Updating/rolling back requires the `caf-maintainers` PVE group;
 checking versions uses ordinary VM access. Updates run in background workers and
 preserve local data. See [application maintenance](application-updates.md) for
@@ -94,7 +115,9 @@ setup, dependency limits, service restarts, source repositories and recovery.
 
 ## Troubleshooting console
 
-The collapsible console at the bottom shows dashboard API request/status timing
+The collapsible console is fixed to the bottom of the viewport on every workspace
+page, with its own scroll area. Page content can scroll fully above the dock.
+Navigation preserves the same console and scroll position. It shows dashboard API request/status timing
 and maintenance activity: host Git commands and their bounded output, guest-agent
 operations, `qm` execution/status responses, authorization timing and file-transfer
 acknowledgements. It is read-only. Hide/show is saved in this browser, and
@@ -129,8 +152,8 @@ Session/access errors clear the private console view along with the dashboard.
 
 ## Bundled samples
 
-In PVE mode, save a participant VM, then choose **Model smoke test** or **Tools vs.
-added helper** under **Try an experiment**. The section displays the participant,
+In PVE mode, save a participant VM on **Lab setup**, then choose **Model smoke test** or **Tools vs.
+added helper** under **Experiments → Try an experiment**. The section displays the participant,
 model, trial count and budgets before launch. No file import or scenario deployment
 is required. Engine/model prerequisites and the exact conditions are listed in the
 [README](../README.md#run-bundled-samples-in-the-webui).
@@ -290,6 +313,7 @@ uv run --group dev pytest -q
 # Optional browser check; Chrome must be installed:
 uv sync --group dev
 uv run --group dev python tests/browser_smoke.py /tmp/caf-dashboard-preview
+uv run --group dev python tests/browser_navigation.py /tmp/caf-navigation-preview
 ```
 
 Tests cover VM absence/unknown/paused states, unreachable guest agents, process
@@ -297,6 +321,9 @@ matching/elapsed time, secret masking, live versus unconfirmed jobs, configurati
 validation, HTTP endpoints, Host/Origin restrictions, cached reads, and the existing
 workflow services. Browser checks use simulated data and exercise desktop/mobile
 layout, advancing clocks, failure states and inert rendering of command strings.
+Navigation checks cover page history and reload, retained form edits and console
+content, console visibility during loading, collapse persistence, and content
+clearance above the console on desktop and mobile. Navigation adds no API requests.
 A live Proxmox end-to-end validation remains outstanding.
 
 ## Private experiment results

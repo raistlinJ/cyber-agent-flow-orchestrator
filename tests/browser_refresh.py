@@ -50,12 +50,16 @@ def main():
                 page.get_by_label('Password', exact=True).fill(PASSWORD)
                 page.get_by_role('button', name='Sign in', exact=True).click()
                 expect(page.locator('#refresh')).to_be_enabled(timeout=30000)
+                page.locator('[data-route=setup]').click()
                 period = page.get_by_label('Automatic refresh', exact=True)
+                def choose_period(value):
+                    page.locator('[data-route=setup]').click()
+                    period.select_option(value)
                 expect(period).to_have_value('1')
                 assert period.locator('option').all_text_contents() == [
                     'Never', 'Every 1 minute', 'Every 2 minutes', 'Every 5 minutes', 'Every 10 minutes']
                 page.clock.install()
-                period.select_option('0')
+                choose_period('0')
                 before = len(statuses)
                 page.clock.fast_forward(601000)
                 assert len(statuses) == before  # Never does not poll an idle dashboard.
@@ -64,7 +68,7 @@ def main():
                 expect(period).to_have_value('0')
                 page.route('**/api/status?refresh=1', lambda route: pending.append(route))
                 for minutes in (1, 2, 5, 10):
-                    period.select_option(str(minutes))
+                    choose_period(str(minutes))
                     before = len(statuses)
                     page.clock.fast_forward(minutes * 60000 - 1000)
                     assert len(statuses) == before
@@ -75,19 +79,19 @@ def main():
                         expect(page.locator(f'[data-update-role="{role}"][data-update-action="update"]')).to_be_enabled()
                     expect(page.locator('#refresh')).to_be_enabled()
                     # Changing to Never during a request is allowed; it cancels subsequent idle polls.
-                    period.select_option('0')
+                    choose_period('0')
                     pending.pop().fulfill(json=dashboard.value)
                     expect(page.locator('#loading-label')).to_have_text('Dashboard loaded')
 
                 # A background VM probe keeps buttons usable, including while progress is read.
-                period.select_option('1')
+                choose_period('1')
                 page.clock.fast_forward(60000)
                 expect(page.locator('#loading-label')).to_contain_text('Background refresh')
                 checking = deepcopy(dashboard.value)
                 checking.update(refreshing=True, loading=dict(completed=1, total=3, percent=33, status='Checking VMs'))
                 pending.pop().fulfill(json=checking)
                 expect(page.locator('#loading-label')).to_contain_text('33%')
-                period.select_option('0')
+                choose_period('0')
                 page.route('**/api/status?refresh=0', lambda route: pending.append(route))
                 page.clock.fast_forward(5000)
                 expect(page.locator('#loading-elapsed')).not_to_be_empty()
@@ -96,6 +100,7 @@ def main():
                 inspect = page.locator('[data-update-role="participant"][data-update-action="inspect"]')
                 expect(inspect).to_be_enabled()
                 page.screenshot(path=str(destination / 'background-refresh.png'), full_page=True)
+                page.locator('[data-route=applications]').click()
                 inspect.click()
                 expect(inspect).to_be_disabled()
                 inspect.dispatch_event('click')
@@ -116,9 +121,10 @@ def main():
                 page.evaluate('scrollTo(0, 0)')
                 page.screenshot(path=str(destination / 'refresh-mobile.png'), full_page=True)
                 # A failed background read must not dispatch the waiting action.
-                period.select_option('1')
+                choose_period('1')
                 page.clock.fast_forward(60000)
                 expect(page.locator('#loading-label')).to_contain_text('Background refresh')
+                page.locator('[data-route=applications]').click()
                 inspect.click()
                 assert not applications
                 pending.pop().fulfill(status=503, json={'error': 'Temporary outage'})

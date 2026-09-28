@@ -256,7 +256,7 @@ Multiple tasks multiply these counts. Each attempt uses one task prompt, up to
 budget is not an exact prompt/response count; tool use can add model calls. The
 evaluator records the actual calls and progress checkpoints.
 
-## Basic WebUI: live lab monitor
+## WebUI: lab operations
 
 The dashboard requires **HTTPS and login**. On Proxmox, use the default launch
 above. For an explicitly configured local account instead of PVE login:
@@ -281,10 +281,19 @@ installation at `/certs/cert.pem` and `/certs/key.pem`; the PVE/LAN web configs 
 those paths. Existing pairs are preserved. Replace them with a signed certificate
 chain and matching key later, keep the key mode `0600`, and restart the WebUI.
 
-The dashboard shows VM power, guest-agent access, application presence, process
-commands and elapsed time, unfinished workflow jobs, and saved experiment status.
-In PVE mode, users select their own VMs and see only their own saved runs.
-Execution/recovery/export remain CLI operations.
+The WebUI separates the workflow into four pages:
+
+| Page | Use it for |
+| --- | --- |
+| Overview | VM power, guest access, application processes and unfinished workflow commands |
+| Experiments | Included samples, saved runs, result summaries and CSV downloads |
+| Applications | Version checks, confirmed updates, rollback and expandable maintenance history |
+| Lab setup | Per-user VM roles and automatic refresh preferences |
+
+The collapsible troubleshooting console stays docked at the bottom on every page.
+Navigation preserves form edits, results, logs and active-operation progress without
+reloading the application. In PVE mode, users see their own VM selections and saved
+runs. Full workflow launch, recovery and other export formats remain CLI operations.
 
 See [HTTPS/login setup](docs/https-login.md) and the
 [WebUI configuration, screenshot and status definitions](docs/webui.md).

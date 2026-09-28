@@ -15,3 +15,25 @@
 .debug-console{margin:24px 0;border:1px solid var(--line);border-radius:10px;background:white;overflow:hidden}.debug-console summary{padding:16px;cursor:pointer;font-weight:600}.debug-console summary span{margin-left:10px;font-weight:400}.console-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:0 16px 12px}.console-toolbar .small{flex:1;min-width:200px}#console-output{margin:0;padding:16px;max-height:340px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#10252b;color:#d6ede8;font:12px/1.6 ui-monospace,monospace}#update-jobs progress{width:100%;accent-color:var(--teal)}
 
 .loading-status.maintenance-failed{color:var(--red);border-color:#e5baba}
+
+/* Workspace pages share the status bar and a persistent console dock. */
+.workspace{padding-bottom:calc(var(--console-height,280px) + 20px)}
+.workspace main{padding-top:24px}
+.workspace-nav{display:flex;gap:8px;padding:0 4.5vw;background:white;border-bottom:1px solid var(--line);overflow-x:auto}
+.workspace-nav a{display:block;padding:16px 20px;border-bottom:3px solid transparent;color:var(--muted);text-decoration:none;white-space:nowrap;font-weight:600}
+.workspace-nav a:hover{background:#f3f8f6;color:var(--teal)}
+.workspace-nav a[aria-current="page"]{border-color:var(--teal);color:var(--teal)}
+.page-links{display:flex;flex-wrap:wrap;gap:12px 24px;margin:20px 0 0}
+.page-links a{color:var(--teal);text-decoration:none;font-size:12px;font-weight:600}
+.history-panel{margin-top:24px;border-top:1px solid var(--line);padding-top:16px}
+.history-panel>summary,.result-details>summary{cursor:pointer;font-weight:600;padding:8px 0}
+.history-panel>summary span{margin-left:12px;font-weight:400}
+.result-details{margin-top:18px}
+.workspace .debug-console{position:fixed;bottom:0;left:0;right:0;z-index:30;margin:0;border-radius:0;border-width:1px 0 0;box-shadow:0 -4px 20px #122b3218}
+.workspace .debug-console[open]{height:auto;min-height:0;display:block}
+.workspace .debug-console summary{padding:10px 4.5vw;flex:none}
+.workspace .console-toolbar{padding:0 4.5vw 8px;flex:none;gap:8px}
+.workspace .console-toolbar button{padding:5px 12px;font-size:12px}
+.workspace #console-output{flex:1;min-height:0;max-height:none;padding:10px 4.5vw}
+@media(max-width:650px){.workspace-nav{padding:0 10px;gap:0}.workspace-nav a{padding:13px 12px;font-size:12px}.workspace .debug-console summary span{display:none}.workspace .console-toolbar .small{display:none}.workspace .console-toolbar{justify-content:flex-end}.workspace header{height:auto;min-height:76px;gap:12px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}.workspace .user-menu{flex-wrap:wrap}.workspace #username-label{overflow-wrap:anywhere;max-width:180px}.workspace .section-title{flex-wrap:wrap}}
+.console-content{height:clamp(120px,24vh,250px);display:flex;flex-direction:column;min-height:0}

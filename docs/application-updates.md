@@ -1,6 +1,6 @@
 # Application updates through the host
 
-The **Application versions** section manages Cyber-agent-flow in the selected
+The **Applications → Application versions** section manages Cyber-agent-flow in the selected
 participant VM and ScenarioForge in the selected app VM. CoreVM is not updated.
 The host downloads source from the configured Git repository, packages it as a
 Git bundle and transfers it through QEMU Guest Agent. Neither VM needs internet
@@ -83,8 +83,8 @@ the VM, not just the operator's private experiment results.
 
 ## Use the WebUI
 
-1. Save the participant and ScenarioForge VM roles.
-2. Click **Check version** for an application. The page shows its last checked
+1. Save the participant and ScenarioForge VM roles on **Lab setup**.
+2. Open **Applications** and click **Check version** for an application. The page shows its last checked
    commit, tracked-local-edit state and filenames, and (for CAF) missing evaluation
    controls. Up to 50 changed paths are shown, each limited to 300 characters;
    the filename list is also bounded to fit guest-agent output. Filenames are
@@ -93,7 +93,8 @@ the VM, not just the operator's private experiment results.
    default is `main`. Click **Update**. If running processes are listed,
    this same button asks you to confirm the displayed PIDs to stop them
    during activation. Canceling the confirmation submits no request.
-4. Watch the maintenance job below the cards. **Details** includes the source URL,
+4. Watch the latest outcome below the cards; expand **Maintenance history** for jobs.
+   **Details** includes the source URL,
    requested ref, resolved commit, bundle checksum, guest outcome and errors.
    The bottom **Troubleshooting console** shows commands, responses and timing;
    it can be hidden or downloaded while the page is busy. Uploads display bytes

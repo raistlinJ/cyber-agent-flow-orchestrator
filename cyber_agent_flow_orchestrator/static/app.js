@@ -6,6 +6,19 @@ let initialized=false, operation=null, waitingForObservation=false, waitingForMa
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
 const clientLog=[];
+const pages={overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
+function routePage(focus=false){
+ const route=location.hash.slice(1),page=Object.hasOwn(pages,route)?route:'overview';
+ if(page!==route)history.replaceState(null,'','#'+page);
+ for(const section of document.querySelectorAll('[data-page]'))section.hidden=section.dataset.page!==page;
+ for(const link of document.querySelectorAll('[data-route]')){if(link.dataset.route===page)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}
+ $('page-title').textContent=pages[page][0];$('page-intro').textContent=pages[page][1];document.title=pages[page][0]+' · CAF Orchestrator';
+ if(focus){$('page-title').focus({preventScroll:true});window.scrollTo(0,0);}
+}
+window.addEventListener('hashchange',()=>routePage(true));routePage();
+// Keep one console node mounted across routes; reserve its measured height so
+// the last control on every page remains reachable above the fixed dock.
+new ResizeObserver(()=>document.body.style.setProperty('--console-height',$('debug-console').getBoundingClientRect().height+'px')).observe($('debug-console'));
 function logClient(kind,message){clientLog.push({at:new Date().toISOString(),kind,message});if(clientLog.length>100)clientLog.shift();renderConsole();}
 function renderConsole(){
  const entries=[...clientLog];
@@ -41,7 +54,7 @@ function syncBusy(){
  else if(waitingForObservation){if(snapshot?.loading){const info=snapshot.loading;percent=info.percent;label=`${info.status} · ${info.completed}/${info.total} VM checks complete · ${percent}%`;}else label='Checking VM power, guest access and applications…';}
  else if(fetching||!initialized)label=csrfToken?'Retrieving dashboard and verifying VM access…':'Checking your login session…';
  else if(failed){label='Loading failed. Use Refresh view to try again.';bar.hidden=true;}
- else{label=maintenanceFailed?`Dashboard loaded · ${lastChange.role} ${lastChange.action} ${lastChange.status}; see Application versions`:'Dashboard loaded';bar.hidden=true;}
+ else{label=maintenanceFailed?`Dashboard loaded · ${lastChange.role} ${lastChange.action} ${lastChange.status}; see Applications`:'Dashboard loaded';bar.hidden=true;}
  if(percent==null)bar.removeAttribute('value');else bar.value=percent;
  $('loading-label').textContent=!busy&&loading?`Background refresh · ${label} · controls available`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
  syncUpdateControls(busy?label:null);
@@ -71,7 +84,7 @@ function render(data) {
   card.append(list);
   for(const service of vm.services||[]){if(service.unit===vm.unit){card.append(el('p',`${service.unit} · ${service.error?'Check unavailable':service.LoadState==='not-found'?'not found':service.ActiveState+' / '+service.SubState}`,'small'));}}
   if(vm.error||vm.guest_error)card.append(el('div',vm.error||vm.guest_error,'error'));
-  if(!vm.vmid)card.append(el('p',data.roles?'Choose this VM in your lab roles above.':'Set monitoring.core_vmid in your workflow YAML.','small'));
+  if(!vm.vmid)card.append(el('p',data.roles?'Choose this VM on the Lab setup page.':'Set monitoring.core_vmid in your workflow YAML.','small'));
   card.append(el('div','APPLICATION & TOOL PROCESSES','process-heading'));
   const processes=el('div',null,'processes');
   for(const proc of vm.processes){const box=el('div',null,'process'), meta=el('div',null,'process-top');meta.append(el('span',`PID ${proc.pid}`),timer(proc.elapsed_seconds,vm.observed_at||data.checked_at,true));box.append(meta,el('code',proc.command));processes.append(box);}
@@ -123,6 +136,7 @@ $('sign-out').addEventListener('click',async()=>{
 
 function clearPrivateView(){snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
+ $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
  for(const role of ['scenarioforge','participant','core']){
   const select=$('role-'+role),wanted=rolesDirty?select.value:String(data.roles[role]??'');
@@ -156,7 +170,7 @@ $('close-results').addEventListener('click',()=>{$('result-panel').hidden=true;$
 function renderSamples(data){
  const samples=data.samples, panel=$('samples-panel');panel.hidden=!samples?.items?.length;if(panel.hidden)return;
  const vm=samples.participant_vmid;
- $('samples-context').textContent=vm?`Participant VM ${vm} · ${samples.provider} / ${samples.model}. Uses the saved VM selection and model settings. These samples use no ScenarioForge export.`:'Save a Cyber-agent-flow VM selection above to run a sample.';
+ $('samples-context').textContent=vm?`Participant VM ${vm} · ${samples.provider} / ${samples.model}. Uses the saved VM selection and model settings. These samples use no ScenarioForge export.`:'Select and save a Cyber-agent-flow VM on Lab setup to run a sample.';
  const busy=(data.runs||[]).some(run=>run.sample_id&&(run.coordinator_active||run.recorded_status==='queued'));
  const cards=$('sample-cards');cards.replaceChildren();
  for(const sample of samples.items){
@@ -197,7 +211,7 @@ function syncUpdateControls(loadingLabel){
  for(const app of updates.applications){
   const status=$(`update-status-${app.role}`);if(!status)continue;
   const permission=updates.can_update?'':`Update permission required: your signed-in account must belong to the ${updates.group} PVE group. Orchestration access alone does not grant update access.`;
-  const selection=app.vmid?'':'Select and save a VM for this application above.';
+  const selection=app.vmid?'':'Select and save a VM for this application on Lab setup.';
   const waiting=loadingLabel?`Please wait: ${loadingLabel}`:'';
   status.textContent=[permission,selection,waiting].filter(Boolean).join(' ')||'Ready to check, update or roll back this application.';
   status.classList.toggle('error',Boolean(permission));
@@ -210,14 +224,15 @@ function syncUpdateControls(loadingLabel){
  }
 }
 function renderUpdates(data){
- const updates=data.updates;$('updates-panel').hidden=!updates;if(!updates)return;
+ const updates=data.updates;$('updates-panel').hidden=!updates;$('applications-unavailable').hidden=Boolean(updates);if(!updates)return;
+ $('maintenance-count').textContent=`${updates.jobs?.length||0} recent jobs`;
  $('updates-context').textContent=updates.can_update?'Updates preserve local data and reuse installed dependencies. The application must be idle; its configured service is restarted when necessary.':`Check installed versions here. Updates and rollback require membership in the ${updates.group} PVE group.`;
  const cards=$('update-cards');
  // Preserve input focus while the dashboard polls.
  if(!document.activeElement?.matches('#update-cards input[data-update-ref]')){
   cards.replaceChildren();
   for(const app of updates.applications){
-   const card=el('article',null,'card update-card');card.append(el('h3',app.role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',app.vmid?`VM ${app.vmid}`:'Choose and save a VM above','small'));
+   const card=el('article',null,'card update-card');card.append(el('h3',app.role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',app.vmid?`VM ${app.vmid}`:'Choose and save a VM on Lab setup','small'));
    const known=(updates.jobs||[]).find(job=>job.role===app.role&&job.vmid===app.vmid&&job.installed);
    if(known){const info=known.installed;card.append(el('p',`Installed revision (last checked): ${info.revision.slice(0,12)}${info.modified?' · local edits':''}`,'small'));if(info.missing_controls?.length)card.append(el('p',`Missing evaluator controls: ${info.missing_controls.join(', ')}`,'error'));
     if(info.processes?.length){card.append(el('p','Processes referencing this checkout (up to 12):','small'));for(const process of info.processes)card.append(el('p',`PID ${process.pid} · ${process.name} · ${process.reason}`,'small'));card.append(el('p','Update asks for confirmation before stopping these processes. A configured service is restarted after activation.','small'));}

@@ -72,6 +72,7 @@ def main():
                     expect(page.locator('#refresh')).to_be_enabled(timeout=30000)
                     expect(page.locator('#loading-label')).to_have_text('Dashboard loaded')
                     page.route('**/api/roles', lambda route: saves.append(route))
+                    page.locator('[data-route=setup]').click()
                     page.get_by_role('button', name='Save VM roles').click()
                     expect(page.locator('#role-participant')).to_be_disabled()
                     expect(page.locator('#refresh')).to_be_disabled()
