@@ -152,6 +152,45 @@ Session/access errors clear the private console view along with the dashboard.
 
 ## Bundled samples
 
+**Sample activity** shows the current run, or the latest outcome when idle:
+
+![Sample progress and persistent console with simulated execution](images/sample-progress.png)
+
+- Preparation steps: participant checks, exclusive access, demo-site setup, and
+  study/catalog preparation.
+- Finished trials out of the planned total, verified successes and execution
+  errors. The percentage counts terminal trials, including errors, not elapsed
+  budget, model tokens, or the probability of success.
+- Current trial ID, condition, repetition, attempt, elapsed time and configured
+  turn/time limits. Trial elapsed includes preparation and output collection;
+  the worker budget applies to execution and is not an end-to-end ETA.
+- Guest stage, input files/bytes transferred, last observed service state/PID,
+  and when that stage was last recorded, when supported by the host evaluator.
+- Per-trial outcomes and scores, recent timestamped events, and a link to results.
+
+A compact status notice follows the active sample across all pages. The full
+panel and console update with the existing five-second progress reads, including
+when Automatic refresh is Never. Run/trial elapsed clocks advance between reads.
+All guest stages come from host transport journals; viewing progress adds no
+guest RPCs. Slow guest calls may leave a stage unchanged until they return.
+Live model tokens, conversation turns and individual tool calls are not streamed;
+verification scores appear after outputs are collected. A finished trial can fail
+verification without being an execution error.
+
+Trials can reach 100% while demo-site cleanup is pending. The run remains active
+until cleanup finishes, and cleanup failures are reported as failures. If the
+coordinator disappears, unfinished trials are marked unconfirmed and live clocks
+stop. Older evaluator checkouts still show trial counts and timing, with a broader
+guest-stage description. Update the host's `cyber-agent-flow-eval` checkout and
+restart the orchestrator for detailed preparation/execution/collection stages;
+there is no new guest installation or API compatibility requirement.
+
+Sample events are recorded in each owner's run journal and derived from trial
+and transport records. The console includes the latest three sample runs along
+with maintenance traces and browser requests, bounded to the latest 300 entries.
+Progress includes identifiers and outcomes, not prompts, answers, credentials,
+or worker command arguments.
+
 In PVE mode, save a participant VM on **Lab setup**, then choose **Model smoke test** or **Tools vs.
 added helper** under **Experiments → Try an experiment**. The section displays the participant,
 model, trial count and budgets before launch. No file import or scenario deployment

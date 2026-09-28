@@ -12,6 +12,7 @@ import yaml
 from cyber_agent_flow_eval import integration as ev
 from cyber_agent_flow_eval.proxmox import authorized_operations
 from .auth import private_file
+from .diagnostics import clean
 from .workspaces import Workspace, private_directory
 
 CATALOG = {
@@ -131,7 +132,7 @@ class SampleManager:
         journal = dict(version=1, sample_id=sample_id, created_at=now(), status='queued',
                        workflow={'id': 'sample-' + sample_id, 'prepare': [], 'artifacts': []},
                        runtime=runtime, stages={}, workflow_hash=ev.digest({'sample': sample_id, 'runtime': runtime}),
-                       message='Waiting for sample worker')
+                       message='Waiting for sample worker', phase='queued', updated_at=now(), events=[])
         with self.lock:
             if output.exists():
                 previous = ev.read_json(output / 'workflow.json')
@@ -150,8 +151,11 @@ class SampleManager:
     def _run(self, workspace, output, journal, access, token):
         def save():
             ev.write_json(output / 'workflow.json', journal)
-        def progress(message):
-            journal['message'] = message
+        def progress(message, phase=None):
+            journal.update(message=clean(message), updated_at=now())
+            if phase: journal['phase'] = phase
+            journal.setdefault('events', []).append(dict(at=journal['updated_at'], kind='sample', message=journal['message']))
+            journal['events'] = journal['events'][-100:]
             save()
             if self.stopping.is_set():
                 raise InterruptedError('Server is stopping; sample stopped between trials')
@@ -162,33 +166,46 @@ class SampleManager:
                     if self.stopping.is_set():
                         raise InterruptedError('Server stopped before the sample began')
                     journal['status'] = 'preparing'
-                    progress('Checking participant engine and guest access')
+                    journal['started_at'] = now()
+                    progress('Checking participant engine and guest access', 'checking')
                     backend, engine = journal['runtime']['backend'], journal['runtime']['engine']
                     vmid = backend['participant_vmid']
                     ev.GuestAgent(backend).call(vmid, 'probe', engine=engine, user=backend['user'])
+                    progress('Acquiring exclusive access to the participant', 'reserving')
                     with ev.TargetReservation(journal['runtime']['execution']['target_lock']) as reservation:
                         try:
                             url = None
                             if journal['sample_id'] == 'tools-vs-helper':
+                                progress('Checking the temporary demo site prerequisites', 'fixture_check')
                                 fixture_agent(backend).call(vmid, 'sample_check', token=token, user=backend['user'], timeout=20)
                                 journal['sample_fixture'] = {'vmid': vmid, 'token': token, 'stopped': False}
-                                progress('Starting the temporary loopback demo site')
+                                progress('Starting the temporary loopback demo site', 'fixture_start')
                                 # Serialize preparation against ordinary evaluator jobs.
                                 with ev.lease(f'/var/lock/cyber-agent-flow-eval-vm-{vmid}.lock'):
                                     result = fixture_agent(backend).call(vmid, 'sample_start', token=token, timeout=40)
                                 url = result['url']
+                            progress('Preparing the study, tool catalogs and trial schedule', 'planning')
                             study = make_spec(journal['sample_id'], journal['runtime'], output, url)
                             journal['status'] = 'evaluating'
-                            progress('Running ' + CATALOG[journal['sample_id']]['name'])
+                            progress('Running ' + CATALOG[journal['sample_id']]['name'], 'evaluating')
                             rows = ev.run(study, output / 'evaluation', reservation=reservation, progress=progress)
-                            journal['status'] = 'completed' if all(row['status'] == 'completed' for row in rows) else 'completed_with_errors'
+                            outcome = 'completed' if all(row['status'] == 'completed' for row in rows) else 'completed_with_errors'
                             journal['trial_count'] = len(rows)
-                            journal['message'] = 'Sample finished; open results to review scores and timing'
                         finally:
-                            stop_fixture(output, journal)
+                            # Do not let a shutdown notification bypass fixture cleanup.
+                            journal.update(phase='cleanup', message='Cleaning up the sample environment', updated_at=now())
+                            journal.setdefault('events', []).append(dict(at=journal['updated_at'], kind='sample', message=journal['message']))
+                            try:
+                                save()
+                            finally:
+                                stop_fixture(output, journal)
+                        journal.update(status=outcome, phase='finished', message='Sample finished; open results to review scores and timing')
             except Exception as exc:
                 journal.update(status='interrupted' if isinstance(exc, InterruptedError) else 'failed',
                                error=f'{type(exc).__name__}: {exc}', message='Sample stopped; open results for details')
             finally:
                 journal['ended_at'] = now()
+                journal['updated_at'] = journal['ended_at']
+                journal.setdefault('events', []).append(dict(at=journal['ended_at'], kind='sample', message=journal['message']))
+                journal['events'] = journal['events'][-100:]
                 save()

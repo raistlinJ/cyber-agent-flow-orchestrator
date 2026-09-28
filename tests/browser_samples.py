@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import threading
 
 import pytest
 from playwright.sync_api import sync_playwright, expect
@@ -21,7 +22,26 @@ def main():
     with tempfile.TemporaryDirectory(prefix='caf-sample-browser-') as temp, pytest.MonkeyPatch.context() as patch:
         root = Path(temp)
         shutil.copytree(Path(__file__).resolve().parents[1] / 'examples', root / 'examples')
-        calls, _, _ = install_backend(patch, root)
+        calls, _, backend = install_backend(patch, root)
+        from cyber_agent_flow_orchestrator import samples
+        from cyber_agent_flow_eval import integration as ev
+        release, finish = threading.Event(), threading.Event()
+        launch, cleanup = backend.launch, samples.stop_fixture
+        trials = []
+        def paused_trial(self, directory, seconds):
+            if self.spec['id'] == 'sample-tools-vs-helper':
+                trials.append(directory)
+                if len(trials) == 3:
+                    ev.write_json(directory / 'transport.json', dict(phase='executing', updated_at=samples.now(),
+                        files_uploaded=7, files_total=7, bytes_uploaded=1000, bytes_total=1000,
+                        service_status={'SubState':'running','ExecMainPID':'123'}))
+                    assert release.wait(90)
+            return launch(self, directory, seconds)
+        def paused_cleanup(output, journal):
+            if journal['sample_id'] == 'tools-vs-helper': assert finish.wait(90)
+            cleanup(output, journal)
+        patch.setattr(backend, 'launch', paused_trial)
+        patch.setattr(samples, 'stop_fixture', paused_cleanup)
         with pve_server(root) as pve:
             pve[0]['resources']['operator@pve'] = [vm(9403, pool='operator-lab')]
             dashboard = UserDashboard(root / 'examples/01-reuse-export.yaml', root / 'runs', 2,
@@ -55,7 +75,24 @@ def main():
                     expect(helper).to_be_enabled(timeout=30000)
                     helper.click()
                     row = page.locator('#runs tr').filter(has_text='sample-tools-vs-helper')
+                    expect(page.locator('#sample-activity')).to_contain_text('2 / 6 trials finished · 33%', timeout=30000)
+                    expect(page.locator('#sample-activity')).to_contain_text('Guest worker executing')
+                    expect(page.locator('#sample-activity')).to_contain_text('PID 123')
+                    expect(page.locator('#sample-activity')).to_contain_text('7 / 7 files')
+                    expect(page.locator('#console-output')).to_contain_text('trial-000003')
+                    expect(helper).to_be_disabled()
+                    page.locator('[data-route=overview]').click()
+                    expect(page.locator('#sample-global-status')).to_contain_text('2/6 trials finished')
+                    page.locator('#sample-global-status a').click()
+                    page.locator('#sample-activity').scroll_into_view_if_needed()
+                    page.screenshot(path=str(destination / 'sample-active.png'))
+                    release.set()
+                    expect(page.locator('#sample-activity')).to_contain_text('Cleaning up the sample environment', timeout=30000)
+                    expect(page.locator('#sample-activity')).to_contain_text('6 / 6 trials finished · 100%')
+                    expect(page.locator('#sample-global-status')).to_be_visible()
+                    finish.set()
                     expect(row).to_contain_text('completed', timeout=30000)
+                    expect(page.locator('#sample-global-status')).to_be_hidden()
                     expect(row).to_contain_text('6 / 6')
                     row.get_by_role('button').click()
                     expect(page.locator('#result-summary')).to_contain_text('baseline')
@@ -77,6 +114,7 @@ def main():
                     assert not errors, errors
                     browser.close()
             finally:
+                release.set(); finish.set()
                 dashboard.close()
     print('PASS: both browser samples, scored results, CSV download, desktop/mobile layout and fixture cleanup')
     print(destination)

@@ -22,6 +22,7 @@ new ResizeObserver(()=>document.body.style.setProperty('--console-height',$('deb
 function logClient(kind,message){clientLog.push({at:new Date().toISOString(),kind,message});if(clientLog.length>100)clientLog.shift();renderConsole();}
 function renderConsole(){
  const entries=[...clientLog];
+ for(const run of (snapshot?.runs||[]).filter(r=>r.sample_progress).sort((a,b)=>(b.sample_progress.started_at||'').localeCompare(a.sample_progress.started_at||'')).slice(0,3))for(const event of run.sample_progress?.events||[])entries.push({...event,message:`[${run.sample_id} ${run.output.split('/').pop()}] ${event.message}`});
  for(const job of snapshot?.updates?.jobs||[])for(const event of job.console?.events||[])entries.push({...event,message:`[${job.role} VM ${job.vmid} ${job.action} ${job.id.slice(0,8)}] ${event.message}`});
  entries.sort((a,b)=>a.at.localeCompare(b.at));
  const output=$('console-output'),follow=output.scrollHeight-output.scrollTop-output.clientHeight<40;
@@ -67,10 +68,10 @@ async function loadSession(){
 }
 function duration(seconds) {if (seconds == null || !Number.isFinite(Number(seconds))) return 'Unknown'; seconds=Math.max(0, Math.floor(seconds)); const h=Math.floor(seconds/3600), m=Math.floor(seconds%3600/60), s=seconds%60; return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;}
 function badge(text, tone='') {return el('span', text, 'badge '+tone);}
-function timer(seconds, observed, live) {const node=el('span',duration(seconds),'clock'); if(seconds!=null){node.dataset.seconds=seconds;node.dataset.observed=observed||'';node.dataset.live=live?'yes':'no';} return node;}
+function timer(seconds, observed, live, sample=false) {const node=el('span',duration(seconds),'clock'); if(seconds!=null){node.dataset.seconds=seconds;node.dataset.observed=observed||'';node.dataset.live=live?'yes':'no';if(sample)node.dataset.source='sample';} return node;}
 function detail(list,label,value) {const row=el('div');row.append(el('dt',label),el('dd',value));list.append(row);}
 function render(data) {
- snapshot=data; renderRoles(data); renderSamples(data); renderUpdates(data); renderConsole();$('workflow').textContent=data.workflow_id||'';
+ snapshot=data; renderRoles(data); renderSamples(data); renderSampleActivity(data); renderUpdates(data); renderConsole();$('workflow').textContent=data.workflow_id||'';
  const notice=$('notice'); const errors=(data.errors||[]).map(x=>x.error);notice.hidden=!errors.length;notice.textContent=errors.join(' · ');
  const cards=$('machines');cards.replaceChildren();
  if(!data.vms.length)cards.append(el('div','Checking configured machines…','empty'));
@@ -100,7 +101,7 @@ function render(data) {
  for(const run of data.runs){const row=el('tr'),evaluation=run.evaluation,summary=evaluation?.summary;const title=el('td'); if(data.owner){const id=run.output.split('/').pop();const button=el('button',run.workflow_id||id);button.type='button';button.addEventListener('click',()=>showResults(id));title.append(button,el('div',id,'small'));if(run.message)title.append(el('div',run.message,'small'));}else{title.textContent=run.workflow_id||run.output;}row.append(title);const state=el('td');state.append(badge(run.recorded_status||'read error',run.recorded_status==='completed'?'good':run.error?'warn':''));row.append(state,el('td',run.coordinator_active?'Active':'Idle'),el('td',evaluation?`${summary.trials_observed} / ${evaluation.planned_trials}`:'Not started'),el('td',summary?String(summary.verified_successes):'—'));if(run.error)row.title=run.error;runs.append(row);}
  waitingForMaintenance=Boolean((data.updates?.jobs||[]).some(job=>['queued','running'].includes(job.status)));waitingForObservation=Boolean(data.refreshing&&(data.loading?data.loading.total>0:(!data.checked_at||data.vms.length>0)));if(!waitingForObservation)foregroundChecks=false;tick();syncBusy();
 }
-function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,Number($('refresh-period').value)*120));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&!stale&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale?'Last observation; refresh required':'Elapsed time since process start';}}
+function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,Number($('refresh-period').value)*120));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&(!stale||clock.dataset.source==='sample')&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale&&clock.dataset.source!=='sample'?'Last observation; refresh required':clock.dataset.source==='sample'?'Elapsed time since sample or trial start':'Elapsed time since process start';}}
 async function refresh(force=false, background=false){
  if(refreshPromise)return refreshPromise;
  clearTimeout(pollTimer);fetching=true;blockingRefresh=!background;if(force&&!background)foregroundChecks=true;syncBusy();
@@ -134,7 +135,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
@@ -181,6 +182,36 @@ function renderSamples(data){
   button.addEventListener('click',()=>startSample(sample.id));card.append(button);cards.append(card);
  }
 }
+function renderSampleActivity(data){
+ const recent=(data.runs||[]).filter(r=>r.sample_progress).sort((a,b)=>(b.sample_progress.started_at||'').localeCompare(a.sample_progress.started_at||''));
+ const active=recent.filter(r=>r.sample_progress.active),shown=active.length?active:recent.slice(0,1);
+ const global=$('sample-global-status');global.replaceChildren();global.hidden=!active.length;
+ if(active.length){const run=active[0],p=run.sample_progress,link=el('a','View sample activity →');link.href='#experiments';global.append(document.createTextNode(`${p.name} · ${run.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
+ const target=$('sample-activity');
+ const expanded=new Set([...target.querySelectorAll('details[open]')].map(n=>n.dataset.run));
+ target.replaceChildren();$('sample-activity-panel').hidden=!shown.length;
+ for(const run of shown){
+  const p=run.sample_progress,trial=p.current_trial,transport=trial?.transport;
+  const card=el('article',null,'panel sample-activity'),head=el('div',null,'result-actions');head.append(el('h3',p.name),badge(run.recorded_status,run.recorded_status==='completed'?'good':['failed','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));
+  const button=el('button','Open results');button.type='button';button.addEventListener('click',()=>showResults(run.output.split('/').pop()));head.append(button);card.append(head);
+  card.append(el('p',run.recorded_status==='interrupted'?'Coordinator is no longer active. Inspect results before retrying.':transport?.activity||run.message||p.phase,'sample-stage'));
+  const progress=el('progress');progress.max=100;progress.value=p.percent??0;progress.setAttribute('aria-label',`${p.name} trials finished`);
+  card.append(el('p',`${p.finished_trials} / ${p.planned_trials} trials finished · ${p.percent??0}% · ${p.verified_successes} verified successes · ${p.errors} trial errors`,'small'),progress);
+  card.append(el('p','Percentage counts finished trials, including errors. Cleanup and finalization may still be pending at 100%.','small'));
+  const elapsed=el('p',null,'small');elapsed.append(document.createTextNode('Run elapsed: '),timer(p.elapsed_seconds,p.observed_at,p.active,true));card.append(elapsed);
+  if(trial){
+   card.append(el('p',`${trial.trial_id} · ${trial.condition_id} · repetition ${trial.repetition} · attempt ${trial.attempt}`));
+   const timing=el('p',null,'small');timing.append(document.createTextNode('Trial elapsed (includes setup and collection): '),timer(trial.elapsed_seconds,p.observed_at,p.active,true));card.append(timing);
+   if(transport?.files_total)card.append(el('p',`Inputs transferred: ${transport.files_uploaded} / ${transport.files_total} files · ${(transport.bytes_uploaded??0).toLocaleString()} / ${(transport.bytes_total??0).toLocaleString()} bytes acknowledged`,'small'));
+   if(transport?.service?.SubState)card.append(el('p',`Last observed guest service: ${transport.service.SubState}${transport.service.ExecMainPID?' · PID '+transport.service.ExecMainPID:''}`,'small'));
+   if(transport?.updated_at)card.append(el('p',`Guest stage last recorded: ${new Date(transport.updated_at).toLocaleTimeString()}`,'small'));
+  }
+  card.append(el('p',`Per-trial limits: ${p.max_turns} turns · ${p.wall_seconds}s worker budget. Live model tokens and tool calls are not streamed; scores appear after collection.`,'small'));
+  if(p.trials.length){const wrap=el('div',null,'scroll'),table=el('table'),header=el('tr'),thead=el('thead'),body=el('tbody');for(const title of ['Trial','Condition','Status','Verified','Score'])header.append(el('th',title));thead.append(header);for(const trial of p.trials){const row=el('tr');for(const value of [trial.trial_id,trial.condition_id,trial.status,trial.verified_success===true?'Yes':trial.verified_success===false?'No':trial.status==='running'?'Pending':'Unavailable',trial.score??'—'])row.append(el('td',value));body.append(row);}table.append(thead,body);wrap.append(table);card.append(wrap);}
+  if(run.error)card.append(el('p',run.error,'error'));
+  const details=el('details'),summary=el('summary','Recent sample events');details.dataset.run=run.output;details.open=expanded.has(run.output);details.append(summary,el('pre',p.events.slice(-12).map(e=>`${e.at} · ${e.message}`).join('\n')));card.append(details);target.append(card);
+ }
+}
 async function startSample(id){
  if(isBusy()||sampleStarting)return;
  if(rolesDirty){$('sample-message').textContent='Save your VM role changes before starting a sample.';return;}
@@ -191,7 +222,7 @@ async function startSample(id){
   if(!csrfToken)await loadSession();
   const response=await apiFetch('/api/samples/run',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:id,request_id:requestId})});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||`Request failed (HTTP ${response.status}); refresh to check your runs before retrying`);
-  $('sample-message').textContent=`Started ${data.run_id}. Follow progress in Experiment runs below.`;await refresh();
+  $('sample-message').textContent=`Started ${data.run_id}. Follow progress in Sample activity.`;await refresh();if(location.hash==='#experiments'&&!$('sample-activity-panel').hidden)$('sample-activity-panel').scrollIntoView({block:'start'});
  }catch(error){$('sample-message').textContent=error.message;}
  finally{sampleStarting=false;operation=null;if(snapshot)renderSamples(snapshot);syncBusy();schedulePoll();}
 }

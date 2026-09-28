@@ -93,6 +93,56 @@ def test_invalid_disabled_samples_and_concurrent_launch(pve, lab, tmp_path, monk
         for future in manager.jobs.values(): future.result(timeout=10)
 
 
+def test_live_progress_is_read_only_private_and_waits_for_cleanup(pve, lab, tmp_path, monkeypatch):
+    manager, user, workspace, calls, _, backend = setup_sample(pve, lab, tmp_path, monkeypatch)
+    executing, release, cleaning, finish = (threading.Event() for _ in range(4))
+    launch, cleanup = backend.launch, samples.stop_fixture
+    def held_launch(self, directory, seconds):
+        if not executing.is_set():
+            ev.write_json(directory / 'transport.json', dict(phase='executing', updated_at=samples.now(),
+                files_uploaded=7, files_total=7, bytes_uploaded=100, bytes_total=100,
+                argv=['private-command'], path='/private/path', service_status={'SubState':'running','ExecMainPID':'123'}))
+            executing.set()
+            assert release.wait(15)
+        return launch(self, directory, seconds)
+    def held_cleanup(output, journal):
+        cleaning.set()
+        assert finish.wait(15)
+        cleanup(output, journal)
+    monkeypatch.setattr(backend, 'launch', held_launch)
+    monkeypatch.setattr(samples, 'stop_fixture', held_cleanup)
+    try:
+        reply = manager.submit(user, 'tools-vs-helper', 'a' * 32)
+        output = workspace.run_path(reply['run_id'])
+        assert executing.wait(10)
+        count = len(calls)
+        live = service.status(output)['sample_progress']
+        assert len(calls) == count
+        assert live['active'] and live['finished_trials'] == 0 and live['percent'] == 0
+        assert live['current_trial']['transport']['activity'] == 'Guest worker executing'
+        assert live['current_trial']['transport']['service']['ExecMainPID'] == '123'
+        assert 'private-command' not in json.dumps(live) and '/private/path' not in json.dumps(live)
+        assert live['current_trial']['condition_id'] in ('baseline', 'added-helper')
+        release.set()
+        assert cleaning.wait(10)
+        status = service.status(output)
+        assert status['recorded_status'] == 'evaluating'
+        assert status['sample_progress']['percent'] == 100
+        assert status['sample_progress']['phase'] == 'cleanup'
+        assert status['sample_progress']['active']
+        finish.set()
+        manager.jobs[user.username].result(timeout=10)
+        status = service.status(output)
+        assert status['recorded_status'] == 'completed'
+        assert status['sample_progress']['verified_successes'] == 6
+        assert not status['sample_progress']['active']
+        assert status['sample_progress']['ended_at']
+        assert any(event['kind'] == 'trial' for event in status['sample_progress']['events'])
+    finally:
+        release.set(); finish.set(); manager.close()
+        for future in manager.jobs.values(): future.result(timeout=10)
+
+
 def test_failed_fixture_start_still_attempts_cleanup(pve, lab, tmp_path, monkeypatch):
     manager, user, workspace, calls, agent, _ = setup_sample(pve, lab, tmp_path, monkeypatch)
     original = agent.call
@@ -258,5 +308,41 @@ def test_user_recovery_cleans_fixture_when_preparation_was_interrupted(pve, lab,
         user_execution.recover(manager.root, reply['run_id'], user)
         assert ev.read_json(output / 'workflow.json')['sample_fixture']['stopped']
         assert [op for _, op, _ in calls].count('sample_stop') == 1
+    finally:
+        manager.close()
+
+
+def test_legacy_transport_and_interrupted_trial_progress(tmp_path):
+    from cyber_agent_flow_orchestrator.sample_progress import build
+    output = tmp_path / 'run'
+    directory = output / 'evaluation/trials/trial-000001/attempt-0001'
+    ev.write_json(directory / 'transport.json', dict(stopped=False))
+    stamp = samples.now()
+    journal = dict(sample_id='smoke', created_at=stamp, updated_at=stamp)
+    report = dict(planned_trials=1, attempts=[dict(trial_id='trial-000001', condition_id='no-tools',
+        attempt=1, status='running', started_at=stamp, attempt_path='trials/trial-000001/attempt-0001')])
+    active = build(output, journal, report, 'evaluating', True)
+    assert 'detailed stage unavailable' in active['current_trial']['transport']['activity']
+    stopped = build(output, journal, report, 'interrupted', False)
+    assert not stopped['active'] and stopped['current_trial'] is None
+    assert stopped['trials'][0]['status'] == 'unconfirmed'
+    assert stopped['trials'][0]['elapsed_seconds'] is None
+    assert stopped['percent'] == 0 and stopped['elapsed_seconds'] == 0
+
+
+def test_progress_journal_failure_still_cleans_up_fixture(pve, lab, tmp_path, monkeypatch):
+    manager, user, workspace, calls, _, _ = setup_sample(pve, lab, tmp_path, monkeypatch)
+    original, failures = samples.ev.write_json, []
+    def write(path, value):
+        if Path(path).name == 'workflow.json' and value.get('phase') == 'cleanup' and not failures:
+            failures.append(str(path))
+            raise OSError('Unable to write cleanup progress')
+        return original(path, value)
+    monkeypatch.setattr(samples.ev, 'write_json', write)
+    try:
+        reply = manager.submit(user, 'tools-vs-helper', 'a' * 32)
+        manager.jobs[user.username].result(timeout=15)
+        assert failures and any(op == 'sample_stop' for _, op, _ in calls)
+        assert ev.read_json(workspace.run_path(reply['run_id']) / 'workflow.json')['sample_fixture']['stopped']
     finally:
         manager.close()

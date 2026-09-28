@@ -380,6 +380,13 @@ roles**. Under **Try an experiment**, click **Run sample**. Nothing needs to be
 imported: the bundled catalogs, prompts and demo fixture are included in the
 orchestrator package. ScenarioForge and CoreVM may remain unselected for these samples.
 
+**Sample activity** shows preparation, the current trial/condition, finished-trial
+percentages, elapsed time, outcomes and cleanup. An active-sample notice appears
+across pages, and timestamped sample events join the persistent console. Progress
+refreshes every five seconds while active, even with automatic refresh set to Never.
+Update both host checkouts for detailed worker upload/execution/collection stages.
+Live model turns and tool calls are not streamed. See [sample progress details](docs/webui.md#bundled-samples).
+
 | Sample | Runs | What it checks |
 | --- | --- | --- |
 | Model smoke test | 1 trial; up to 3 turns / 120 seconds | Supplied port observation, no tools; checks the worker, model and JSON scoring |
