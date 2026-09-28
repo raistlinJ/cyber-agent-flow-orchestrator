@@ -13,7 +13,7 @@ from . import service
 class UserDashboard:
     scoped = True
 
-    def __init__(self, config, runs_root, interval=10, probe_factory=None, *, samples=None):
+    def __init__(self, config, runs_root, interval=10, probe_factory=None, *, samples=None, updates=None):
         if not 2 <= interval <= 300:
             raise ValueError('Poll interval must be between 2 and 300 seconds')
         self.cfg, self.runtime, _, _ = load(config)
@@ -25,12 +25,15 @@ class UserDashboard:
         self.entries = {}
         from .samples import SampleManager
         self.samples = SampleManager(self.runtime, runs_root, samples)
+        from .updates import UpdateManager
+        self.updates = UpdateManager(self.cfg, self.runtime, runs_root, updates)
 
     def start(self):
         pass  # Monitoring begins only with an authenticated request.
 
     def close(self):
         self.samples.close()
+        self.updates.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def workspace(self, access):
@@ -98,6 +101,7 @@ class UserDashboard:
         # Trial progress is independent of a potentially slow guest observation.
         value['runs'] = service.list_runs(workspace.runs)
         value['samples'] = self.samples.catalog(value['roles'])
+        value['updates'] = self.updates.view(access, workspace, value['roles'])
         access.current()
         return value
 
@@ -114,6 +118,9 @@ class UserDashboard:
 
     def run_sample(self, access, sample_id, request_id):
         return self.samples.submit(access, sample_id, request_id)
+
+    def maintain(self, access, data):
+        return self.updates.submit(access, **data)
 
     def dataset(self, access, run_id):
         workspace = self.workspace(access)

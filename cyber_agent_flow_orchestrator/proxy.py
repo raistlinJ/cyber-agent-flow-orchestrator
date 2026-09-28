@@ -79,7 +79,7 @@ def run_https(config_path, runs_root, web_config, interval=10):
                 absolute_seconds=config['session_max_seconds'])
     if provider is not None:
         from .user_dashboard import UserDashboard
-        dashboard = UserDashboard(config_path, runs_root, interval, samples=config['samples'])
+        dashboard = UserDashboard(config_path, runs_root, interval, samples=config['samples'], updates=config['updates'] if config['updates'] is not None else False)
     else:
         dashboard = Dashboard(config_path, runs_root, interval)
     key = secrets.token_urlsafe(48)

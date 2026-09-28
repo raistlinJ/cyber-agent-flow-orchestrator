@@ -21,7 +21,7 @@ def settings(path):
     path = Path(path).resolve()
     data = yaml.load(path.read_text(), Loader=ev.StrictLoader)
     ev.fields(data, ['version', 'listen', 'port', 'public_url', 'certificate', 'private_key', 'users_file',
-                     'session_idle_seconds', 'session_max_seconds', 'auth', 'samples'],
+                     'session_idle_seconds', 'session_max_seconds', 'auth', 'samples', 'updates'],
               ['version', 'public_url', 'certificate', 'private_key'], 'web configuration')
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('Only web configuration version 1 is supported')
@@ -30,6 +30,8 @@ def settings(path):
     data.setdefault('session_idle_seconds', 1800)
     data.setdefault('session_max_seconds', 28800)
     from .samples import SAMPLE_IDS
+    from .updates import settings as update_settings
+    data['updates'] = update_settings(data.get('updates'))
     data.setdefault('samples', list(SAMPLE_IDS))
     if (not isinstance(data['samples'], list) or any(not isinstance(name, str) or name not in SAMPLE_IDS for name in data['samples'])
             or len(data['samples']) != len(set(data['samples']))):

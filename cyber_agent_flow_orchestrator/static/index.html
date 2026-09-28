@@ -17,6 +17,11 @@
 <p id="roles-message" class="small" role="status">Select a VM for each role. These selections belong to your account.</p>
 </form></section>
 <section aria-labelledby="machines-title"><div class="section-title"><h2 id="machines-title">Lab machines</h2><span>Proxmox host · QEMU guest agent</span></div><div id="machines" class="machines"><div class="empty">Checking configured machines…</div></div></section>
+<section id="updates-panel" aria-labelledby="updates-title" hidden>
+<div class="section-title"><h2 id="updates-title">Application versions</h2><span>Host downloads · guest-agent transfer</span></div>
+<p id="updates-context" class="small"></p><div id="update-cards" class="sample-cards"></div>
+<p id="update-message" class="small" role="status" aria-live="polite"></p><div id="update-jobs" class="panel"></div>
+</section>
 <section id="samples-panel" aria-labelledby="samples-title" hidden>
 <div class="section-title"><h2 id="samples-title">Try an experiment</h2><span>Included samples · no import needed</span></div>
 <p id="samples-context" class="small"></p>

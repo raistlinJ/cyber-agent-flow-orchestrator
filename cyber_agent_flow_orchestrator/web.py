@@ -56,6 +56,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
     from .access import AccessDenied
     from .workspaces import Workspace
     from .samples import SampleBusy, SampleRequestError
+    from .updates import UpdateError
     from .auth import LoginLimited, token_from_cookie, session_cookie
     assets = Path(__file__).with_name('static')
     authority = urlsplit(origin).netloc
@@ -233,6 +234,10 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(400, {'error': 'Supply a sample ID and request ID only'})
                         return
                     self.respond(202, dashboard.run_sample(auth.access(token, revalidate=False), data['sample_id'], data['request_id']))
+                elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                    if set(data) != {'role', 'action', 'ref', 'request_id'} or any(not isinstance(v, str) for v in data.values()):
+                        raise UpdateError('Supply role, action, ref and request_id only')
+                    self.respond(202, dashboard.maintain(auth.access(token, revalidate=False), data))
                 else:
                     self.respond(404, {'error': 'No such action is enabled'})
             except AccessDenied:
@@ -240,6 +245,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
             except SampleBusy as exc:
                 self.respond(409, {'error': str(exc)})
             except SampleRequestError as exc:
+                self.respond(400, {'error': str(exc)})
+            except UpdateError as exc:
                 self.respond(400, {'error': str(exc)})
             except LoginLimited:
                 self.respond(429, {'error': 'Too many login attempts; try again shortly'}, **{'Retry-After': '60'})

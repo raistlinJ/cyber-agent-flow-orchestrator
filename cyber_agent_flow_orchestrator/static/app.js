@@ -7,7 +7,7 @@ function badge(text, tone='') {return el('span', text, 'badge '+tone);}
 function timer(seconds, observed, live) {const node=el('span',duration(seconds),'clock'); if(seconds!=null){node.dataset.seconds=seconds;node.dataset.observed=observed||'';node.dataset.live=live?'yes':'no';} return node;}
 function detail(list,label,value) {const row=el('div');row.append(el('dt',label),el('dd',value));list.append(row);}
 function render(data) {
- snapshot=data; renderRoles(data); renderSamples(data); $('workflow').textContent=data.workflow_id||'';
+ snapshot=data; renderRoles(data); renderSamples(data); renderUpdates(data); $('workflow').textContent=data.workflow_id||'';
  const notice=$('notice'); const errors=(data.errors||[]).map(x=>x.error);notice.hidden=!errors.length;notice.textContent=errors.join(' · ');
  const cards=$('machines');cards.replaceChildren();
  if(!data.vms.length)cards.append(el('div','Checking configured machines…','empty'));
@@ -46,7 +46,7 @@ async function loadSession(){const response=await fetch('/api/session',{cache:'n
 $('sign-out').addEventListener('click',async()=>{try{if(!csrfToken)await loadSession();const response=await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});if(response.ok||response.status===401){location.replace('/login');return;}throw Error('Sign out failed');}catch(error){$('notice').hidden=false;$('notice').textContent='Unable to sign out. Please try again.';}});
 loadSession().catch(()=>{$('notice').hidden=false;$('notice').textContent='Unable to load your session. Refresh to try again.';});
 
-function clearPrivateView(){snapshot=null;$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){snapshot=null;$('updates-panel').hidden=true;$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
  for(const role of ['scenarioforge','participant','core']){
@@ -110,4 +110,40 @@ function renderResultSummary(data){
  const groups=Object.entries(data.evaluation.conditions||{});
  const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
  for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);
+}
+
+let maintenanceStarting=false;
+const maintenanceRefs={};
+function renderUpdates(data){
+ const updates=data.updates;$('updates-panel').hidden=!updates;if(!updates)return;
+ $('updates-context').textContent=updates.can_update?'Updates preserve local data and reuse installed dependencies. The application must be idle; its configured service is restarted when necessary.':`Check installed versions here. Updates and rollback require membership in the ${updates.group} PVE group.`;
+ const busy=maintenanceStarting||(updates.jobs||[]).some(job=>['queued','running'].includes(job.status));
+ const cards=$('update-cards');
+ // Preserve input focus while the dashboard polls.
+ if(!cards.contains(document.activeElement)){
+  cards.replaceChildren();
+  for(const app of updates.applications){
+   const card=el('article',null,'card update-card');card.append(el('h3',app.role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',app.vmid?`VM ${app.vmid}`:'Choose and save a VM above','small'));
+   const known=(updates.jobs||[]).find(job=>job.role===app.role&&job.vmid===app.vmid&&job.installed);
+   if(known){const info=known.installed;card.append(el('p',`Last checked: ${info.revision.slice(0,12)}${info.modified?' · local edits':''}`,'small'));if(info.missing_controls?.length)card.append(el('p',`Missing evaluator controls: ${info.missing_controls.join(', ')}`,'error'));}
+   const label=el('label','Branch, tag or commit','small'),input=el('input');input.type='text';input.value=maintenanceRefs[app.role]||app.ref;input.dataset.updateRef=app.role;input.disabled=!updates.can_update||busy;input.addEventListener('input',()=>{maintenanceRefs[app.role]=input.value;});label.append(input);card.append(label);
+   const actions=el('div',null,'update-actions');
+   for(const [action,title] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.disabled=!app.vmid||busy||(action!=='inspect'&&!updates.can_update);button.addEventListener('click',()=>maintain(app.role,action,input.value));actions.append(button);}card.append(actions);cards.append(card);
+  }
+ }
+ const jobs=$('update-jobs');jobs.replaceChildren();
+ for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));if(job.revision)row.append(el('code',job.revision));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
+ if(!(updates.jobs||[]).length)jobs.append(el('p','No application maintenance recorded for your account.','empty'));
+}
+async function maintain(role,action,ref){
+ if(maintenanceStarting)return;
+ if(rolesDirty){$('update-message').textContent='Save VM role changes before application maintenance.';return;}
+ maintenanceStarting=true;if(snapshot)renderUpdates(snapshot);
+ try{
+  if(!csrfToken)await loadSession();
+  const response=await fetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action,ref,request_id:crypto.randomUUID().replaceAll('-','')})});
+  const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||`Maintenance request failed (HTTP ${response.status})`);
+  $('update-message').textContent=`Maintenance ${result.id} submitted. Follow its status below.`;await refresh();
+ }catch(error){$('update-message').textContent=error.message;}
+ finally{maintenanceStarting=false;if(snapshot)renderUpdates(snapshot);}
 }
