@@ -21,7 +21,7 @@ uv run cyber-agent-flow-orchestrator
 This defaults to `serve`, `workflow.yaml`, `web.yaml`, and `runs/` in the current
 directory. Missing default configuration files are created once; missing
 certificate pairs are generated on first launch in `/certs`. PVE login is the
-default, using the host FQDN, Proxmox CA and `caf-orchestrator` group.
+default, using the host FQDN, Proxmox CA and `caf-orchestration` group.
 Use [PVE login](pve-login.md) to enroll accounts, then choose VM roles in the page.
 For local accounts instead, follow [HTTPS and login setup](https-login.md).
 Explicit overrides remain supported:

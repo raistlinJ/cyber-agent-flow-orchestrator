@@ -25,7 +25,7 @@ def test_default_launch_creates_valid_persistent_configs(tmp_path, monkeypatch, 
     assert runtime['backend']['type'] == 'proxmox'
     config = settings(kwargs['web_config'])
     assert config['auth']['url'] == 'https://node.lab:8006'
-    assert config['auth']['required_group'] == 'caf-orchestrator'
+    assert config['auth']['required_group'] == 'caf-orchestration'
     assert config['certificate'] == '/certs/cert.pem'
     originals = {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
     monkeypatch.setattr(bootstrap.socket, 'getfqdn', lambda: 'changed.lab')
@@ -40,6 +40,17 @@ def test_explicit_paths_and_missing_config_do_not_get_replaced(tmp_path, monkeyp
     workflow, web_config = bootstrap.prepare()
     monkeypatch.chdir(tmp_path.parent)
     assert bootstrap.prepare(workflow, web_config) == (workflow, web_config)
+
+
+def test_existing_legacy_enrollment_config_is_preserved(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    workflow, web_config = bootstrap.prepare()
+    path = Path(web_config)
+    original = path.read_text().replace('caf-orchestration', 'caf-orchestrator')
+    path.write_text(original)
+    bootstrap.prepare(workflow, web_config)
+    assert path.read_text() == original
+    assert settings(web_config)['auth']['required_group'] == 'caf-orchestrator'
 
 
 def test_help_has_no_setup_side_effects(tmp_path, monkeypatch):

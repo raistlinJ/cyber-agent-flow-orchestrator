@@ -171,7 +171,7 @@ def test_maintenance_group_and_vm_permission_rechecked(pve):
     with pytest.raises(AccessDenied): updates.require_maintenance(user, 'caf-maintainers')
     pve[0]['groups'] += ',caf-maintainers'
     updates.require_maintenance(user, 'caf-maintainers')
-    pve[0]['groups'] = 'caf-orchestrator'
+    pve[0]['groups'] = 'caf-orchestration'
     with pytest.raises(AccessDenied): updates.require_maintenance(user, 'caf-maintainers')
 
 
@@ -247,7 +247,7 @@ def test_manager_revocation_after_inspection_prevents_download_or_update(pve, la
     original = agent.call
     def call(self, vmid, op, **data):
         original(self, vmid, op, **data)
-        pve[0]['groups'] = 'caf-orchestrator'
+        pve[0]['groups'] = 'caf-orchestration'
         return {'revision': 'a' * 40}
     monkeypatch.setattr(agent, 'call', call)
     monkeypatch.setattr(updates, 'package', lambda *args: pytest.fail('Download after permission revocation'))

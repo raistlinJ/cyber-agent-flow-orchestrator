@@ -43,7 +43,11 @@ pveum group add caf-maintainers --comment 'CAF and ScenarioForge application mai
 pveum user modify researcher@pve --groups caf-maintainers --append 1
 ```
 
-Keep the user's existing `caf-orchestrator` membership and VM/pool permissions.
+Keep the user's existing `caf-orchestration` membership and VM/pool permissions.
+SCE-web's **Enable orchestration access (dangerous)** grants both groups together;
+re-run it for users enrolled before maintenance access was included. Older
+orchestrator configurations using `caf-orchestrator` should migrate
+`auth.required_group` to `caf-orchestration` after enrollment, then restart.
 The equivalent group membership can be configured in the PVE WebUI. Maintenance
 permission is checked again before each guest command and file-transfer chunk;
 removing either permission blocks further dispatch. An already dispatched guest

@@ -23,5 +23,5 @@ auth:
   provider: pve
   url: https://pve.lab:8006
   ca_file: /etc/pve/pve-root-ca.pem
-  required_group: caf-orchestrator
+  required_group: caf-orchestration
   realms: [pve, pam]

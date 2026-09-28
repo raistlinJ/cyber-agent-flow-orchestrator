@@ -35,6 +35,6 @@ def prepare(workflow=None, web_config=None):
                     samples=['smoke', 'tools-vs-helper'],
                     auth=dict(provider='pve', url=f'https://{hostname}:8006',
                               ca_file='/etc/pve/pve-root-ca.pem',
-                              required_group='caf-orchestrator', realms=['pve', 'pam']))
+                              required_group='caf-orchestration', realms=['pve', 'pam']))
         private_file(web_path, yaml.safe_dump(data, sort_keys=False).encode())
     return str(workflow_path), str(web_path)

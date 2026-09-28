@@ -37,7 +37,7 @@ def main():
                 pve[0]['groups'] = ''
                 page.get_by_role('button', name='Sign in', exact=True).click()
                 page.get_by_text('Login failed or orchestrator access not granted').wait_for()
-                pve[0].update(groups='caf-orchestrator', tfa=True)
+                pve[0].update(groups='caf-orchestration', tfa=True)
                 page.get_by_label('Password', exact=True).fill(PASSWORD)
                 page.get_by_role('button', name='Sign in', exact=True).click()
                 page.get_by_label('Authenticator code (TOTP)').wait_for()

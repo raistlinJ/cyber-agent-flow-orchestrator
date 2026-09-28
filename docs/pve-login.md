@@ -36,9 +36,21 @@ On the Proxmox host, as an administrator, create the group once and add each
 existing user (substitute the correct username and realm):
 
 ```bash
-pveum group add caf-orchestrator --comment 'CAF orchestrator access'
-pveum user modify researcher@pve --groups caf-orchestrator --append 1
+pveum group add caf-orchestration --comment 'CAF orchestrator access'
+pveum user modify researcher@pve --groups caf-orchestration --append 1
 ```
+
+SCE-web's **Enable orchestration access (dangerous)** enrolls users in both
+`caf-orchestration` and `caf-maintainers`, so they can also update/roll back
+applications on their eligible VMs. Its Disable operation removes both plus
+legacy `caf-orchestrator` membership. Ordinary manual enrollment above grants
+orchestration only; application maintenance remains a separate permission.
+
+For installations previously using `caf-orchestrator`, re-enable the intended
+users through SCE-web, set `auth.required_group: caf-orchestration` in the existing
+`web.yaml`, and restart the orchestrator. SCE preserves old membership when enabling
+to allow migration across multiple instances. Existing configuration is never
+rewritten automatically; new configurations default to `caf-orchestration`.
 
 `--append 1` preserves the user's other group memberships. The equivalent WebUI
 steps are **Datacenter → Permissions → Groups** to create the group, and
@@ -58,7 +70,7 @@ directory. Later launches reuse them; results default to `runs/`. Login still
 requires group membership and VM permissions as described above.
 
 The generated `web.yaml` uses this node's FQDN, the Proxmox CA path and the
-`caf-orchestrator` group. You can also start from
+`caf-orchestration` group. You can also start from
 [web.pve.yaml](../examples/web.pve.yaml). Edit `auth.url` to the PVE
 node's hostname matching its TLS certificate. For the default Proxmox CA, use
 `/etc/pve/pve-root-ca.pem` on the host. If the PVE endpoint uses a certificate from a
@@ -70,7 +82,7 @@ auth:
   provider: pve
   url: https://pve.lab:8006
   ca_file: /etc/pve/pve-root-ca.pem
-  required_group: caf-orchestrator
+  required_group: caf-orchestration
   realms: [pve, pam]
 ```
 

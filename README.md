@@ -108,7 +108,7 @@ when absent. Results default to `runs/` there. Continue launching from that same
 directory to retain settings and per-user workspaces.
 
 The web defaults are **https://localhost:8443**, PVE login at the host's FQDN on
-port 8006, `/etc/pve/pve-root-ca.pem`, and the `caf-orchestrator` group. Use the
+port 8006, `/etc/pve/pve-root-ca.pem`, and the `caf-orchestration` group. Use the
 existing SCE-web enrollment operation or [PVE group setup](docs/pve-login.md).
 Users select their authorized VM roles after login; starting the server does not
 launch experiments. The generated workflow/runtime are example templates: review
@@ -266,7 +266,7 @@ certificate. No nginx/Caddy installation is required. There is no default passwo
 
 For **existing Proxmox accounts**, use [PVE login setup](docs/pve-login.md) and
 [web.pve.yaml](examples/web.pve.yaml). Membership in the configured PVE group
-(`caf-orchestrator` in the example) grants the application's `orchestrator` role.
+(`caf-orchestration` in the example) grants the application's `orchestrator` role.
 PVE validates passwords/TOTP; group removal revokes access on the next protected
 request. Host commands still use the backend's Linux permissions.
 The ScenarioForge Proxmox installer creates a self-signed certificate on first
@@ -290,7 +290,7 @@ Each account has its own selections, monitor cache and private run workspace.
 Ordinary templates start with empty role selections. Provision-import profiles
 can initialize authorized roles once; existing saved selections always win.
 
-Eligibility requires both membership in `caf-orchestrator` and effective
+Eligibility requires both membership in `caf-orchestration` and effective
 `VM.Audit` access to the VM. Existing pool/group ACLs are resolved by PVE. The
 orchestrator group deliberately authorizes host-mediated guest operations on that
 visible VM set; it does not grant native `VM.Monitor` or administrator privileges

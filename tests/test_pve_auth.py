@@ -19,7 +19,7 @@ from test_web import request
 def pve_server(tmp_path):
     cert, key = tmp_path / 'pve.pem', tmp_path / 'pve.key'
     create_certificate(cert, key, ['localhost'])
-    state = {'groups': 'caf-orchestrator', 'enable': 1, 'expire': 0, 'tfa': False,
+    state = {'groups': 'caf-orchestration', 'enable': 1, 'expire': 0, 'tfa': False,
              'requests': [], 'failure': None, 'realm_otp': False, 'resources': {}, 'permissions': {}}
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
@@ -74,7 +74,7 @@ def pve_server(tmp_path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     config = {'provider': 'pve', 'url': f'https://localhost:{server.server_port}', 'ca_file': str(cert),
-              'required_group': 'caf-orchestrator', 'realms': ['pve', 'pam']}
+              'required_group': 'caf-orchestration', 'realms': ['pve', 'pam']}
     try:
         yield state, config
     finally:
@@ -97,9 +97,9 @@ def test_pve_login_group_gate_and_no_password_retention(pve):
     state, _ = pve
     auth = make_auth(pve)
     assert auth.login('operator@pve', 'wrong', 'peer') is None
-    state['groups'] = 'caf-orchestrator-extra,other'
+    state['groups'] = 'caf-orchestration-extra,other'
     assert auth.login('operator@pve', PASSWORD, 'peer') is None
-    state['groups'] = 'other,caf-orchestrator'
+    state['groups'] = 'other,caf-orchestration'
     token = auth.login('operator@pve', PASSWORD, 'peer')
     session = auth.session(token)
     assert session['role'] == 'orchestrator' and session['provider'] == 'pve'
@@ -244,7 +244,7 @@ def test_https_webui_pve_login_totp_revocation_and_no_fallback(pve, tmp_path):
 def test_pve_config_requires_explicit_group_and_rejects_unsafe_options(tmp_path):
     path = tmp_path / 'web.yaml'
     base = dict(version=1, public_url='https://localhost:8443', certificate='cert.pem', private_key='key.pem')
-    auth = dict(provider='pve', url='https://pve.lab:8006', required_group='caf-orchestrator', ca_file='pve-ca.pem')
+    auth = dict(provider='pve', url='https://pve.lab:8006', required_group='caf-orchestration', ca_file='pve-ca.pem')
     path.write_text(yaml.safe_dump(dict(base, auth=auth)))
     resolved = settings(path)
     assert resolved['auth']['ca_file'] == str(tmp_path / 'pve-ca.pem')
