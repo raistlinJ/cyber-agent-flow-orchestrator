@@ -17,8 +17,14 @@
 <p id="roles-message" class="small" role="status">Select a VM for each role. These selections belong to your account.</p>
 </form></section>
 <section aria-labelledby="machines-title"><div class="section-title"><h2 id="machines-title">Lab machines</h2><span>Proxmox host · QEMU guest agent</span></div><div id="machines" class="machines"><div class="empty">Checking configured machines…</div></div></section>
+<section id="samples-panel" aria-labelledby="samples-title" hidden>
+<div class="section-title"><h2 id="samples-title">Try an experiment</h2><span>Included samples · no import needed</span></div>
+<p id="samples-context" class="small"></p>
+<div id="sample-cards" class="sample-cards"></div>
+<p id="sample-message" class="small" role="status" aria-live="polite"></p>
+</section>
 <section aria-labelledby="commands-title"><div class="section-title"><h2 id="commands-title">Workflow commands</h2><span id="command-count">0 recorded jobs</span></div><div class="panel"><div id="commands" class="command-list"><p class="empty">Waiting for the first observation.</p></div></div></section>
-<section aria-labelledby="runs-title"><div class="section-title"><h2 id="runs-title">Experiment runs</h2><span>Saved workflow journals</span></div><div class="panel scroll"><table><thead><tr><th>Run</th><th>Recorded status</th><th>Coordinator</th><th>Trials observed / planned</th><th>Verified successes</th></tr></thead><tbody id="runs"></tbody></table><p id="no-runs" class="empty">No visible runs yet. Start a workflow from the CLI.</p></div></section>
-<section id="result-panel" class="panel result-panel" hidden><button id="close-results" type="button">Close results</button><pre id="result-content"></pre></section>
-<footer><span>VM power, guest access, and application presence are checked separately.</span><span>Observation only · no start, stop, or deployment actions</span></footer>
+<section aria-labelledby="runs-title"><div class="section-title"><h2 id="runs-title">Experiment runs</h2><span>Your saved runs · select one for results</span></div><div class="panel scroll"><table><thead><tr><th>Run</th><th>Recorded status</th><th>Coordinator</th><th>Trials observed / planned</th><th>Verified successes</th></tr></thead><tbody id="runs"></tbody></table><p id="no-runs" class="empty">No visible runs yet. Run an included sample or start a workflow from the CLI.</p></div></section>
+<section id="result-panel" class="panel result-panel" hidden><div class="result-actions"><h2>Run results</h2><a id="download-dataset" hidden>Download CSV</a><button id="close-results" type="button">Close results</button></div><div id="result-summary"></div><pre id="result-content"></pre></section>
+<footer><span>VM power, guest access, and application presence are checked separately.</span><span>Included samples run in your selected participant VM</span></footer>
 </main></body></html>

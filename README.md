@@ -331,12 +331,60 @@ user a root shell. The existing `run`, `resume`, `recover` and inspection comman
 remain trusted host-administrator interfaces, outside PVE user authorization.
 Unowned legacy runs are hidden from the PVE WebUI. Local-account mode retains its
 original shared administrator dashboard; multi-user isolation requires PVE mode.
-There is no browser execution endpoint yet. The browser saves roles and lets the
-owner open results by clicking their run. User workspaces and all collected
+The browser can launch two bundled samples and lets the owner open results by
+clicking their run. See [WebUI samples](#run-bundled-samples-in-the-webui). User workspaces and all collected
 artifacts remain private on the host under `RUNS_ROOT/_users/<owner-hash>/` (0700).
 Project sharing is not implemented; access is owner-only. PVE users who share a VM
 can observe its processes; private host results do not isolate workloads inside
 that shared guest. See [PVE authorization details](docs/pve-login.md).
+
+## Run bundled samples in the WebUI
+
+Sign in with PVE, select your **Cyber-agent-flow** participant VM, and **Save VM
+roles**. Under **Try an experiment**, click **Run sample**. Nothing needs to be
+imported: the bundled catalogs, prompts and demo fixture are included in the
+orchestrator package. ScenarioForge and CoreVM may remain unselected for these samples.
+
+| Sample | Runs | What it checks |
+| --- | --- | --- |
+| Model smoke test | 1 trial; up to 3 turns / 120 seconds | Supplied port observation, no tools; checks the worker, model and JSON scoring |
+| Tools vs. added helper | 6 trials; up to 12 turns / 120 seconds each | Three repetitions of baseline `nmap`, `curl`, `python3` versus those same tools plus `http_flag_walk`; recover two flags from a temporary loopback site |
+
+The turn counts are upper bounds, not a fixed number of prompt/response pairs.
+The configured model makes real calls and can fail or time out. The HTTP helper
+is a **hand-authored example artifact**; this sample does not generate a new tool
+or establish that generated artifacts help on real ScenarioForge scenarios.
+
+Requirements: a running Linux participant with QEMU guest agent, systemd, Python 3,
+the configured CAF engine and guest account. The HTTP sample also checks that
+`nmap`, `curl` and `python3` are available to that account. The samples inherit the
+workflow runtime's `engine`, `model`, guest user and paths; verify your model
+endpoint/name and credentials first. Selecting a VM does not install these pieces
+or change the configured model. Provision import can supply these settings.
+
+The orchestrator starts the demo site automatically on `127.0.0.1` at a free port
+inside the participant, uses a fixed loopback-only sample policy and removes the
+service afterward. It does not run scenario reset hooks. The baseline catalog is
+identical in both conditions; only the helper is added. Each run saves its own
+YAML, catalogs, manifest, attempts and scored datasets in your private host workspace.
+
+Watch **Experiment runs**, then click a run to see condition scores and timings,
+raw results and **Download CSV**. Preparation errors are also visible there.
+One sample may run per account, with two workers per server; evaluator locks
+prevent simultaneous evaluation in the same participant. See [sample lifecycle
+and recovery](docs/webui.md#sample-lifecycle-and-recovery).
+
+To remove a sample, list only the IDs you want in `web.yaml` and restart:
+
+```yaml
+samples: [smoke]  # Or [smoke, tools-vs-helper], the default when omitted
+# samples: []    # Hide all sample controls and reject all sample launches
+```
+
+Disabling samples preserves saved results. Sample execution is available in PVE
+mode; the local-account dashboard remains a shared monitor. General workflow
+imports, arbitrary browser commands and artifact generation controls are not part
+of this sample picker.
 
 ## Manage runs and inspect results from the CLI
 
@@ -401,9 +449,9 @@ attempts and cached datasets. They do not copy the suite, prompts, private verif
 or raw logs; result rows can still contain discovered flags, addresses and final
 answers, so exports are **not redacted**.
 
-Execution remains synchronous. Use Ctrl-C to interrupt the foreground coordinator,
-then `recover`/`resume` as needed. The WebUI provides separate monitoring and PVE VM-role selection; it has
-login protection and a Python HTTPS proxy, but no execution queue or remote `stop` endpoint.
+CLI execution remains synchronous. Use Ctrl-C to interrupt the foreground
+coordinator, then `recover`/`resume` as needed. Bundled WebUI samples run in background
+workers. The WebUI has no remote stop, general workflow launch or resume controls.
 
 ## Shared application API and WebUI
 
@@ -427,9 +475,9 @@ keep argparse out of application logic. Execution accepts a progress callback an
 is quiet by default through the service API. The evaluator's
 `cyber_agent_flow_eval.reporting` module owns shared trial summaries/log inspection
 and result serialization. The current WebUI uses the service layer for run status
-and a separate read-only monitor for guest observations. Adding execution controls
-will require action authorization, authorized path selection, background job
-management and cancellation, with login/session checks for shared/networked deployments. See
+and a separate read-only monitor for guest observations. Its `SampleManager` runs
+a fixed sample catalog in background workers with owner-scoped paths, CSRF checks,
+per-command PVE authorization, journals and evaluator locks. See
 [the service-boundary design](docs/interfaces.md).
 
 ## Workflow controls and repeatability
@@ -513,6 +561,9 @@ configuration/workflow error, 130 = interrupted.
 
 Tests exercise real suite validation/import, frozen artifacts, evaluator scoring
 and provenance, shared locks, stage retry/recovery, export markers, and resume
-integrity. Guest operations and model execution are simulated. A live Proxmox
+integrity. Sample tests cover both conditions, private results/CSV, CSRF, revoked
+VM access, retry IDs, shutdown cleanup and a real local HTTP fixture/helper.
+`uv run --group dev python tests/browser_samples.py /tmp/caf-samples-preview`
+checks both sample buttons and results in Chrome. Guest operations and model execution are simulated. A live Proxmox
 end-to-end run is still required in your deployed lab; no guest deployment or model
 request was performed during implementation.

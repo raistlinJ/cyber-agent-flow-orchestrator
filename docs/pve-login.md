@@ -182,8 +182,10 @@ The original `run`, `resume`, `recover` and filesystem inspection commands remai
 trusted host-administrator interfaces. They do not impersonate a PVE user and their
 legacy outputs are hidden from the PVE dashboard. Local-account login retains the
 shared administrator dashboard; PVE mode is required for this user isolation.
-There is still no browser execution queue. Role selection is a CSRF-protected
-write endpoint; result reads always resolve through the requesting user's workspace.
+The browser can launch the fixed [sample catalog](webui.md#bundled-samples) using
+background workers. Role selection and sample launch are CSRF-protected write
+endpoints; results and CSV downloads resolve through the requesting user's workspace.
+Every sample guest command rechecks current VM access, including fixture cleanup.
 
 Commands inside an authorized VM retain that VM's network access and credentials.
 This host VM authorization is not a guest network sandbox. Users sharing the same

@@ -32,6 +32,7 @@ def prepare(workflow=None, web_config=None):
                     public_url='https://localhost:8443',
                     certificate='/certs/cert.pem', private_key='/certs/key.pem',
                     session_idle_seconds=1800, session_max_seconds=7200,
+                    samples=['smoke', 'tools-vs-helper'],
                     auth=dict(provider='pve', url=f'https://{hostname}:8006',
                               ca_file='/etc/pve/pve-root-ca.pem',
                               required_group='caf-orchestrator', realms=['pve', 'pam']))

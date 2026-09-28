@@ -4,6 +4,7 @@ Functions return JSON-serializable values or raise exceptions; none print, parse
 CLI arguments, or start a web server. run/recover are the execution entry points.
 """
 from pathlib import Path
+from datetime import datetime, timezone
 from cyber_agent_flow_eval import integration as ev, reporting
 from .config import load
 from .workflow import execute_command, run as execute, recover
@@ -35,10 +36,18 @@ def journal(output):
 def status(output):
     root, data = journal(output)
     evaluation = root / 'evaluation'
+    state = data['status']
+    coordinator_active = reporting.active(root / '.workflow.lock')
+    if data.get('sample_id') and not coordinator_active and state in ('preparing', 'evaluating'):
+        state = 'interrupted'
+    if data.get('sample_id') and not coordinator_active and state == 'queued':
+        if (datetime.now(timezone.utc) - datetime.fromisoformat(data['created_at'])).total_seconds() > 15:
+            state = 'interrupted'
     return {'output': str(root), 'workflow_id': data['workflow']['id'],
-            'workflow_hash': data['workflow_hash'], 'recorded_status': data['status'],
-            'coordinator_active': reporting.active(root / '.workflow.lock'),
-            'error': data.get('error') if data['status'] == 'failed' else None,
+            'workflow_hash': data['workflow_hash'], 'recorded_status': state,
+            'coordinator_active': coordinator_active,
+            'sample_id': data.get('sample_id'), 'message': data.get('message'),
+            'error': data.get('error') if data['status'] in ('failed', 'interrupted') else None,
             'stages': {key: {'status': stage['status'], 'attempt_count': len(stage.get('attempts', [])),
                              'error': stage.get('error') if stage['status'] == 'failed' else None, 'log': stage.get('log')}
                        for key, stage in data['stages'].items()},

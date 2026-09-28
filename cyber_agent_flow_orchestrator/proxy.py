@@ -47,7 +47,7 @@ def application(upstream_port, proxy_key, config):
                                                        allow_redirects=False) as response:
                     content = await response.read()
                     result = web.Response(status=response.status, body=content)
-                    for key in ('Content-Type', 'Set-Cookie', 'Location', 'Cache-Control', 'Content-Security-Policy',
+                    for key in ('Content-Type', 'Content-Disposition', 'Set-Cookie', 'Location', 'Cache-Control', 'Content-Security-Policy',
                                 'X-Content-Type-Options', 'Referrer-Policy', 'Retry-After'):
                         for value in response.headers.getall(key, []):
                             result.headers.add(key, value)
@@ -79,7 +79,7 @@ def run_https(config_path, runs_root, web_config, interval=10):
                 absolute_seconds=config['session_max_seconds'])
     if provider is not None:
         from .user_dashboard import UserDashboard
-        dashboard = UserDashboard(config_path, runs_root, interval)
+        dashboard = UserDashboard(config_path, runs_root, interval, samples=config['samples'])
     else:
         dashboard = Dashboard(config_path, runs_root, interval)
     key = secrets.token_urlsafe(48)

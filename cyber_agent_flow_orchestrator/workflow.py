@@ -231,3 +231,6 @@ def recover(output):
         with ev.TargetReservation(journal['runtime']['execution']['target_lock']):
             Workflow(output, journal).recover_jobs()
             ev.recover(journal['runtime'], output / 'evaluation')
+            if journal.get('sample_fixture'):
+                from .samples import stop_fixture
+                stop_fixture(output, journal)

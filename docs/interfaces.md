@@ -1,15 +1,17 @@
 # CLI and WebUI boundary
 
 The CLI and a WebUI with PVE VM-role selection and monitoring are available. Both use application services
-rather than invoke each other's command lines. Browser execution controls are not
-implemented. See [the dashboard guide](webui.md).
+rather than invoke each other's command lines. Browser execution is restricted to
+a bundled sample catalog with background workers. See [the dashboard guide](webui.md).
 
 ```mermaid
 flowchart TD
     CLI[Installed CLI / python -m] --> Service[Orchestrator service API]
     Browser[Browser] -->|HTTPS| Proxy[Python TLS proxy]
     Proxy --> Auth[Login and session checks]
-    Auth --> UI[Read-only WebUI]
+    Auth --> UI[Scoped WebUI]
+    UI --> Samples[Bundled sample manager]
+    Samples --> Eval
     UI --> Service
     UI --> Monitor[Guest and VM monitor]
     Monitor --> Proxmox[Proxmox status and guest-agent probes]
@@ -27,15 +29,14 @@ progress printing and exit codes. Neither service layer imports argparse or exit
 the process. Inspection is read-only; exports and execution explicitly acquire
 locks. Long-running execution is blocking and accepts a progress callback.
 
-Future browser execution controls should run workflows in supervised jobs and keep HTTP handlers
-responsive. It must use these same locks and journals, authenticate operators in
-shared/networked deployments,
-restrict accessible paths/VMs, and implement job cancellation with cleanup. Do not
-expose arbitrary command YAML or private run directories to unauthenticated clients.
+The sample manager keeps HTTP handlers responsive with bounded background workers.
+It uses workflow/evaluator leases and journals, owner-specific output paths, and
+PVE authorization before each guest command. General workflow launch/cancellation
+controls remain future work. No browser endpoint accepts arbitrary command YAML.
 The Python HTTPS proxy fronts a private loopback server with mandatory login.
 Both dashboard and cached status API require a session; the backend also requires
-a per-start proxy secret. It starts no workflow jobs and exposes no execution
-endpoint. See [HTTPS and login](https-login.md). Guest probes run
+a per-start proxy secret. The sample launch endpoint is available only with PVE
+authentication and a saved, currently authorized participant VM. See [HTTPS and login](https-login.md). Guest probes run
 in a background polling thread, separate from HTTP requests.
 
 Data semantics:
@@ -87,5 +88,12 @@ The authenticated `user-run`, `user-resume` and `user-recover` CLI commands use
 captured by each GuestAgent and runs before every qm subprocess. PVE permissions
 are checked at dispatch, not just when a workflow starts. Trusted administrator
 CLI calls and standalone evaluator calls can still use the transport without a
-user context. Future browser execution endpoints must use the scoped entry points,
-not the unrestricted administrator API. No browser execution endpoint exists yet.
+user context. `SampleManager` also establishes `authorized_operations` inside each
+background worker; it does not call the unrestricted administrator workflow API.
+
+`POST /api/samples/run` accepts exactly `sample_id` and a 32-hex-character
+`request_id`, requires same-origin/CSRF checks, and returns HTTP 202 with a private
+run ID. Disabled IDs are rejected server-side. Repeated IDs return the existing
+run, and capacity conflicts return 409. `GET /api/runs/{id}/dataset.csv` resolves
+only beneath the requesting owner's workspace. The proxy preserves its download
+header. Model answers and trial files remain in the evaluator's normal format.

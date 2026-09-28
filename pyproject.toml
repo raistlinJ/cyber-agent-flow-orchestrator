@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyber-agent-flow-orchestrator"
-version = "0.6.0"
+version = "0.7.0"
 readme = "README.md"
 description = "Host workflows for ScenarioForge and cyber-agent-flow-eval"
 requires-python = ">=3.10"
@@ -23,7 +23,7 @@ include = ["cyber_agent_flow_orchestrator*"]
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-cyber_agent_flow_orchestrator = ["static/*.html", "static/*.css", "static/*.js", "defaults/*.yaml", "defaults/catalogs/*.json"]
+cyber_agent_flow_orchestrator = ["static/*.html", "static/*.css", "static/*.js", "defaults/*.yaml", "defaults/catalogs/*.json", "sample_data/*.json"]
 
 [tool.uv]
 default-groups = []

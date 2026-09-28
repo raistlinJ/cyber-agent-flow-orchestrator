@@ -13,7 +13,7 @@ from . import service
 class UserDashboard:
     scoped = True
 
-    def __init__(self, config, runs_root, interval=10, probe_factory=None):
+    def __init__(self, config, runs_root, interval=10, probe_factory=None, *, samples=None):
         if not 2 <= interval <= 300:
             raise ValueError('Poll interval must be between 2 and 300 seconds')
         self.cfg, self.runtime, _, _ = load(config)
@@ -23,11 +23,14 @@ class UserDashboard:
         self.lock = threading.Lock()
         self.slots = threading.BoundedSemaphore(4)
         self.entries = {}
+        from .samples import SampleManager
+        self.samples = SampleManager(self.runtime, runs_root, samples)
 
     def start(self):
         pass  # Monitoring begins only with an authenticated request.
 
     def close(self):
+        self.samples.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def workspace(self, access):
@@ -92,12 +95,31 @@ class UserDashboard:
         value['vms'] = [vm for vm in value['vms'] if vm['vmid'] is None or vm['vmid'] in latest]
         value['available_vms'] = [vm for vm in available if vm['vmid'] in latest]
         value['roles'] = {k: v if v in latest else None for k, v in roles.items()}
+        # Trial progress is independent of a potentially slow guest observation.
+        value['runs'] = service.list_runs(workspace.runs)
+        value['samples'] = self.samples.catalog(value['roles'])
+        access.current()
         return value
 
     def run_detail(self, access, run_id, kind):
         workspace = self.workspace(access)
         path = workspace.run_path(run_id)
         # Caller supplies only an ID; owner, base directory and full path are server-derived.
-        value = service.results(path) if kind == 'results' else service.status(path)
+        if kind == 'results' and not (path / 'evaluation/manifest.json').is_file():
+            value = {'workflow': service.status(path), 'evaluation': None}
+        else:
+            value = service.results(path) if kind == 'results' else service.status(path)
         access.current()
         return value
+
+    def run_sample(self, access, sample_id, request_id):
+        return self.samples.submit(access, sample_id, request_id)
+
+    def dataset(self, access, run_id):
+        workspace = self.workspace(access)
+        path = workspace.run_path(run_id) / 'evaluation/dataset.csv'
+        if path.is_symlink() or not path.resolve().is_relative_to(workspace.runs) or path.stat().st_size > 32 * 1024 * 1024:
+            raise ValueError('Dataset is not available for browser download')
+        data = path.read_bytes()
+        access.current()
+        return data

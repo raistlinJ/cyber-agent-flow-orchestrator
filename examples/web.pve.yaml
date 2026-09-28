@@ -10,6 +10,8 @@ certificate: /certs/cert.pem
 private_key: /certs/key.pem
 session_idle_seconds: 1800
 session_max_seconds: 7200
+# Keep either ID, or use [] to hide and disable all bundled sample launches.
+samples: [smoke, tools-vs-helper]
 
 auth:
   provider: pve

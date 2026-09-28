@@ -1,7 +1,9 @@
 # Live lab dashboard
 
 The WebUI monitors labs and saves per-user VM role selections in PVE mode.
-Use the CLI to run, resume, recover and export experiments. The page shows VM availability, application presence,
+It can launch [two bundled samples](../README.md#run-bundled-samples-in-the-webui)
+and download their CSV datasets. Use the CLI for full workflows, resume, recovery
+and other exports. The page shows VM availability, application presence,
 process commands and elapsed time, unfinished workflow jobs, and saved run status.
 
 ![Per-user VM selection with simulated lab data](images/user-vms-desktop.png)
@@ -41,7 +43,9 @@ PVE, login, or the HTTPS proxy is planned. It is not implemented yet; see the
 The selected workflow YAML and its runtime must validate. `--runs-root` is a host
 path relative to the current working directory; it need not exist until you start
 a run. The workflow YAML supplies a template; PVE users choose their VM roles
-in the page, while local-account mode uses the configured VM IDs. Starting/stopping the WebUI does not start/stop experiments or VMs.
+in the page, while local-account mode uses the configured VM IDs. Starting the
+WebUI does not start experiments or VMs. Stopping it asks sample workers to finish
+the current bounded trial and clean up; independent CLI runs are unaffected.
 Use a second terminal for ordinary CLI runs. Restart the WebUI after editing its
 configuration.
 
@@ -49,6 +53,57 @@ To reuse ScenarioForge VM IDs and model settings, add
 `--provision-config /path/to/scenarioforge-lab.conf`. This creates a separate
 profile and initializes eligible roles once per user; saved selections are
 preserved. See [provision import](provision-config.md).
+
+## Bundled samples
+
+In PVE mode, save a participant VM, then choose **Model smoke test** or **Tools vs.
+added helper** under **Try an experiment**. The section displays the participant,
+model, trial count and budgets before launch. No file import or scenario deployment
+is required. Engine/model prerequisites and the exact conditions are listed in the
+[README](../README.md#run-bundled-samples-in-the-webui).
+
+Runs appear immediately with preparation/evaluation progress. Click a run for
+condition summaries and recorded JSON; **Download CSV** exports its current trial
+dataset. A failed preparation is visible even if no trial manifest was created.
+Completed execution is distinct from verified success: inspect both trial status
+and score. Missing first-flag timing is shown as Unknown.
+
+Set `samples: [smoke]` in the WebUI YAML to retain only the smoke test, or
+`samples: []` to remove all sample controls and reject launch requests. Restart the
+WebUI after changing this setting. Existing results remain available.
+
+### Sample lifecycle and recovery
+
+Launch returns promptly; at most one sample per account and two per server run
+in background threads. Requests contain only a whitelisted sample ID and an
+idempotency ID, never commands, VM IDs, paths, owners or uploaded YAML. The saved
+participant selection and configured engine/model are frozen for that run.
+All guest calls pass the same current PVE checks as authenticated CLI execution.
+
+The HTTP fixture is a separate bounded systemd service using a dynamic user,
+loopback binding and a unique name. It is stopped after success or failure; a
+30-minute runtime limit bounds orphaned fixtures if the host crashes or access is
+revoked before cleanup. Revocation blocks cleanup commands too. Service control
+records remain in `/var/lib/caf-eval-samples` in the guest to prevent delayed starts
+after cancellation. Trial workers have their own bounded runtime and cleanup.
+
+Graceful shutdown stops between trials and attempts fixture cleanup. A forced
+shutdown leaves journals marked interrupted once their coordinator lock is gone.
+Samples do not automatically resume, and the browser has no stop button. To clean
+up an interrupted run with current PVE authorization, use the same runs root as
+`serve` and its displayed sample run ID:
+
+```bash
+uv run cyber-agent-flow-orchestrator user-recover \
+  --username researcher@pve --web-config web.yaml \
+  --runs-root /absolute/path/to/runs --run-id sample-<id>
+```
+
+Replace `sample-<id>` with the displayed ID (without angle brackets). An authorized
+host administrator can instead use `recover --output /absolute/private/run/path`.
+After cleanup, start a fresh sample from the WebUI. These fixed samples use their
+own loopback fixture and participant lock; they do not invoke ScenarioForge or
+alter any real scenario's preparation/reset steps.
 
 ## Select machines and application checks
 

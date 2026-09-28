@@ -55,6 +55,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
     import secrets
     from .access import AccessDenied
     from .workspaces import Workspace
+    from .samples import SampleBusy, SampleRequestError
     from .auth import LoginLimited, token_from_cookie, session_cookie
     assets = Path(__file__).with_name('static')
     authority = urlsplit(origin).netloc
@@ -137,15 +138,22 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(200, dashboard.read())
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):
                     parts = path.split('/')
-                    if len(parts) != 5 or parts[4] not in ('status', 'results'):
+                    if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv'):
                         self.respond(404, {'error': 'Not found'})
                         return
                     try:
-                        value = dashboard.run_detail(auth.access(token, revalidate=False), parts[3], parts[4])
+                        access = auth.access(token, revalidate=False)
+                        if parts[4] == 'dataset.csv':
+                            value = dashboard.dataset(access, parts[3])
+                        else:
+                            value = dashboard.run_detail(access, parts[3], parts[4])
                     except (FileNotFoundError, KeyError, ValueError):
                         self.respond(404, {'error': 'Run not found or results unavailable'})
                         return
-                    self.respond(200, value)
+                    if parts[4] == 'dataset.csv':
+                        self.respond(200, value, 'text/csv', **{'Content-Disposition': f'attachment; filename="{parts[3]}.csv"'})
+                    else:
+                        self.respond(200, value)
                 elif path in protected_assets:
                     self.asset(protected_assets[path])
                 else:
@@ -219,10 +227,20 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(400, {'error': str(exc)})
                         return
                     self.respond(200, dashboard.select(auth.access(token, revalidate=False), data))
+                elif path == '/api/samples/run' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                    if (set(data) != {'sample_id', 'request_id'} or not isinstance(data['sample_id'], str)
+                            or not isinstance(data['request_id'], str)):
+                        self.respond(400, {'error': 'Supply a sample ID and request ID only'})
+                        return
+                    self.respond(202, dashboard.run_sample(auth.access(token, revalidate=False), data['sample_id'], data['request_id']))
                 else:
-                    self.respond(404, {'error': 'No execution endpoint is enabled'})
+                    self.respond(404, {'error': 'No such action is enabled'})
             except AccessDenied:
                 self.respond(403, {'error': 'Access not granted'})
+            except SampleBusy as exc:
+                self.respond(409, {'error': str(exc)})
+            except SampleRequestError as exc:
+                self.respond(400, {'error': str(exc)})
             except LoginLimited:
                 self.respond(429, {'error': 'Too many login attempts; try again shortly'}, **{'Retry-After': '60'})
             except (ValueError, OSError, KeyError):

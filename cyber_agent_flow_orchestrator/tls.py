@@ -21,7 +21,7 @@ def settings(path):
     path = Path(path).resolve()
     data = yaml.load(path.read_text(), Loader=ev.StrictLoader)
     ev.fields(data, ['version', 'listen', 'port', 'public_url', 'certificate', 'private_key', 'users_file',
-                     'session_idle_seconds', 'session_max_seconds', 'auth'],
+                     'session_idle_seconds', 'session_max_seconds', 'auth', 'samples'],
               ['version', 'public_url', 'certificate', 'private_key'], 'web configuration')
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('Only web configuration version 1 is supported')
@@ -29,6 +29,11 @@ def settings(path):
     data.setdefault('port', 8443)
     data.setdefault('session_idle_seconds', 1800)
     data.setdefault('session_max_seconds', 28800)
+    from .samples import SAMPLE_IDS
+    data.setdefault('samples', list(SAMPLE_IDS))
+    if (not isinstance(data['samples'], list) or any(not isinstance(name, str) or name not in SAMPLE_IDS for name in data['samples'])
+            or len(data['samples']) != len(set(data['samples']))):
+        raise ValueError('samples must list unique bundled sample IDs, or [] to disable them')
     for key in ('port', 'session_idle_seconds', 'session_max_seconds'):
         ev.positive(data[key], key)
     if data['port'] > 65535 or data['session_idle_seconds'] > data['session_max_seconds'] or data['session_max_seconds'] > 604800:
