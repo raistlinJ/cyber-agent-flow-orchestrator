@@ -378,3 +378,82 @@ def test_runtime_catalog_replacement_refusals_and_failure(installation, tmp_path
     with pytest.raises(ValueError): guest.dispatch(dict(args, op='app_update'))
     assert git(root, 'rev-parse', 'HEAD') == original
     assert (root / 'kali_tools.json').read_bytes() == content
+
+
+def fake_process(proc_root, pid, argv, cwd, name='python3'):
+    folder = proc_root / str(pid)
+    folder.mkdir()
+    (folder / 'cmdline').write_bytes(b'\0'.join(arg.encode() for arg in argv) + b'\0')
+    (folder / 'cwd').symlink_to(cwd)
+    (folder / 'comm').write_text(name + '\n')
+    return folder
+
+
+def test_process_inspection_identifies_blockers_without_arguments(tmp_path):
+    proc = tmp_path / 'proc'
+    proc.mkdir()
+    root = Path('/opt/cyber-agent-flow')
+    fake_process(proc, 900001, ['/opt/cyber-agent-flow/venv/bin/python', 'app.py', '--api-key', 'secret-token'], str(root))
+    fake_process(proc, 900002, ['bash'], str(root / 'tools'), 'bash')
+    fake_process(proc, 900003, ['python', '/opt/cyber-agent-flow-other/app.py'], '/tmp')
+    fake_process(proc, 900004, ['python', '-c', '"""Read-only, stdlib-only Linux guest probe, sent through QEMU Guest Agent.', str(root)], '/tmp')
+    fake_process(proc, os.getpid(), ['python', str(root / 'helper.py')], str(root))
+    found = guest.application_processes(root, proc_root=proc)
+    assert {p['pid'] for p in found} == {900001, 900002}
+    assert 'secret-token' not in json.dumps(found)
+    assert 'app.py' not in json.dumps(found)
+    assert next(p for p in found if p['pid'] == 900002)['reason'] == 'working directory is in checkout'
+
+
+def test_process_guard_has_actionable_error_and_inspect_is_read_only(installation, monkeypatch):
+    role, _, root, original, calls = installation
+    found = [{'pid': 42, 'name': 'python3', 'reason': 'working directory is in checkout'}]
+    monkeypatch.setattr(guest, 'application_processes', lambda root: found)
+    result = guest.dispatch(dict(op='app_inspect', role=role, root=str(root)))
+    assert result['processes'] == found
+    assert result['revision'] == original
+    assert not any(argv[:2] == ['systemctl', 'stop'] for argv in calls)
+    # The integration fixture disables active_processes; test its real function separately below.
+
+
+def test_final_process_guard_reports_pid(monkeypatch):
+    monkeypatch.setattr(guest, 'application_processes', lambda root: [{'pid': 42, 'name': 'bash', 'reason': 'working directory is in checkout'}])
+    with pytest.raises(ValueError, match=r'PID 42.*bash.*move idle shells'):
+        guest.active_processes(Path('/opt/cyber-agent-flow'))
+
+
+@pytest.mark.parametrize('managed_service', [None, 'caf-web.service'])
+def test_manager_checks_unmanaged_processes_before_source_download(pve, lab, tmp_path, monkeypatch, managed_service):
+    pve[0]['groups'] += ',caf-maintainers'
+    pve[0]['resources']['operator@pve'] = [vm(9403)]
+    user = access(pve)
+    workspace = Workspace(tmp_path / 'runs', user.username)
+    workspace.save_roles(dict(scenarioforge=None, participant=9403, core=None), user)
+    calls, agent, _ = install_backend(monkeypatch, tmp_path)
+    original = agent.call
+    def call(self, vmid, op, **data):
+        original(self, vmid, op, **data)
+        return {'revision': 'a' * 40, 'modified': False,
+                'processes': [{'pid': 42, 'name': 'python3', 'reason': 'working directory is in checkout'}]}
+    monkeypatch.setattr(agent, 'call', call)
+    packages = []
+    def package(*args, **kwargs):
+        packages.append(args)
+        raise updates.UpdateError('Reached packaging; service is managed')
+    monkeypatch.setattr(updates, 'package', package)
+    cfg, runtime, _, _ = load(lab[0])
+    if managed_service:
+        cfg.setdefault('monitoring', {})['caf_service'] = managed_service
+    manager = updates.UpdateManager(cfg, runtime, tmp_path / 'runs')
+    try:
+        manager.submit(user, 'participant', 'update', 'main', 'a' * 32)
+        manager.jobs[user.username].result(timeout=10)
+        row = ev.read_json(workspace.path / 'updates' / ('a' * 32) / 'job.json')
+        assert row['status'] == 'failed'
+        assert bool(packages) == bool(managed_service)
+        if not managed_service:
+            assert 'PID 42 (python3' in row['error']
+            assert 'No source bundle downloaded or transferred' in row['error']
+        assert [op for _, op, _ in calls] == ['app_inspect']
+    finally:
+        manager.close()

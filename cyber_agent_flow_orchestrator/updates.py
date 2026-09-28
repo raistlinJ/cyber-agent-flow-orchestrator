@@ -212,6 +212,10 @@ class UpdateManager:
                 replace_tools = job['action'] == 'update' and installed.get('tools_config_replaceable')
                 if installed.get('modified') and not replace_tools:
                     raise UpdateError('Tracked local edits exist; review the changed files under Check version and preserve/commit them before retrying. No source bundle downloaded or transferred; application files unchanged.')
+                if installed.get('processes') and not service:
+                    processes = '; '.join(f"PID {p['pid']} ({p['name']}: {p['reason']})" for p in installed['processes'])
+                    raise UpdateError('Processes reference the application checkout: ' + processes +
+                                      '. No managed service is configured. Stop the application/workers or move idle shells out of the checkout, then retry. No source bundle downloaded or transferred.')
                 with ev.TargetReservation(self.runtime['execution']['target_lock']), ev.lease(f'/var/lock/cyber-agent-flow-eval-vm-{vmid}.lock'):
                     if self.closed:
                         raise UpdateError('Server stopped before maintenance began')

@@ -29,6 +29,7 @@ def main():
         finish_upload = threading.Event()
         dirty = set()
         replaceable = set()
+        process_blockers = {}
         activation_failures = set()
         original = agent.call
         def call(self, vmid, op, **data):
@@ -40,7 +41,7 @@ def main():
                 dirty.discard(vmid)
                 replaceable.discard(vmid)
             if op == 'app_rollback': revisions[vmid] = 'a' * 40
-            return {'revision': revisions[vmid], 'missing_controls': ['allowed_tools'] if vmid == 9403 and revisions[vmid][0] == 'a' else [], 'modified': vmid in dirty, 'tools_config_replaceable': vmid in replaceable, 'modified_files': [' M \"mcp_client.py\"'] if vmid in dirty else [], 'modified_file_count': 1 if vmid in dirty else 0}
+            return {'revision': revisions[vmid], 'missing_controls': ['allowed_tools'] if vmid == 9403 and revisions[vmid][0] == 'a' else [], 'processes': process_blockers.get(vmid, []), 'modified': vmid in dirty, 'tools_config_replaceable': vmid in replaceable, 'modified_files': [' M \"mcp_client.py\"'] if vmid in dirty else [], 'modified_file_count': 1 if vmid in dirty else 0}
         patch.setattr(agent, 'call', call)
         def put(self, vmid, path, content):
             midpoint = len(content) // 2
@@ -144,6 +145,14 @@ def main():
                     expect(latest).to_contain_text('Target revision: ' + 'b' * 40)
                     expect(page.locator('#update-cards article').filter(has=button('participant', 'update'))).to_contain_text('Installed revision (last checked): aaaaaaaaaaaa')
                     expect(page.locator('#loading-label')).to_contain_text('participant update failed')
+                    process_blockers[9403] = [{'pid': 4242, 'name': 'python3', 'reason': 'working directory is in checkout'}]
+                    before_process_check = len(calls)
+                    button('participant', 'update').click()
+                    expect(page.locator('#update-message')).to_contain_text('PID 4242', timeout=30000)
+                    expect(page.locator('#update-message')).to_contain_text('No source bundle downloaded or transferred')
+                    expect(page.locator('#update-cards')).to_contain_text('PID 4242 · python3')
+                    assert [op for _, op, _ in calls[before_process_check:]] == ['app_inspect']
+                    process_blockers.clear()
                     page.screenshot(path=str(destination / 'updates-desktop.png'), full_page=True)
                     activation_failures.clear()
                     dirty.add(9403)

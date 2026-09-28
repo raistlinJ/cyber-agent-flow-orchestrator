@@ -150,6 +150,20 @@ configured service is stopped just before activation and restarted afterward.
 A previously inactive service remains inactive. Other application processes
 must be stopped before updating; the updater will not kill arbitrary processes.
 
+**Check version** lists up to 12 processes that reference the checkout, including
+PIDs, process names and the matching reason. Arguments are omitted because they
+can contain credentials. This is a conservative check: an idle shell whose working
+directory is inside the checkout also appears. Move such a shell elsewhere with
+`cd ~`; stop actual CAF sessions/workers and the WebUI server before retrying.
+Closing a browser tab does not stop the server process.
+
+When no service is configured (for example `service: null` for a desktop-launched
+CAF), these blockers stop the host update before downloading or transferring a
+bundle. If a real service is configured, the updater proceeds and stops that
+service during activation, then checks again for remaining processes. The final
+check always remains in place and reports PIDs if new or unmanaged processes still
+block activation. It never guesses a service name or kills an arbitrary process.
+
 Optional overrides in `web.yaml` (restart after editing):
 
 ```yaml

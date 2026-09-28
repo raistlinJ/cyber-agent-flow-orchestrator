@@ -127,28 +127,50 @@ def active_jobs():
         raise ValueError('An experiment or workflow is still running inside this VM')
 
 
-def active_processes(root):
+def application_processes(root, proc_root='/proc'):
     # Fail closed on unreadable processes. Ignore only this helper and its ancestors.
+    proc_root = Path(proc_root)
     ignored, pid = {os.getpid()}, os.getppid()
     while pid > 1 and pid not in ignored:
         ignored.add(pid)
         try:
-            pid = int(Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[1])
+            pid = int((proc_root / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()[1])
         except FileNotFoundError:
             break
-    for proc in Path('/proc').iterdir():
+    found = []
+    for proc in proc_root.iterdir():
         if not proc.name.isdecimal() or int(proc.name) in ignored:
             continue
         try:
             argv = (proc / 'cmdline').read_bytes().split(b'\0')
             command = b' '.join(argv).decode(errors='replace')
             cwd = os.readlink(proc / 'cwd')
+            name = (proc / 'comm').read_text().strip()
         except FileNotFoundError:
             continue
         if len(argv) > 2 and argv[1] == b'-c' and argv[2].startswith(b'"""Read-only, stdlib-only Linux guest probe, sent through QEMU Guest Agent.'):
             continue
-        if (str(root) in command or cwd == str(root) or cwd.startswith(str(root) + '/')):
-            raise ValueError('Application processes are still running; stop them before maintenance')
+        reasons = []
+        if re.search(re.escape(str(root)) + r'''(?=/|$|[\s'"\x00])''', command):
+            reasons.append('command references checkout')
+        if cwd == str(root) or cwd.startswith(str(root) + '/'):
+            reasons.append('working directory is in checkout')
+        if reasons:
+            # Names and reasons identify blockers without exposing command arguments,
+            # which can contain API keys, inline scripts or other credentials.
+            found.append(dict(pid=int(proc.name), name=re.sub(r'[^A-Za-z0-9_. -]', '?', name)[:60],
+                              reason='; '.join(reasons)))
+            if len(found) == 12:
+                break
+    return found
+
+
+def active_processes(root):
+    found = application_processes(root)
+    if found:
+        labels = '; '.join(f"PID {p['pid']} ({p['name']}: {p['reason']})" for p in found)
+        raise ValueError('Processes still reference the application checkout: ' + labels +
+                         '. Stop the application/workers or move idle shells out of the checkout, then retry.')
 
 
 def validate_checkout(stage, original, python, role, *, rollback=False):
@@ -190,7 +212,8 @@ def dispatch(data):
     journal = directory / 'state.json'
     op = data['op']
     if op == 'app_inspect':
-        return dict(identity(root, role), root=str(root), update=read(journal), rollback=read(directory / 'last-success.json'))
+        return dict(identity(root, role), root=str(root), processes=application_processes(root),
+                    update=read(journal), rollback=read(directory / 'last-success.json'))
     token = data.get('token', '')
     if not re.fullmatch('[0-9a-f]{32}', token):
         raise ValueError('Invalid maintenance request ID')
