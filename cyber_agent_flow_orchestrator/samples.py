@@ -1,5 +1,6 @@
 """Bundled experiments and bounded, owner-scoped browser execution."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, ExitStack
 from copy import deepcopy
 from datetime import datetime, timezone
 from importlib.resources import files
@@ -9,7 +10,7 @@ import threading
 
 import yaml
 
-from cyber_agent_flow_eval import integration as ev
+from cyber_agent_flow_eval import integration as ev, reporting
 from cyber_agent_flow_eval.proxmox import authorized_operations
 from .auth import private_file
 from .diagnostics import clean
@@ -32,8 +33,24 @@ class SampleBusy(RuntimeError):
     pass
 
 
+class SampleCancelled(InterruptedError):
+    pass
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+@contextmanager
+def submission_lock(workspace):
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(ev.lease(workspace.path / '.sample-submit.lock'))
+        except ValueError as exc:
+            if not str(exc).startswith('Already locked:'):
+                raise
+            raise SampleBusy('Another experiment request is being saved; retry shortly') from None
+        yield
 
 
 def fixture_agent(backend):
@@ -105,7 +122,62 @@ class SampleManager:
         self.stopping.set()
         self.pool.shutdown(wait=False, cancel_futures=False)
 
-    def submit(self, access, sample_id, request_id):
+    def create(self, access, sample_id, request_id):
+        if sample_id not in self.enabled or not isinstance(request_id, str) or not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise SampleRequestError('Choose an enabled sample and a valid request ID')
+        access.current()
+        workspace = Workspace(self.root, access.username)
+        run_id = 'sample-' + request_id
+        output = workspace.run_path(run_id)
+        with self.lock, submission_lock(workspace):
+            if output.exists():
+                record = ev.read_json(output / 'workflow.json')
+                if record.get('sample_id') != sample_id:
+                    raise SampleRequestError('Request ID already belongs to another experiment')
+                return {'run_id':run_id, 'status':record['status']}
+            else:
+                private_directory(output)
+                ev.write_json(output / 'workflow.json', dict(version=1, sample_id=sample_id, status='ready',
+                    phase='ready', created_at=now(), updated_at=now(), stages={}, events=[],
+                    workflow={'id':'sample-' + sample_id}, workflow_hash=ev.digest({'sample':sample_id}),
+                    message='Ready to run with your saved participant VM and model settings'))
+        return {'run_id':run_id, 'status':'ready'}
+
+    def run_saved(self, access, run_id, request_id):
+        if not isinstance(request_id, str) or not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise SampleRequestError('Invalid experiment request ID')
+        access.current()
+        workspace = Workspace(self.root, access.username)
+        output = workspace.run_path(run_id)
+        if not (output / 'workflow.json').is_file():
+            raise SampleRequestError('Experiment not found')
+        record = ev.read_json(output / 'workflow.json')
+        if record.get('sample_id') not in self.enabled:
+            raise SampleRequestError('This experiment cannot be run from the WebUI')
+        if record.get('launch_request_id') == request_id:
+            return {'run_id':run_id, 'status':record['status']}
+        if reporting.active(output / '.workflow.lock') or record['status'] in ('queued', 'preparing', 'evaluating'):
+            raise SampleBusy('This experiment is already active; refresh its progress')
+        return self.submit(access, record['sample_id'], run_id.removeprefix('sample-') if record['status'] == 'ready' else request_id,
+                           launch_request_id=request_id)
+
+    def stop(self, access, run_id):
+        access.current()
+        workspace = Workspace(self.root, access.username)
+        output = workspace.run_path(run_id)
+        if not (output / 'workflow.json').is_file():
+            raise SampleRequestError('Experiment not found')
+        record = ev.read_json(output / 'workflow.json')
+        from .service import status
+        current = status(output)
+        if (not record.get('sample_id') or record['status'] not in ('queued', 'preparing', 'evaluating') or
+                not (current['coordinator_active'] or current['recorded_status'] in ('queued', 'stopping'))):
+            raise SampleRequestError('This sample is not running')
+        access.require_vm(record['runtime']['backend']['participant_vmid'])
+        ev.write_json(output / 'stop-request.json', {'requested_at':now()})
+        return {'run_id':run_id, 'status':'stopping'}
+
+    def submit(self, access, sample_id, request_id, *, launch_request_id=None):
         if sample_id not in self.enabled:
             raise SampleRequestError('This sample is not enabled')
         if not isinstance(request_id, str) or not re.fullmatch(r'[0-9a-f]{32}', request_id):
@@ -119,7 +191,8 @@ class SampleManager:
                 previous = ev.read_json(output / 'workflow.json')
                 if previous.get('sample_id') != sample_id:
                     raise SampleRequestError('Request ID already belongs to another sample')
-                return {'run_id': run_id, 'status': previous['status']}
+                if previous['status'] != 'ready':
+                    return {'run_id': run_id, 'status': previous['status']}
         vmid = workspace.roles()['participant']
         if vmid is None:
             raise SampleRequestError('Save a Cyber-agent-flow VM selection first')
@@ -132,16 +205,21 @@ class SampleManager:
         journal = dict(version=1, sample_id=sample_id, created_at=now(), status='queued',
                        workflow={'id': 'sample-' + sample_id, 'prepare': [], 'artifacts': []},
                        runtime=runtime, stages={}, workflow_hash=ev.digest({'sample': sample_id, 'runtime': runtime}),
-                       message='Waiting for sample worker', phase='queued', updated_at=now(), events=[])
-        with self.lock:
+                       message='Waiting for sample worker', phase='queued', updated_at=now(), events=[], launch_request_id=launch_request_id)
+        with self.lock, submission_lock(workspace):
             if output.exists():
                 previous = ev.read_json(output / 'workflow.json')
                 if previous.get('sample_id') != sample_id:
                     raise SampleRequestError('Request ID already belongs to another sample')
-                return {'run_id': run_id, 'status': previous['status']}
+                if previous['status'] != 'ready':
+                    return {'run_id': run_id, 'status': previous['status']}
             self.jobs = {owner: future for owner, future in self.jobs.items() if not future.done()}
             if self.stopping.is_set() or access.username in self.jobs or len(self.jobs) >= 2:
                 raise SampleBusy('A sample is already running for this account, or both sample workers are busy')
+            from .service import list_runs
+            if any(row.get('coordinator_active') or row.get('recorded_status') in ('queued', 'stopping')
+                   for row in list_runs(workspace.runs)):
+                raise SampleBusy('Only one experiment can run at a time for this account')
             private_directory(output)
             ev.write_json(output / 'workflow.json', journal)
             future = self.pool.submit(self._run, workspace, output, journal, access, request_id)
@@ -149,6 +227,9 @@ class SampleManager:
         return {'run_id': run_id, 'status': 'queued'}
 
     def _run(self, workspace, output, journal, access, token):
+        def check_stop():
+            if (output / 'stop-request.json').is_file():
+                raise SampleCancelled('Stopped by the user after collecting the current trial')
         def save():
             ev.write_json(output / 'workflow.json', journal)
         def progress(message, phase=None):
@@ -157,12 +238,14 @@ class SampleManager:
             journal.setdefault('events', []).append(dict(at=journal['updated_at'], kind='sample', message=journal['message']))
             journal['events'] = journal['events'][-100:]
             save()
+            check_stop()
             if self.stopping.is_set():
                 raise InterruptedError('Server is stopping; sample stopped between trials')
         # Keep all terminal writes under the workflow lease, including failures.
         with ev.lease(output / '.workflow.lock'):
             try:
                 with ev.lease(workspace.path / '.sample-user.lock'), authorized_operations(access.qm):
+                    check_stop()
                     if self.stopping.is_set():
                         raise InterruptedError('Server stopped before the sample began')
                     journal['status'] = 'preparing'
@@ -201,8 +284,9 @@ class SampleManager:
                                 stop_fixture(output, journal)
                         journal.update(status=outcome, phase='finished', message='Sample finished; open results to review scores and timing')
             except Exception as exc:
-                journal.update(status='interrupted' if isinstance(exc, InterruptedError) else 'failed',
-                               error=f'{type(exc).__name__}: {exc}', message='Sample stopped; open results for details')
+                journal.update(status='cancelled' if isinstance(exc, SampleCancelled) else 'interrupted' if isinstance(exc, InterruptedError) else 'failed',
+                               error=None if isinstance(exc, SampleCancelled) else f'{type(exc).__name__}: {exc}',
+                               message='Stopped by request; collected results are saved locally' if isinstance(exc, SampleCancelled) else 'Sample stopped; open results for details')
             finally:
                 journal['ended_at'] = now()
                 journal['updated_at'] = journal['ended_at']

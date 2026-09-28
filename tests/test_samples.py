@@ -346,3 +346,82 @@ def test_progress_journal_failure_still_cleans_up_fixture(pve, lab, tmp_path, mo
         assert ev.read_json(workspace.run_path(reply['run_id']) / 'workflow.json')['sample_fixture']['stopped']
     finally:
         manager.close()
+
+
+def test_saved_experiments_stop_and_rerun_preserve_results(pve, lab, tmp_path, monkeypatch):
+    manager, user, workspace, calls, _, backend = setup_sample(pve, lab, tmp_path, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    original = backend.launch
+    def launch(self, directory, seconds):
+        entered.set()
+        assert release.wait(15)
+        return original(self, directory, seconds)
+    monkeypatch.setattr(backend, 'launch', launch)
+    other_manager = samples.SampleManager(manager.runtime, manager.root)
+    try:
+        with ev.lease(workspace.path / '.sample-submit.lock'):
+            with pytest.raises(samples.SampleBusy): manager.create(user, 'tools-vs-helper', 'a' * 32)
+        draft = manager.create(user, 'tools-vs-helper', 'a' * 32)
+        assert service.status(workspace.run_path(draft['run_id']))['recorded_status'] == 'ready'
+        assert not calls
+        reply = manager.run_saved(user, draft['run_id'], 'b' * 32)
+        assert reply['run_id'] == draft['run_id'] and entered.wait(10)
+        assert manager.create(user, 'tools-vs-helper', 'a' * 32)['status'] != 'ready'
+        with pytest.raises(samples.SampleBusy): other_manager.submit(user, 'smoke', 'c' * 32)
+        with pytest.raises(samples.SampleRequestError): manager.stop(access(pve, 'another@pve'), reply['run_id'])
+        pve[0]['resources']['operator@pve'] = []
+        from cyber_agent_flow_orchestrator.access import AccessDenied
+        with pytest.raises(AccessDenied): manager.stop(user, reply['run_id'])
+        pve[0]['resources']['operator@pve'] = [vm(9403)]
+        manager.stop(user, reply['run_id'])
+        assert service.status(workspace.run_path(reply['run_id']))['recorded_status'] == 'stopping'
+        release.set()
+        manager.jobs[user.username].result(timeout=10)
+        result = service.results(workspace.run_path(reply['run_id']))
+        assert result['workflow']['recorded_status'] == 'cancelled'
+        assert len(result['evaluation']['attempts']) == 1
+        assert any(op == 'sample_stop' for _, op, _ in calls)
+        count = len(calls)
+        assert manager.run_saved(user, reply['run_id'], 'b' * 32)['run_id'] == reply['run_id']
+        assert len(calls) == count  # A retried Run request must not start another run.
+        again = manager.run_saved(user, reply['run_id'], 'd' * 32)
+        assert again['run_id'] != reply['run_id']
+        manager.jobs[user.username].result(timeout=10)
+        assert service.status(workspace.run_path(reply['run_id']))['recorded_status'] == 'cancelled'
+        assert service.status(workspace.run_path(again['run_id']))['recorded_status'] == 'completed'
+    finally:
+        release.set(); manager.close(); other_manager.close()
+        for future in manager.jobs.values(): future.result(timeout=10)
+
+
+def test_experiment_http_create_run_validation_and_owner_isolation(pve, lab, tmp_path, monkeypatch):
+    install_backend(monkeypatch, tmp_path)
+    pve[0]['resources']['operator@pve'] = [vm(9403)]
+    dash = UserDashboard(lab[0], tmp_path / 'runs', 2, lambda b, a: Probe(b, a, []))
+    try:
+        with secure_server(dash, tmp_path / 'web', auth=make_auth(pve)) as server:
+            def login(name):
+                _, headers, _ = request(server, '/api/login', {'username':name, 'password':PASSWORD})
+                cookie = headers['Set-Cookie'].split(';', 1)[0]
+                csrf = json.loads(request(server, '/api/session', cookie=cookie)[2])['csrf']
+                return cookie, {'X-CSRF-Token':csrf}
+            cookie, headers = login('operator@pve')
+            bob, bob_headers = login('bob@pve')
+            data = dict(sample_id='smoke', request_id='a' * 32)
+            assert request(server, '/api/experiments/create', data)[0] == 401
+            assert request(server, '/api/experiments/create', data, cookie=cookie)[0] == 403
+            assert request(server, '/api/experiments/create', dict(data, vmid=999), cookie=cookie, headers=headers)[0] == 400
+            status, _, body = request(server, '/api/experiments/create', data, cookie=cookie, headers=headers)
+            assert status == 202
+            run_id = json.loads(body)['run_id']
+            run = dict(run_id=run_id, request_id='b' * 32)
+            assert request(server, '/api/experiments/run', run, cookie=bob, headers=bob_headers)[0] == 400
+            assert request(server, '/api/experiments/stop', {'run_id':run_id}, cookie=bob, headers=bob_headers)[0] == 400
+            assert request(server, '/api/experiments/stop', {'run_id':run_id}, cookie=cookie)[0] == 403
+            request(server, '/api/roles', dict(scenarioforge=None, participant=9403, core=None), cookie=cookie, headers=headers)
+            assert request(server, '/api/experiments/run', run, cookie=cookie, headers=headers)[0] == 202
+            dash.samples.jobs['operator@pve'].result(timeout=10)
+            assert request(server, f'/api/runs/{run_id}/results', cookie=cookie)[0] == 200
+            assert request(server, f'/api/runs/{run_id}/results', cookie=bob)[0] == 404
+    finally:
+        dash.close()

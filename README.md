@@ -375,12 +375,18 @@ See [setup, source configuration, CLI and recovery](docs/application-updates.md)
 
 ## Run bundled samples in the WebUI
 
-Sign in with PVE, select your **Cyber-agent-flow** participant VM, and **Save VM
-roles**. Under **Try an experiment**, click **Run sample**. Nothing needs to be
+Sign in with PVE, select your **Cyber-agent-flow** participant VM on **Lab setup**, and **Save VM
+roles**. On **Experiments**, choose **New**, select a sample and **Create experiment**.
+The new table row stays **Ready** until you press its **Run** icon. Nothing needs to be
 imported: the bundled catalogs, prompts and demo fixture are included in the
 orchestrator package. ScenarioForge and CoreVM may remain unselected for these samples.
 
-**Sample activity** shows preparation, the current trial/condition, finished-trial
+Each row has **Run**, **Stop**, **View results**, and **Open progress** icons with
+tooltips. One experiment can run per account at a time. Stop finishes the current
+bounded trial, collects its results and cleans up before ending the run. Running
+a finished row again creates a new run, preserving previous results.
+
+**Open progress** shows preparation, the current trial/condition, finished-trial
 percentages, elapsed time, outcomes and cleanup. An active-sample notice appears
 across pages, and timestamped sample events join the persistent console. Progress
 refreshes every five seconds while active, even with automatic refresh set to Never.
@@ -493,7 +499,8 @@ answers, so exports are **not redacted**.
 
 CLI execution remains synchronous. Use Ctrl-C to interrupt the foreground
 coordinator, then `recover`/`resume` as needed. Bundled WebUI samples run in background
-workers. The WebUI has no remote stop, general workflow launch or resume controls.
+workers and support stopping after the current trial. General workflow launch,
+resume and recovery remain CLI operations.
 
 ## Shared application API and WebUI
 

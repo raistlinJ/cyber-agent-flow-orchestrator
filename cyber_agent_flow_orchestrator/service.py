@@ -43,6 +43,8 @@ def status(output):
     if data.get('sample_id') and not coordinator_active and state == 'queued':
         if (datetime.now(timezone.utc) - datetime.fromisoformat(data['created_at'])).total_seconds() > 15:
             state = 'interrupted'
+    stopping = state in ('queued', 'preparing', 'evaluating') and (root / 'stop-request.json').is_file()
+    if stopping: state = 'stopping'
     evaluation_status, sample_progress = None, None
     if (evaluation / 'manifest.json').is_file():
         evaluation_status = reporting.results(evaluation) if data.get('sample_id') else reporting.status(evaluation)
@@ -53,7 +55,7 @@ def status(output):
     return {'output': str(root), 'workflow_id': data['workflow']['id'],
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,
             'coordinator_active': coordinator_active,
-            'sample_id': data.get('sample_id'), 'message': data.get('message'),
+            'sample_id': data.get('sample_id'), 'message': 'Stop requested; finishing the current trial, collecting results and cleaning up' if stopping else data.get('message'),
             'sample_progress': sample_progress,
             'error': data.get('error') if data['status'] in ('failed', 'interrupted') else None,
             'stages': {key: {'status': stage['status'], 'attempt_count': len(stage.get('attempts', [])),

@@ -130,6 +130,9 @@ class UserDashboard:
     def run_sample(self, access, sample_id, request_id):
         return self.samples.submit(access, sample_id, request_id)
 
+    def experiment(self, access, action, data):
+        return {'create':self.samples.create, 'run':self.samples.run_saved, 'stop':self.samples.stop}[action](access, **data)
+
     def maintain(self, access, data):
         return self.updates.submit(access, **data)
 

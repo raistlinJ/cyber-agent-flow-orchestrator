@@ -21,7 +21,7 @@ def elapsed(start, end=None):
 
 def build(root, journal, report, state, coordinator):
     item = CATALOG.get(journal['sample_id'], {})
-    active = coordinator or state == 'queued'
+    active = coordinator or state in ('queued', 'stopping')
     rows = report.get('attempts', []) if report else []
     planned = report['planned_trials'] if report else item.get('trials', 0)
     finished = sum(row['status'] != 'running' for row in rows)

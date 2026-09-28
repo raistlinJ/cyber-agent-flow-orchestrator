@@ -15,8 +15,10 @@ The screenshot uses simulated data for browser verification, not a live Proxmox 
 - **Overview** (`/#overview`): VM power, guest-agent access, application processes,
   elapsed time and unfinished workflow commands. Links lead to setup, experiments
   and application maintenance.
-- **Experiments** (`/#experiments`): bundled samples, saved runs, condition summaries
-  and CSV downloads. Full result JSON is available under **Full result details**.
+- **Experiments** (`/#experiments`): an experiment table with Run, Stop, View results
+  and Open progress icons. **New** opens a sample configuration modal. Condition
+  summaries and CSV downloads are available in results; full JSON is under
+  **Full result details**.
 - **Applications** (`/#applications`): version checks, Update with process-stop
   confirmation, rollback and the latest maintenance outcome. Expand **Maintenance
   history** for older jobs, transfer details and diagnostic records.
@@ -152,7 +154,34 @@ Session/access errors clear the private console view along with the dashboard.
 
 ## Bundled samples
 
-**Sample activity** shows the current run, or the latest outcome when idle:
+Choose **New**, select either bundled sample, and press **Create experiment**.
+The modal shows its description and trial budgets. This saves a **Ready** row;
+it does not start a VM operation. Configuration currently consists of selecting
+the sample; future experiment settings can be added here.
+
+![New experiment modal with simulated lab data](images/new-experiment.png)
+
+Each row has four labeled icon buttons:
+
+| Icon | Action |
+| --- | --- |
+| ▶ | Run a ready experiment, or run a finished experiment again in a new row |
+| ■ | Stop after the current bounded trial, collect its output and clean up |
+| ▤ | View results already saved on the orchestrator host, including failed runs |
+| ◴ | Open the selected run's progress panel |
+
+![Experiment table and persistent console with simulated results](images/experiment-table.png)
+
+Only one experiment can run per account at a time. The server enforces this
+across browser tabs, and Run buttons stay disabled during execution and cleanup.
+Stop changes the status to **Stopping** until the current trial finishes and
+cleanup completes. It does not immediately kill a model request or worker.
+A stopped run retains its collected results with status **Cancelled**; rerunning
+creates a separate run and preserves the original. Trials that never started
+have no output to collect.
+
+**Open progress** shows the selected run; starting or stopping a run opens it
+automatically. **Close progress** hides the panel without stopping execution.
 
 ![Sample progress and persistent console with simulated execution](images/sample-progress.png)
 
@@ -191,13 +220,13 @@ with maintenance traces and browser requests, bounded to the latest 300 entries.
 Progress includes identifiers and outcomes, not prompts, answers, credentials,
 or worker command arguments.
 
-In PVE mode, save a participant VM on **Lab setup**, then choose **Model smoke test** or **Tools vs.
-added helper** under **Experiments → Try an experiment**. The section displays the participant,
-model, trial count and budgets before launch. No file import or scenario deployment
+In PVE mode, save a participant VM on **Lab setup**, then create **Model smoke test** or **Tools vs.
+added helper** under **Experiments → New**. The page displays the participant and
+model; the modal displays trial counts and budgets before launch. No file import or scenario deployment
 is required. Engine/model prerequisites and the exact conditions are listed in the
 [README](../README.md#run-bundled-samples-in-the-webui).
 
-Runs appear immediately with preparation/evaluation progress. Click a run for
+Runs appear immediately with preparation/evaluation progress. Click **View results** for
 condition summaries and recorded JSON; **Download CSV** exports its current trial
 dataset. A failed preparation is visible even if no trial manifest was created.
 Completed execution is distinct from verified success: inspect both trial status
@@ -210,8 +239,10 @@ WebUI after changing this setting. Existing results remain available.
 ### Sample lifecycle and recovery
 
 Launch returns promptly; at most one sample per account and two per server run
-in background threads. Requests contain only a whitelisted sample ID and an
-idempotency ID, never commands, VM IDs, paths, owners or uploaded YAML. The saved
+in background threads. Requests contain a whitelisted sample ID or an owner-scoped
+run ID, plus an idempotency ID for create/run, never commands, VM IDs, paths,
+owners or uploaded YAML. Stop checks access to the participant frozen in that
+run's configuration, even if the saved VM selection has since changed. The saved
 participant selection and configured engine/model are frozen for that run.
 All guest calls pass the same current PVE checks as authenticated CLI execution.
 
@@ -224,7 +255,8 @@ after cancellation. Trial workers have their own bounded runtime and cleanup.
 
 Graceful shutdown stops between trials and attempts fixture cleanup. A forced
 shutdown leaves journals marked interrupted once their coordinator lock is gone.
-Samples do not automatically resume, and the browser has no stop button. To clean
+Samples do not automatically resume. The browser Stop action applies to a live
+coordinator; it cannot recover an orphaned worker after a forced shutdown. To clean
 up an interrupted run with current PVE authorization, use the same runs root as
 `serve` and its displayed sample run ID:
 

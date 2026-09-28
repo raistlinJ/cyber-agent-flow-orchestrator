@@ -4,6 +4,7 @@ const el = (tag, text, cls) => {const node = document.createElement(tag); if (te
 let snapshot = null, fetching = false, failed = false, rolesDirty = false, rolesSaving = false, sampleStarting = false;
 let initialized=false, operation=null, waitingForObservation=false, waitingForMaintenance=false, redirecting=false, maintenanceStarting=false;
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
+let selectedProgress=null, experimentCreating=false;
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
 const clientLog=[];
 const pages={overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
@@ -97,8 +98,7 @@ function render(data) {
  $('command-count').textContent=`${jobs.length} recorded job${jobs.length===1?'':'s'}`; const commands=$('commands');commands.replaceChildren();
  for(const job of jobs){const row=el('article',null,'command'),head=el('div',null,'command-head');head.append(badge(job.live_state,job.live_state==='running'?'good':job.live_state==='unconfirmed'?'warn':''),el('span',`${job.run} / ${job.stage}`,'command-title'),timer(job.live_state==='finished'?null:job.elapsed_seconds,job.observed_at,job.live_state==='running'));row.append(head,el('code',job.command),el('div',`VM ${job.vmid} · ${job.unit} · ${job.live_state==='finished'?'No longer running; journal awaits cleanup':job.elapsed_source||'Last recorded job; live state unconfirmed'}`,'small'));commands.append(row);}
  if(!jobs.length)commands.append(el('p','No unfinished workflow commands recorded. Applications may still be running above.','empty'));
- const runs=$('runs');runs.replaceChildren(); $('no-runs').hidden=Boolean(data.runs.length);
- for(const run of data.runs){const row=el('tr'),evaluation=run.evaluation,summary=evaluation?.summary;const title=el('td'); if(data.owner){const id=run.output.split('/').pop();const button=el('button',run.workflow_id||id);button.type='button';button.addEventListener('click',()=>showResults(id));title.append(button,el('div',id,'small'));if(run.message)title.append(el('div',run.message,'small'));}else{title.textContent=run.workflow_id||run.output;}row.append(title);const state=el('td');state.append(badge(run.recorded_status||'read error',run.recorded_status==='completed'?'good':run.error?'warn':''));row.append(state,el('td',run.coordinator_active?'Active':'Idle'),el('td',evaluation?`${summary.trials_observed} / ${evaluation.planned_trials}`:'Not started'),el('td',summary?String(summary.verified_successes):'—'));if(run.error)row.title=run.error;runs.append(row);}
+ renderExperiments(data);
  waitingForMaintenance=Boolean((data.updates?.jobs||[]).some(job=>['queued','running'].includes(job.status)));waitingForObservation=Boolean(data.refreshing&&(data.loading?data.loading.total>0:(!data.checked_at||data.vms.length>0)));if(!waitingForObservation)foregroundChecks=false;tick();syncBusy();
 }
 function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,Number($('refresh-period').value)*120));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&(!stale||clock.dataset.source==='sample')&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale&&clock.dataset.source!=='sample'?'Last observation; refresh required':clock.dataset.source==='sample'?'Elapsed time since sample or trial start':'Elapsed time since process start';}}
@@ -135,7 +135,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
@@ -164,29 +164,59 @@ async function showResults(id){
  $('result-panel').hidden=false;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren();$('download-dataset').hidden=true;
  try{await finishDashboardRead();const response=await apiFetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});if(!response.ok)throw Error('Results unavailable or access not granted');const data=await response.json();renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);if(data.evaluation){$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;$('download-dataset').hidden=false;}}
  catch(error){$('result-content').textContent=error.message;}
- finally{operation=null;syncBusy();schedulePoll();}
+ finally{operation=null;syncBusy();schedulePoll();if(location.hash==='#experiments')$('result-panel').scrollIntoView({block:'start'});}
 }
 $('close-results').addEventListener('click',()=>{$('result-panel').hidden=true;$('result-content').textContent='';});
 
+function runActive(run){return run.coordinator_active||run.sample_progress?.active||['queued','stopping'].includes(run.recorded_status);}
 function renderSamples(data){
- const samples=data.samples, panel=$('samples-panel');panel.hidden=!samples?.items?.length;if(panel.hidden)return;
- const vm=samples.participant_vmid;
- $('samples-context').textContent=vm?`Participant VM ${vm} · ${samples.provider} / ${samples.model}. Uses the saved VM selection and model settings. These samples use no ScenarioForge export.`:'Select and save a Cyber-agent-flow VM on Lab setup to run a sample.';
- const busy=(data.runs||[]).some(run=>run.sample_id&&(run.coordinator_active||run.recorded_status==='queued'));
- const cards=$('sample-cards');cards.replaceChildren();
- for(const sample of samples.items){
-  const card=el('article',null,'card sample-card');card.append(el('h3',sample.name),el('p',sample.description,'small'));
-  card.append(el('p',`${sample.trials} trial${sample.trials===1?'':'s'} · up to ${sample.max_turns} turns and ${sample.wall_seconds}s per trial`,'sample-budget'));
-  if(sample.id==='tools-vs-helper')card.append(el('p','The helper is a bundled example artifact. The demo site is created automatically inside the participant and cleaned up afterward.','small'));
-  const button=el('button',sampleStarting?'Starting…':busy?'Sample running…':'Run sample');button.type='button';button.disabled=!vm||sampleStarting||busy;button.dataset.sampleId=sample.id;
-  button.addEventListener('click',()=>startSample(sample.id));card.append(button);cards.append(card);
+ const samples=data.samples,vm=samples?.participant_vmid;
+ $('new-experiment').disabled=!samples?.items?.length;
+ $('samples-context').textContent=vm?`Participant VM ${vm} · ${samples.provider} / ${samples.model}.`:'Save a participant VM on Lab setup before running an experiment.';
+}
+function iconAction(label,icon,disabled,callback){const button=el('button',null,'icon-action');button.type='button';button.title=label;button.setAttribute('aria-label',label);const glyph=el('span',icon);glyph.setAttribute('aria-hidden','true');button.append(glyph);button.disabled=disabled;button.addEventListener('click',callback);return button;}
+function renderExperiments(data){
+ const runs=$('runs');runs.replaceChildren();$('no-runs').hidden=Boolean(data.runs.length);
+ const active=data.runs.some(runActive),items=data.samples?.items||[];
+ for(const run of [...data.runs].sort((a,b)=>(b.sample_progress?.started_at||'').localeCompare(a.sample_progress?.started_at||''))){
+  const id=run.output?.split('/').pop()||run.workflow_id||'',sample=items.find(s=>s.id===run.sample_id),live=runActive(run),ready=run.recorded_status==='ready',p=run.sample_progress,summary=run.evaluation?.summary;
+  const row=el('tr');row.dataset.runId=id;const title=el('td');title.append(el('strong',sample?.name||run.workflow_id||id),el('div',id,'small'));
+  const state=el('td');state.append(badge(run.recorded_status||'unavailable',run.recorded_status==='completed'?'good':['failed','cancelled','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));if(run.message)state.append(el('div',run.message,'small'));
+  const actions=el('td',null,'experiment-actions');
+  actions.append(iconAction(ready?'Run experiment':'Run again','▶',!data.owner||!sample||!data.samples.participant_vmid||active||sampleStarting,()=>experimentAction('run',id)));
+  actions.append(iconAction('Stop after current trial','■',!data.owner||!run.sample_id||!live||run.recorded_status==='stopping',()=>experimentAction('stop',id)));
+  actions.append(iconAction('View results','▤',!data.owner||ready,()=>showResults(id)));
+  actions.append(iconAction('Open progress','◴',!p||ready,()=>openProgress(id)));
+  row.append(title,state,el('td',p?`${p.finished_trials} / ${p.planned_trials}`:run.evaluation?`${summary.trials_observed} / ${run.evaluation.planned_trials}`:'—'),el('td',p?.verified_successes??summary?.verified_successes??'—'),actions);runs.append(row);
  }
+}
+function openProgress(id){selectedProgress=id;if(location.hash!=='#experiments')location.hash='experiments';if(snapshot)renderSampleActivity(snapshot);$('sample-activity-panel').scrollIntoView({block:'start'});}
+$('close-progress').addEventListener('click',()=>{selectedProgress=null;$('sample-activity-panel').hidden=true;});
+function describeSample(){const sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);$('experiment-description').textContent=sample?.description||'';$('experiment-budget').textContent=sample?`${sample.trials} trial${sample.trials===1?'':'s'} · up to ${sample.max_turns} turns and ${sample.wall_seconds}s per trial`:'';}
+$('new-experiment').addEventListener('click',()=>{if(isBusy())return;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));$('experiment-error').textContent='';describeSample();$('experiment-dialog').showModal();});
+$('experiment-sample').addEventListener('change',describeSample);
+$('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating)$('experiment-dialog').close();});
+$('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating)event.preventDefault();});
+$('experiment-form').addEventListener('submit',async event=>{
+ event.preventDefault();if(isBusy()||experimentCreating)return;
+ experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
+ try{await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:$('experiment-sample').value,request_id:crypto.randomUUID().replaceAll('-','')})});const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to create experiment');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ catch(error){$('experiment-error').textContent=error.message;}
+ finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
+});
+async function experimentAction(action,id){
+ if(isBusy()||sampleStarting)return;
+ if(action==='run'&&rolesDirty){$('sample-message').textContent='Save VM role changes on Lab setup before running.';return;}
+ sampleStarting=true;operation=action==='stop'?'Requesting experiment stop…':'Starting experiment…';syncBusy();
+ try{await finishDashboardRead();const response=await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Experiment action failed');selectedProgress=result.run_id;$('sample-message').textContent=action==='stop'?'Stop requested. The current trial will finish, then results will be collected and cleanup completed.':'Experiment started.';await refresh();if(location.hash==='#experiments')$('sample-activity-panel').scrollIntoView({block:'start'});}
+ catch(error){$('sample-message').textContent=error.message;}
+ finally{sampleStarting=false;operation=null;if(snapshot)renderExperiments(snapshot);syncBusy();schedulePoll();}
 }
 function renderSampleActivity(data){
  const recent=(data.runs||[]).filter(r=>r.sample_progress).sort((a,b)=>(b.sample_progress.started_at||'').localeCompare(a.sample_progress.started_at||''));
- const active=recent.filter(r=>r.sample_progress.active),shown=active.length?active:recent.slice(0,1);
+ const active=recent.filter(r=>r.sample_progress.active),shown=recent.filter(r=>r.output.split('/').pop()===selectedProgress);
  const global=$('sample-global-status');global.replaceChildren();global.hidden=!active.length;
- if(active.length){const run=active[0],p=run.sample_progress,link=el('a','View sample activity →');link.href='#experiments';global.append(document.createTextNode(`${p.name} · ${run.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
+ if(active.length){const run=active[0],p=run.sample_progress,link=el('a','View sample activity →');link.href='#experiments';link.addEventListener('click',()=>openProgress(run.output.split('/').pop()));global.append(document.createTextNode(`${p.name} · ${run.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
  const target=$('sample-activity');
  const expanded=new Set([...target.querySelectorAll('details[open]')].map(n=>n.dataset.run));
  target.replaceChildren();$('sample-activity-panel').hidden=!shown.length;
@@ -194,7 +224,7 @@ function renderSampleActivity(data){
   const p=run.sample_progress,trial=p.current_trial,transport=trial?.transport;
   const card=el('article',null,'panel sample-activity'),head=el('div',null,'result-actions');head.append(el('h3',p.name),badge(run.recorded_status,run.recorded_status==='completed'?'good':['failed','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));
   const button=el('button','Open results');button.type='button';button.addEventListener('click',()=>showResults(run.output.split('/').pop()));head.append(button);card.append(head);
-  card.append(el('p',run.recorded_status==='interrupted'?'Coordinator is no longer active. Inspect results before retrying.':transport?.activity||run.message||p.phase,'sample-stage'));
+  card.append(el('p',run.recorded_status==='interrupted'?'Coordinator is no longer active. Inspect results before retrying.':run.recorded_status==='stopping'?run.message:transport?.activity||run.message||p.phase,'sample-stage'));
   const progress=el('progress');progress.max=100;progress.value=p.percent??0;progress.setAttribute('aria-label',`${p.name} trials finished`);
   card.append(el('p',`${p.finished_trials} / ${p.planned_trials} trials finished · ${p.percent??0}% · ${p.verified_successes} verified successes · ${p.errors} trial errors`,'small'),progress);
   card.append(el('p','Percentage counts finished trials, including errors. Cleanup and finalization may still be pending at 100%.','small'));
@@ -211,20 +241,6 @@ function renderSampleActivity(data){
   if(run.error)card.append(el('p',run.error,'error'));
   const details=el('details'),summary=el('summary','Recent sample events');details.dataset.run=run.output;details.open=expanded.has(run.output);details.append(summary,el('pre',p.events.slice(-12).map(e=>`${e.at} · ${e.message}`).join('\n')));card.append(details);target.append(card);
  }
-}
-async function startSample(id){
- if(isBusy()||sampleStarting)return;
- if(rolesDirty){$('sample-message').textContent='Save your VM role changes before starting a sample.';return;}
- sampleStarting=true;operation='Submitting sample experiment…';syncBusy();if(snapshot)renderSamples(snapshot);$('sample-message').textContent='Starting sample…';
- try{
-  await finishDashboardRead();
-  const requestId=crypto.randomUUID().replaceAll('-','');
-  if(!csrfToken)await loadSession();
-  const response=await apiFetch('/api/samples/run',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:id,request_id:requestId})});
-  const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||`Request failed (HTTP ${response.status}); refresh to check your runs before retrying`);
-  $('sample-message').textContent=`Started ${data.run_id}. Follow progress in Sample activity.`;await refresh();if(location.hash==='#experiments'&&!$('sample-activity-panel').hidden)$('sample-activity-panel').scrollIntoView({block:'start'});
- }catch(error){$('sample-message').textContent=error.message;}
- finally{sampleStarting=false;operation=null;if(snapshot)renderSamples(snapshot);syncBusy();schedulePoll();}
 }
 function renderResultSummary(data){
  const target=$('result-summary');target.replaceChildren();
@@ -303,7 +319,7 @@ async function maintain(role,action,ref,confirmation=null){
 function schedulePoll(){
  clearTimeout(pollTimer);
  if(fetching||operation||redirecting)return;
- const active=Boolean(snapshot?.refreshing||waitingForMaintenance||(snapshot?.runs||[]).some(run=>run.coordinator_active||run.recorded_status==='queued'));
+ const active=Boolean(snapshot?.refreshing||waitingForMaintenance||(snapshot?.runs||[]).some(runActive));
  const minutes=Number($('refresh-period').value);
  if(!active&&!minutes)return;
  pollTimer=setTimeout(()=>{if(!fetching&&!operation&&!redirecting)refresh(!active,true);},active?5000:minutes*60000);

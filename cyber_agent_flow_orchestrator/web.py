@@ -236,6 +236,12 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(400, {'error': 'Supply a sample ID and request ID only'})
                         return
                     self.respond(202, dashboard.run_sample(auth.access(token, revalidate=False), data['sample_id'], data['request_id']))
+                elif path in ('/api/experiments/create', '/api/experiments/run', '/api/experiments/stop') and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                    action = path.rsplit('/', 1)[1]
+                    expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
+                    if set(data) != expected or any(not isinstance(v, str) for v in data.values()):
+                        raise SampleRequestError('Invalid experiment request fields')
+                    self.respond(202, dashboard.experiment(auth.access(token, revalidate=False), action, data))
                 elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
                     if (set(data) - {'process_confirmation'} != {'role', 'action', 'ref', 'request_id'}
                             or any(not isinstance(v, str) for v in data.values())):
