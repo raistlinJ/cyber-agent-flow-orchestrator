@@ -5,3 +5,11 @@ __pycache__/
 build/
 dist/
 runs/
+
+.local/
+*.key
+*.pem
+/web.yaml
+/workflow.yaml
+/runtime.yaml
+/catalogs/

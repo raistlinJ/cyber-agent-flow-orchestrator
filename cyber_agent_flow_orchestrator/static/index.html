@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CAF • Lab monitor</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><a class="brand" href="/" aria-label="Orchestrator home"><span class="brand-mark">C</span>CYBER AGENT FLOW<span class="brand-divider">/</span><span class="brand-sub">Orchestrator</span></a><div class="user-menu"><span class="readonly">LAB MONITOR</span><span id="username-label"></span><button id="sign-out" type="button">Sign out</button></div></header>
+<main>
+<div class="heading"><div><p class="eyebrow">LAB OPERATIONS</p><h1>Your lab, at a glance.</h1><p class="intro">Virtual machines, application processes, and experiment activity.</p></div><button id="refresh" type="button">↻ Refresh view</button></div>
+<div class="statusbar"><span><span id="pulse" class="dot muted"></span><strong id="connection">Connecting to monitor…</strong></span><span id="workflow"></span><span id="checked">Waiting for first check</span></div>
+<div id="notice" class="notice" role="status" hidden></div>
+<section id="role-panel" aria-labelledby="roles-title" hidden>
+<div class="section-title"><h2 id="roles-title">Choose your lab VMs</h2><span>Your available VMs on this Proxmox node</span></div>
+<form id="role-form" class="panel role-form">
+<label>ScenarioForge<select id="role-scenarioforge" name="scenarioforge"></select></label>
+<label>Cyber-agent-flow<select id="role-participant" name="participant"></select></label>
+<label>CoreVM<select id="role-core" name="core"></select></label>
+<button id="save-roles" type="submit">Save VM roles</button>
+<p id="roles-message" class="small" role="status">Select a VM for each role. These selections belong to your account.</p>
+</form></section>
+<section aria-labelledby="machines-title"><div class="section-title"><h2 id="machines-title">Lab machines</h2><span>Proxmox host · QEMU guest agent</span></div><div id="machines" class="machines"><div class="empty">Checking configured machines…</div></div></section>
+<section aria-labelledby="commands-title"><div class="section-title"><h2 id="commands-title">Workflow commands</h2><span id="command-count">0 recorded jobs</span></div><div class="panel"><div id="commands" class="command-list"><p class="empty">Waiting for the first observation.</p></div></div></section>
+<section aria-labelledby="runs-title"><div class="section-title"><h2 id="runs-title">Experiment runs</h2><span>Saved workflow journals</span></div><div class="panel scroll"><table><thead><tr><th>Run</th><th>Recorded status</th><th>Coordinator</th><th>Trials observed / planned</th><th>Verified successes</th></tr></thead><tbody id="runs"></tbody></table><p id="no-runs" class="empty">No visible runs yet. Start a workflow from the CLI.</p></div></section>
+<section id="result-panel" class="panel result-panel" hidden><button id="close-results" type="button">Close results</button><pre id="result-content"></pre></section>
+<footer><span>VM power, guest access, and application presence are checked separately.</span><span>Observation only · no start, stop, or deployment actions</span></footer>
+</main></body></html>

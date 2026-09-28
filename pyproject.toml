@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyber-agent-flow-orchestrator"
-version = "0.1.0"
+version = "0.6.0"
 readme = "README.md"
 description = "Host workflows for ScenarioForge and cyber-agent-flow-eval"
 requires-python = ">=3.10"
-dependencies = ["cyber-agent-flow-eval>=0.2.0", "PyYAML>=6,<7"]
+dependencies = ["cyber-agent-flow-eval>=0.4.0", "PyYAML>=6,<7", "aiohttp>=3.13,<4", "argon2-cffi>=25.1,<26", "cryptography>=46,<49"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
@@ -21,3 +21,15 @@ include = ["cyber_agent_flow_orchestrator*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+cyber_agent_flow_orchestrator = ["static/*.html", "static/*.css", "static/*.js", "defaults/*.yaml", "defaults/catalogs/*.json"]
+
+[tool.uv]
+default-groups = []
+
+[tool.uv.sources]
+cyber-agent-flow-eval = { path = "../cyber-agent-flow-eval", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=8", "playwright>=1.50"]

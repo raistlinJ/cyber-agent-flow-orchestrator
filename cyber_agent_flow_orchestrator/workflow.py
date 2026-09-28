@@ -1,6 +1,7 @@
 """Durable host workflow; private suite data never goes to guest workers."""
 from copy import deepcopy
 from pathlib import Path
+from datetime import datetime, timezone
 import hashlib
 import json
 import uuid
@@ -39,7 +40,8 @@ def export_marker(log):
 
 
 class Workflow:
-    def __init__(self, output, journal, agent=None):
+    def __init__(self, output, journal, agent=None, progress=print):
+        self.progress = progress
         self.output = Path(output)
         self.journal = journal
         self.agent = agent or ev.GuestAgent(journal['runtime']['backend'])
@@ -81,7 +83,8 @@ class Workflow:
             raise ValueError(f'{key} has an interrupted/failed attempt. Inspect its log and guest state; '
                              'use --resume --retry-steps only when rerunning that command is appropriate.')
         stage = self.journal['stages'].setdefault(key, {'attempts': []})
-        attempt = dict(vmid=command['vmid'], unit='caf-orchestrator-' + uuid.uuid4().hex, stopped=False)
+        attempt = dict(vmid=command['vmid'], unit='caf-orchestrator-' + uuid.uuid4().hex, stopped=False,
+                       argv=command['argv'], started_at=datetime.now(timezone.utc).isoformat())
         stage['attempts'].append(attempt)
         stage['status'] = 'running'
         log = self.output / 'logs' / f'{key}-{len(stage["attempts"]):04d}.log'
@@ -89,7 +92,8 @@ class Workflow:
         stage['log'] = str(log.relative_to(self.output))
         attempt.update(log_path='/tmp/' + attempt['unit'] + '.log', host_log=stage['log'])
         self.save()
-        print(f'Running {key} on VM {command["vmid"]}', flush=True)
+        if self.progress is not None:
+            self.progress(f'Running {key} on VM {command["vmid"]}')
         try:
             with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{command['vmid']}.lock"):
                 try:
@@ -142,7 +146,7 @@ class Workflow:
         self.save()
 
 
-def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, agent=None, evaluator=ev.run):
+def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, agent=None, evaluator=ev.run, progress=print):
     if (retry_steps or retry_failed) and not resume:
         raise ValueError('Retry options require --resume')
     cfg, runtime, files, identity = load(config)
@@ -161,7 +165,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                 raise ValueError('New workflow needs an empty output; resume needs workflow.json')
             journal = dict(version=1, workflow_hash=identity, workflow=cfg, runtime=runtime,
                            token=cfg['id'] + '-' + uuid.uuid4().hex[:12], stages={}, status='running')
-        wf = Workflow(output, journal, agent)
+        wf = Workflow(output, journal, agent, progress=progress)
         wf.save()
         wf.check_files()
         wf.recover_jobs()
@@ -204,7 +208,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
             journal['status'] = 'evaluating'
             wf.save()
             rows = evaluator(study, dataset, resume=(dataset / 'manifest.json').exists(),
-                             retry_failed=retry_failed, reservation=reservation)
+                             retry_failed=retry_failed, reservation=reservation, progress=progress)
             latest = {}
             for row in rows:
                 latest[row['trial_id']] = row

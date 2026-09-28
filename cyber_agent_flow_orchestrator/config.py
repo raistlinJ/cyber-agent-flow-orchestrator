@@ -21,7 +21,7 @@ def job(value, backend):
 def load(path):
     path = Path(path).resolve()
     cfg = yaml.load(path.read_text(), Loader=ev.StrictLoader)
-    ev.fields(cfg, ['version', 'id', 'runtime', 'scenarioforge', 'prepare', 'artifacts', 'collect', 'max_readiness_age_seconds'],
+    ev.fields(cfg, ['version', 'id', 'runtime', 'scenarioforge', 'prepare', 'artifacts', 'collect', 'max_readiness_age_seconds', 'monitoring'],
               ['version', 'id', 'runtime', 'scenarioforge'], 'workflow')
     if type(cfg['version']) is not int or cfg['version'] != 1:
         raise ValueError('Only workflow version 1 is supported')
@@ -32,6 +32,21 @@ def load(path):
     backend = runtime['backend']
     if 'app_vmid' not in backend:
         raise ValueError('Runtime backend.app_vmid is required')
+    monitoring = cfg.get('monitoring', {})
+    ev.fields(monitoring, ['core_vmid', 'scenarioforge_path', 'scenarioforge_service', 'caf_service', 'core_service', 'initial_roles'], [], 'monitoring')
+    if 'initial_roles' in monitoring:
+        from .workspaces import Workspace
+        Workspace.validate_roles(monitoring['initial_roles'])
+    if 'core_vmid' in monitoring:
+        ev.positive(monitoring['core_vmid'], 'monitoring.core_vmid')
+        if not 100 <= monitoring['core_vmid'] <= 999999999 or monitoring['core_vmid'] in (backend['app_vmid'], backend['participant_vmid']):
+            raise ValueError('monitoring.core_vmid must identify a distinct Proxmox VM')
+    if 'scenarioforge_path' in monitoring:
+        guest_path(monitoring['scenarioforge_path'], 'monitoring.scenarioforge_path')
+    import re
+    for key in ('scenarioforge_service', 'caf_service', 'core_service'):
+        if key in monitoring and (not isinstance(monitoring[key], str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.@-]*\.service', monitoring[key])):
+            raise ValueError('monitoring.' + key + ' must name a systemd .service unit')
     sf = cfg['scenarioforge']
     if not isinstance(sf, dict):
         raise ValueError('scenarioforge must be a mapping')

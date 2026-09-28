@@ -24,3 +24,7 @@ collect:
     catalog: /opt/experiments/catalogs/with-lab-helper.json
     # guidance_files: [/opt/experiments/guidance/lab-helper.md]
 max_readiness_age_seconds: 7200
+
+# Optional dashboard target; does not change ScenarioForge deployment settings.
+monitoring:
+  core_vmid: 9401

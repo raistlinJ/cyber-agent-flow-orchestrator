@@ -15,3 +15,7 @@ scenarioforge:
   split: development
   # tasks: /opt/scenarioforge/scenarios/reviewed-tasks.json
 max_readiness_age_seconds: 3600
+
+# Optional dashboard target; does not change ScenarioForge deployment settings.
+monitoring:
+  core_vmid: 9401

@@ -1,0 +1,19 @@
+# PVE group membership grants the application's orchestrator role.
+# Configure the PVE hostname to match its certificate; use no users_file here.
+version: 1
+listen: 127.0.0.1
+port: 8443
+public_url: https://localhost:8443
+# Created on first Proxmox installer run; preserved on reinstall.
+# Replace these files with your signed certificate chain and matching private key.
+certificate: /certs/cert.pem
+private_key: /certs/key.pem
+session_idle_seconds: 1800
+session_max_seconds: 7200
+
+auth:
+  provider: pve
+  url: https://pve.lab:8006
+  ca_file: /etc/pve/pve-root-ca.pem
+  required_group: caf-orchestrator
+  realms: [pve, pam]

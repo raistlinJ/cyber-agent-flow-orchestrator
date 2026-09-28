@@ -1,0 +1,76 @@
+/* Text-only rendering keeps guest command lines and journal labels inert. */
+const $ = id => document.getElementById(id);
+const el = (tag, text, cls) => {const node = document.createElement(tag); if (text != null) node.textContent = text; if (cls) node.className = cls; return node;};
+let snapshot = null, fetching = false, failed = false, rolesDirty = false, rolesSaving = false;
+function duration(seconds) {if (seconds == null || !Number.isFinite(Number(seconds))) return 'Unknown'; seconds=Math.max(0, Math.floor(seconds)); const h=Math.floor(seconds/3600), m=Math.floor(seconds%3600/60), s=seconds%60; return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;}
+function badge(text, tone='') {return el('span', text, 'badge '+tone);}
+function timer(seconds, observed, live) {const node=el('span',duration(seconds),'clock'); if(seconds!=null){node.dataset.seconds=seconds;node.dataset.observed=observed||'';node.dataset.live=live?'yes':'no';} return node;}
+function detail(list,label,value) {const row=el('div');row.append(el('dt',label),el('dd',value));list.append(row);}
+function render(data) {
+ snapshot=data; renderRoles(data); $('workflow').textContent=data.workflow_id||'';
+ const notice=$('notice'); const errors=(data.errors||[]).map(x=>x.error);notice.hidden=!errors.length;notice.textContent=errors.join(' · ');
+ const cards=$('machines');cards.replaceChildren();
+ if(!data.vms.length)cards.append(el('div','Checking configured machines…','empty'));
+ for(const vm of data.vms){
+  const card=el('article',null,'card'), top=el('div',null,'card-top'), label=el('div');
+  label.append(el('h3',vm.label),el('div',vm.vmid ? `VM ${vm.vmid}${vm.name?' · '+vm.name:''}`:'No VM selected','vm-id'));
+  const power=vm.qmp_status==='paused'?'paused':vm.power;
+  top.append(el('span',vm.role==='core'?'◈':'▤','vm-icon'),label,badge(power,power==='running'?'good':power==='unknown'?'warn':''));card.append(top);
+  const list=el('dl');detail(list,'Guest agent',vm.guest_access);if(vm.qmp_status && vm.qmp_status!==vm.power)detail(list,'Emulator state',vm.qmp_status);detail(list,'Application',vm.application_present==null?'Not checked':vm.application_present?'Present':'Not found at configured location');
+  detail(list,'Processes observed',vm.guest_access==='reachable'?String(vm.processes.length):'Unknown');
+  card.append(list);
+  for(const service of vm.services||[]){if(service.unit===vm.unit){card.append(el('p',`${service.unit} · ${service.error?'Check unavailable':service.LoadState==='not-found'?'not found':service.ActiveState+' / '+service.SubState}`,'small'));}}
+  if(vm.error||vm.guest_error)card.append(el('div',vm.error||vm.guest_error,'error'));
+  if(!vm.vmid)card.append(el('p',data.roles?'Choose this VM in your lab roles above.':'Set monitoring.core_vmid in your workflow YAML.','small'));
+  card.append(el('div','APPLICATION & TOOL PROCESSES','process-heading'));
+  const processes=el('div',null,'processes');
+  for(const proc of vm.processes){const box=el('div',null,'process'), meta=el('div',null,'process-top');meta.append(el('span',`PID ${proc.pid}`),timer(proc.elapsed_seconds,vm.observed_at||data.checked_at,true));box.append(meta,el('code',proc.command));processes.append(box);}
+  if(!vm.processes.length)processes.append(el('p',vm.guest_access==='reachable'?'No matching processes observed.':'Process state not available.','empty'));
+  if(vm.processes_truncated)processes.append(el('p','Showing the first 40 matching processes.','small'));
+  card.append(processes);cards.append(card);
+ }
+ const jobs=(data.vms||[]).flatMap(vm=>(vm.jobs||[]).map(job=>({...job,observed_at:vm.observed_at||data.checked_at})));
+ $('command-count').textContent=`${jobs.length} recorded job${jobs.length===1?'':'s'}`; const commands=$('commands');commands.replaceChildren();
+ for(const job of jobs){const row=el('article',null,'command'),head=el('div',null,'command-head');head.append(badge(job.live_state,job.live_state==='running'?'good':job.live_state==='unconfirmed'?'warn':''),el('span',`${job.run} / ${job.stage}`,'command-title'),timer(job.live_state==='finished'?null:job.elapsed_seconds,job.observed_at,job.live_state==='running'));row.append(head,el('code',job.command),el('div',`VM ${job.vmid} · ${job.unit} · ${job.live_state==='finished'?'No longer running; journal awaits cleanup':job.elapsed_source||'Last recorded job; live state unconfirmed'}`,'small'));commands.append(row);}
+ if(!jobs.length)commands.append(el('p','No unfinished workflow commands recorded. Applications may still be running above.','empty'));
+ const runs=$('runs');runs.replaceChildren(); $('no-runs').hidden=Boolean(data.runs.length);
+ for(const run of data.runs){const row=el('tr'),evaluation=run.evaluation,summary=evaluation?.summary;const title=el('td'); if(data.owner){const id=run.output.split('/').pop();const button=el('button',run.workflow_id||id);button.type='button';button.addEventListener('click',()=>showResults(id));title.append(button);}else{title.textContent=run.workflow_id||run.output;}row.append(title);const state=el('td');state.append(badge(run.recorded_status||'read error',run.recorded_status==='completed'?'good':run.error?'warn':''));row.append(state,el('td',run.coordinator_active?'Active':'Idle'),el('td',evaluation?`${summary.trials_observed} / ${evaluation.planned_trials}`:'Not started'),el('td',summary?String(summary.verified_successes):'—'));if(run.error)row.title=run.error;runs.append(row);}
+ tick();
+}
+function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,(snapshot.poll_seconds||10)*3));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&!stale&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale?'Last observation; refresh required':'Elapsed time since process start';}}
+async function refresh(){if(fetching)return;fetching=true;try{const response=await fetch('/api/status',{cache:'no-store'});if(response.status===401){clearPrivateView();location.replace('/login');return;}if(!response.ok)throw Error(`HTTP ${response.status}`);const data=await response.json();failed=false;render(data);}catch(error){failed=true;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Unable to verify dashboard access: ${error.message}. Refresh to try again.`;tick();}finally{fetching=false;}}
+$('refresh').addEventListener('click',refresh);setInterval(refresh,3000);setInterval(tick,1000);refresh();
+
+let csrfToken=null;
+async function loadSession(){const response=await fetch('/api/session',{cache:'no-store'});if(response.status===401){location.replace('/login');return;}if(!response.ok)throw Error('Session unavailable');const session=await response.json();csrfToken=session.csrf;$('username-label').textContent=session.username;}
+$('sign-out').addEventListener('click',async()=>{try{if(!csrfToken)await loadSession();const response=await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});if(response.ok||response.status===401){location.replace('/login');return;}throw Error('Sign out failed');}catch(error){$('notice').hidden=false;$('notice').textContent='Unable to sign out. Please try again.';}});
+loadSession().catch(()=>{$('notice').hidden=false;$('notice').textContent='Unable to load your session. Refresh to try again.';});
+
+function clearPrivateView(){snapshot=null;$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function renderRoles(data){
+ const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
+ for(const role of ['scenarioforge','participant','core']){
+  const select=$('role-'+role),wanted=rolesDirty?select.value:String(data.roles[role]??'');
+  select.replaceChildren(new Option('Not selected',''));
+  for(const vm of data.available_vms||[])select.add(new Option(`VM ${vm.vmid} · ${vm.name||'Unnamed'} · ${vm.status||'unknown'}${vm.pool?' · '+vm.pool:''}`,String(vm.vmid)));
+  select.value=[...select.options].some(o=>o.value===wanted)?wanted:'';
+ }
+ if(!rolesDirty&&!rolesSaving)$('roles-message').textContent=data.available_vms.length?'Selections are private to your account. Changes apply to subsequent runs.':'No available QEMU VMs on this node. Check your PVE VM/pool permissions.';
+}
+for(const role of ['scenarioforge','participant','core'])$('role-'+role).addEventListener('change',()=>{rolesDirty=true;});
+$('role-form').addEventListener('submit',async event=>{
+ event.preventDefault();if(rolesSaving)return;rolesSaving=true;$('save-roles').disabled=true;
+ try{
+  if(!csrfToken)await loadSession();
+  const roles=Object.fromEntries(['scenarioforge','participant','core'].map(role=>[role,$('role-'+role).value?Number($('role-'+role).value):null]));
+  const response=await fetch('/api/roles',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(roles)});
+  const body=await response.json();if(!response.ok)throw Error(body.error||'Unable to save roles');
+  rolesDirty=false;$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh();
+ }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;$('save-roles').disabled=false;}
+});
+async function showResults(id){
+ $('result-panel').hidden=false;$('result-content').textContent='Loading results…';
+ try{const response=await fetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});if(!response.ok)throw Error('Results unavailable or access not granted');$('result-content').textContent=JSON.stringify(await response.json(),null,2);}
+ catch(error){$('result-content').textContent=error.message;}
+}
+$('close-results').addEventListener('click',()=>{$('result-panel').hidden=true;$('result-content').textContent='';});
