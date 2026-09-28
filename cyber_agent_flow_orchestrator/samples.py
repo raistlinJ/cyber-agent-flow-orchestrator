@@ -124,6 +124,15 @@ class SampleManager:
         self.stopping.set()
         self.pool.shutdown(wait=False, cancel_futures=False)
 
+    def selected_runtime(self, workspace, vmid):
+        from .model_config import apply_model
+        runtime = apply_model(workspace, self.runtime, vmid)
+        runtime['backend'].update(participant_vmid=vmid, before_trial=[])
+        runtime['backend'].pop('app_vmid', None)
+        # Samples use participant loopback, without real-scenario reset hooks.
+        runtime['execution']['target_lock'] = f'/var/lock/caf-sample-participant-{vmid}.lock'
+        return runtime
+
     def create(self, access, sample_id, request_id):
         if sample_id not in self.enabled or not isinstance(request_id, str) or not re.fullmatch('[0-9a-f]{32}', request_id):
             raise SampleRequestError('Choose an enabled sample and a valid request ID')
@@ -138,11 +147,17 @@ class SampleManager:
                     raise SampleRequestError('Request ID already belongs to another experiment')
                 return {'run_id':run_id, 'status':record['status']}
             else:
+                vmid = workspace.roles()['participant']
+                runtime = None
+                if vmid is not None:
+                    access.require_vm(vmid)
+                    runtime = self.selected_runtime(workspace, vmid)
                 private_directory(output)
                 ev.write_json(output / 'workflow.json', dict(version=1, sample_id=sample_id, status='ready',
                     phase='ready', created_at=now(), updated_at=now(), stages={}, events=[],
                     workflow={'id':'sample-' + sample_id}, workflow_hash=ev.digest({'sample':sample_id}),
-                    message='Ready to run with your saved participant VM and model settings'))
+                    runtime=runtime, message='Ready to run with saved experiment settings' if runtime else
+                    'Select a participant VM before running; settings will be saved on first run'))
         return {'run_id':run_id, 'status':'ready'}
 
     def run_saved(self, access, run_id, request_id):
@@ -161,7 +176,7 @@ class SampleManager:
         if reporting.active(output / '.workflow.lock') or record['status'] in ('queued', 'preparing', 'evaluating'):
             raise SampleBusy('This experiment is already active; refresh its progress')
         return self.submit(access, record['sample_id'], run_id.removeprefix('sample-') if record['status'] == 'ready' else request_id,
-                           launch_request_id=request_id)
+                           launch_request_id=request_id, saved_runtime=record.get('runtime'))
 
     def stop(self, access, run_id):
         access.current()
@@ -179,7 +194,7 @@ class SampleManager:
         ev.write_json(output / 'stop-request.json', {'requested_at':now()})
         return {'run_id':run_id, 'status':'stopping'}
 
-    def submit(self, access, sample_id, request_id, *, launch_request_id=None):
+    def submit(self, access, sample_id, request_id, *, launch_request_id=None, saved_runtime=None):
         if sample_id not in self.enabled:
             raise SampleRequestError('This sample is not enabled')
         if not isinstance(request_id, str) or not re.fullmatch(r'[0-9a-f]{32}', request_id):
@@ -195,16 +210,12 @@ class SampleManager:
                     raise SampleRequestError('Request ID already belongs to another sample')
                 if previous['status'] != 'ready':
                     return {'run_id': run_id, 'status': previous['status']}
-        vmid = workspace.roles()['participant']
+                saved_runtime = previous.get('runtime') or saved_runtime
+        vmid = saved_runtime['backend']['participant_vmid'] if saved_runtime else workspace.roles()['participant']
         if vmid is None:
             raise SampleRequestError('Save a Cyber-agent-flow VM selection first')
         access.require_vm(vmid)
-        from .model_config import apply_model
-        runtime = apply_model(workspace, self.runtime, vmid)
-        runtime['backend'].update(participant_vmid=vmid, before_trial=[])
-        runtime['backend'].pop('app_vmid', None)
-        # These samples use only participant loopback; no real-scenario reset hooks.
-        runtime['execution']['target_lock'] = f'/var/lock/caf-sample-participant-{vmid}.lock'
+        runtime = deepcopy(saved_runtime) if saved_runtime else self.selected_runtime(workspace, vmid)
         journal = dict(version=1, sample_id=sample_id, created_at=now(), status='queued',
                        workflow={'id': 'sample-' + sample_id, 'prepare': [], 'artifacts': []},
                        runtime=runtime, stages={}, workflow_hash=ev.digest({'sample': sample_id, 'runtime': runtime}),

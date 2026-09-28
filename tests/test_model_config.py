@@ -42,7 +42,7 @@ def test_guest_caf_preserves_config_keys_secrets_and_snapshots(guest_root):
     data = ev.read_json(path)
     assert data['api_key'] == 'original-secret' and data['network_policy']['disallow'] == ['10.1.2.3'] and data['server_command'] == 'unchanged'
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    use = guest.dispatch(dict(action='use', role='participant', root=str(guest_root), revision=updated['revision']))
+    use = updated  # Save also prepares the immutable credential snapshot.
     assert 'original-secret' not in json.dumps(use)
     snapshot = Path(use['environment_file'])
     assert snapshot.read_text() == 'CAF_EVAL_MODEL_API_KEY="original-secret"\n'
@@ -100,14 +100,14 @@ def test_host_import_is_owned_vm_bound_and_changes_sample_runtime(pve, lab, tmp_
     ev.write_json(guest_root / 'configs/cli.json', dict(settings(), api_key='guest-only-key'))
     result = manager.exchange(user, dict(role='participant', action='read'))
     with pytest.raises(AccessDenied):
-        manager.exchange(user, dict(role='participant', action='use', token=result['token']))
+        manager.exchange(user, dict(role='participant', action='save', token=result['token'], settings=settings()))
     pve[0]['groups'] += ',caf-maintainers'
     pve[0]['resources']['bob@pve'] = [vm(9403)]
     bob = access(pve, 'bob@pve')
     Workspace(manager.root, bob.username).save_roles(dict(participant=9403, scenarioforge=None, core=None), bob)
     with pytest.raises(ModelConfigError, match='draft changed'):
-        manager.exchange(bob, dict(role='participant', action='use', token=result['token']))
-    selected = manager.exchange(user, dict(role='participant', action='use', token=result['token']))
+        manager.exchange(bob, dict(role='participant', action='save', token=result['token'], settings=settings()))
+    selected = manager.exchange(user, dict(role='participant', action='save', token=result['token'], settings=settings()))
     assert calls[-1] == 'write'  # Secret-bearing operations use the existing stdin path.
     current = apply_model(workspace, runtime, 9403)
     assert current['model']['provider'] == 'openai' and current['model']['name'] == 'lab-model'
@@ -152,4 +152,37 @@ def test_new_samples_freeze_selected_model_settings(pve, lab, tmp_path, monkeypa
         assert saved['runtime']['backend']['environment_file'] == '/var/lib/caf-model-config/fixed-test.env'
         inputs = next((output / 'evaluation').glob('trials/*/attempt-*/input.json'))
         assert ev.read_json(inputs)['model'] == model
+    finally: manager.close()
+
+
+def test_saved_experiment_rerun_preserves_model_credentials_and_vm(pve, lab, tmp_path, monkeypatch):
+    from test_samples import setup_sample
+    manager, user, workspace, _, _, _ = setup_sample(pve, lab, tmp_path, monkeypatch)
+    model = dict(provider='openai', url='https://models.example/v1', name='saved-model', ssl_verify=True, api_key_env='CAF_EVAL_MODEL_API_KEY')
+    preference = workspace.path / 'model-9403.json'
+    ev.write_json(preference, dict(model=model, engine_path=manager.runtime['engine']['path'], environment_file='/var/lib/caf-model-config/original.env'))
+    try:
+        draft = manager.create(user, 'smoke', 'a' * 32)
+        original = ev.read_json(workspace.run_path(draft['run_id']) / 'workflow.json')['runtime']
+        # Changing defaults after Create must not affect either the first run or reruns.
+        ev.write_json(preference, dict(model=dict(model, name='new-default'), engine_path=manager.runtime['engine']['path'], environment_file='/var/lib/caf-model-config/new.env'))
+        first = manager.run_saved(user, draft['run_id'], 'b' * 32)
+        manager.jobs[user.username].result(timeout=15)
+        first_path = workspace.run_path(first['run_id']) / 'workflow.json'
+        assert ev.read_json(first_path)['runtime'] == original
+        pve[0]['resources']['operator@pve'] = [vm(9403), vm(9402)]
+        workspace.save_roles(dict(participant=9402, scenarioforge=None, core=None), user)
+        again = manager.run_saved(user, first['run_id'], 'c' * 32)
+        manager.jobs[user.username].result(timeout=15)
+        assert again['run_id'] != first['run_id']
+        saved = ev.read_json(workspace.run_path(again['run_id']) / 'workflow.json')
+        assert saved['runtime'] == original
+        assert saved['runtime']['model'] == model
+        from cyber_agent_flow_orchestrator import service
+        assert service.status(workspace.run_path(again['run_id']))['saved_settings'] == dict(participant_vmid=9403, provider='openai', model='saved-model')
+        assert saved['runtime']['backend']['participant_vmid'] == 9403
+        assert saved['runtime']['backend']['environment_file'] == '/var/lib/caf-model-config/original.env'
+        pve[0]['resources']['operator@pve'] = [vm(9402)]
+        with pytest.raises(AccessDenied):
+            manager.run_saved(user, first['run_id'], 'd' * 32)
     finally: manager.close()

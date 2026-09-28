@@ -61,8 +61,8 @@
 <p id="experiment-description"></p><p id="experiment-budget" class="small"></p>
 <p id="experiment-model-context" class="small"></p>
 </form>
-<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">Application model settings</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the saved VM configuration, edit model connection settings, then save it back. Use for experiments applies the saved CAF settings to future runs for your account and participant VM. Browser-saved application settings may override these files.</p><div id="model-config-cards" class="sample-cards"></div></section>
-<div class="experiment-dialog-footer"><p class="small">Creating an experiment does not start it. Run uses your saved participant VM and model settings.</p>
+<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">Application model settings</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the current Cyber-agent-flow configuration, edit the model settings, then Save. Save copies settings to the VM and selects them for new experiments. Each experiment keeps its saved settings for reruns.</p><div id="model-config-cards" class="sample-cards"></div></section>
+<div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>
 <p id="experiment-error" class="error" role="status"></p><button id="create-experiment" type="submit" form="experiment-form">Create experiment</button></div>
 </fieldset></dialog>
 <details id="debug-console" class="debug-console" open><summary>Troubleshooting console <span class="small">Commands, sample events and transfer progress</span></summary>

@@ -164,15 +164,15 @@ let modelDrafts={};
 function renderModelConfigs(data){
  $('model-config-panel').hidden=!data.owner;
  if(!data.owner)return;
- for(const role of ['participant','scenarioforge']){
+ for(const role of ['participant']){
   const vmid=data.roles?.[role];let card=$('model-config-'+role);
   if(card&&card.dataset.vmid===String(vmid??'')){syncModelControls(role);continue;}
   delete modelDrafts[role];
   const form=el('form',null,'card model-config');form.id='model-config-'+role;form.dataset.vmid=vmid??'';
-  form.append(el('h3',role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',vmid?`VM ${vmid} · ${role==='participant'?'configs/cli.json':'.scenarioforge.env'}`:'Select and save a VM first.','small'));
+  form.append(el('h3','Cyber-agent-flow'),el('p',vmid?`VM ${vmid} · configs/cli.json`:'Select and save a VM first.','small'));
   const fields=[['provider','Provider'],['url','API base URL'],['model','Model name']];
   for(const [key,title] of fields){const label=el('label',title);const input=el(key==='provider'?'select':'input');input.id=`model-${role}-${key}`;input.name=key;input.required=true;
-   if(key==='provider')for(const value of role==='participant'?['openai','litellm','ollama_direct','claude']:['litellm','openai','ollama'])input.add(new Option(value==='openai'?'OpenAI / compatible':value,value));
+   if(key==='provider')for(const value of ['openai','litellm','ollama_direct','claude'])input.add(new Option(value==='openai'?'OpenAI / compatible':value,value));
    else{input.type=key==='url'?'url':'text';input.maxLength=2048;input.placeholder=key==='url'?'https://model-server.example/v1':'Model ID from your server';}
    label.append(input);form.append(label);
   }
@@ -181,7 +181,7 @@ function renderModelConfigs(data){
   const clearLabel=el('label','Clear stored API key '),clear=el('input');clear.type='checkbox';clear.id=`model-${role}-clear`;clearLabel.append(clear);form.append(clearLabel);
   const message=el('p','Pull the configuration before editing.','small');message.id=`model-${role}-message`;message.setAttribute('role','status');form.append(message);
   const buttons=el('div',null,'model-buttons');
-  for(const [action,label] of [['read','Pull from VM'],['save','Save to VM'],...(role==='participant'?[['use','Use for experiments']]:[])]){const button=el('button',label);button.type=action==='save'?'submit':'button';button.id=`model-${role}-${action}`;if(action!=='save')button.addEventListener('click',()=>modelConfigAction(role,action));buttons.append(button);}form.append(buttons);
+  for(const [action,label] of [['read','Pull from VM'],['save','Save']]){const button=el('button',label);button.type=action==='save'?'submit':'button';button.id=`model-${role}-${action}`;if(action!=='save')button.addEventListener('click',()=>modelConfigAction(role,action));buttons.append(button);}form.append(buttons);
   form.addEventListener('input',()=>{if(modelDrafts[role])modelDrafts[role].dirty=true;syncModelControls(role);});
   form.addEventListener('submit',event=>{event.preventDefault();modelConfigAction(role,'save');});
   if(card)card.replaceWith(form);else $('model-config-cards').append(form);syncModelControls(role);
@@ -192,8 +192,7 @@ function syncModelControls(role){
  for(const input of form.querySelectorAll('input,select'))input.disabled=!draft||!canWrite;
  $(`model-${role}-read`).disabled=!available;
  $(`model-${role}-save`).disabled=!draft||!canWrite;
- if(role==='participant')$(`model-${role}-use`).disabled=!draft||draft.dirty||!canWrite;
- if(!canWrite)$(`model-${role}-message`).textContent=`Saving and using model settings requires the ${snapshot?.updates?.group||'caf-maintainers'} group and enabled application maintenance.`;
+ if(!canWrite)$(`model-${role}-message`).textContent=`Saving model settings requires the ${snapshot?.updates?.group||'caf-maintainers'} group and enabled application maintenance.`;
 }
 async function modelConfigAction(role,action){
  if(isBusy())return;
@@ -204,14 +203,14 @@ async function modelConfigAction(role,action){
   body.settings={provider:$(`model-${role}-provider`).value,url:$(`model-${role}-url`).value.trim(),model:$(`model-${role}-model`).value.trim(),ssl_verify:$(`model-${role}-ssl`).checked};
   const key=$(`model-${role}-key`);if($(`model-${role}-clear`).checked)body.api_key='';else if(key.value)body.api_key=key.value;key.value='';
  }
- operation=action==='read'?'Reading model configuration from the VM…':action==='save'?'Saving model configuration in the VM…':'Saving model settings for future experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
+ operation=action==='read'?'Reading model configuration from the VM…':'Saving model settings to the VM and experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
  try{
   await finishDashboardRead();const response=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(body)});delete body.api_key;
   const data=await response.json();if(!response.ok)throw Error(data.error||'Model configuration operation failed');
-  modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:false};
+  modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:action==='read'};
   for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=data.settings[key];$(`model-${role}-ssl`).checked=data.settings.ssl_verify;$(`model-${role}-key`).value='';$(`model-${role}-clear`).checked=false;
-  $(`model-${role}-message`).textContent=(action==='use'?'Future experiments will use these settings. ':action==='save'?'Saved in the VM. Start a new app session to load file changes. ':data.exists?'Configuration loaded. ':'No configuration file yet; saving will create it. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.backup?'Backup: '+data.backup:'');
-  if(action==='use')await refresh();
+  $(`model-${role}-message`).textContent=(action==='save'?'Saved. Settings copied to the VM and selected for new experiments. ':data.exists?'Configuration loaded. Save to select these settings for new experiments. ':'No configuration file yet; saving will create it. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.backup?'Backup: '+data.backup:'');
+  if(action==='save'){$('experiment-error').textContent='';await refresh();}
  }catch(error){$(`model-${role}-message`).textContent=error.message;}
  finally{delete body.api_key;operation=null;syncModelControls(role);syncBusy();schedulePoll();}
 }
@@ -244,7 +243,7 @@ function renderSamples(data){
  const samples=data.samples,vm=samples?.participant_vmid;
  $('new-experiment').disabled=!samples?.items?.length;
  $('experiment-model-context').textContent=vm?`Current experiment model: ${samples.provider} / ${samples.model} · Participant VM ${vm}. Pull from VM below to read its saved application settings.`:'Select and save a participant VM on Lab setup to enable Pull from VM and run experiments.';
- $('samples-context').textContent=vm?`Participant VM ${vm} · ${samples.provider} / ${samples.model}.`:'Save a participant VM on Lab setup before running an experiment.';
+ $('samples-context').textContent=vm?`New experiment defaults: Participant VM ${vm} · ${samples.provider} / ${samples.model}. Saved experiments retain their own settings.`:'Save a participant VM on Lab setup before running an experiment.';
 }
 function iconAction(label,icon,disabled,callback){const button=el('button',null,'icon-action');button.type='button';button.title=label;button.setAttribute('aria-label',label);const glyph=el('span',icon);glyph.setAttribute('aria-hidden','true');button.append(glyph);button.disabled=disabled;button.addEventListener('click',callback);return button;}
 function renderExperiments(data){
@@ -253,9 +252,10 @@ function renderExperiments(data){
  for(const run of [...data.runs].sort((a,b)=>(b.sample_progress?.started_at||'').localeCompare(a.sample_progress?.started_at||''))){
   const id=run.output?.split('/').pop()||run.workflow_id||'',sample=items.find(s=>s.id===run.sample_id),live=runActive(run),ready=run.recorded_status==='ready',p=run.sample_progress,summary=run.evaluation?.summary;
   const row=el('tr');row.dataset.runId=id;const title=el('td');title.append(el('strong',sample?.name||run.workflow_id||id),el('div',id,'small'));
+  if(run.saved_settings){const settings=run.saved_settings;title.append(el('div',`VM ${settings.participant_vmid} · ${settings.provider} / ${settings.model}`,'small'));}
   const state=el('td');state.append(badge(run.recorded_status||'unavailable',run.recorded_status==='completed'?'good':['failed','cancelled','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));if(run.message)state.append(el('div',run.message,'small'));
   const actions=el('td',null,'experiment-actions');
-  actions.append(iconAction(ready?'Run experiment':'Run again','▶',!data.owner||!sample||!data.samples.participant_vmid||active||sampleStarting,()=>experimentAction('run',id)));
+  actions.append(iconAction(ready?'Run experiment':'Run again','▶',!data.owner||!sample||!(run.saved_settings?.participant_vmid||data.samples.participant_vmid)||active||sampleStarting,()=>experimentAction('run',id)));
   actions.append(iconAction('Stop after current trial','■',!data.owner||!run.sample_id||!live||run.recorded_status==='stopping',()=>experimentAction('stop',id)));
   actions.append(iconAction('View results','▤',!data.owner||ready,()=>showResults(id)));
   actions.append(iconAction('Open progress','◴',!p||ready,()=>openProgress(id)));
@@ -271,6 +271,7 @@ $('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating&&!op
 $('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating||operation)event.preventDefault();});
 $('experiment-form').addEventListener('submit',async event=>{
  event.preventDefault();if(isBusy()||experimentCreating)return;
+ if(modelDrafts.participant?.dirty){$('experiment-error').textContent='Save the model settings before creating this experiment.';return;}
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
  try{await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:$('experiment-sample').value,request_id:crypto.randomUUID().replaceAll('-','')})});const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to create experiment');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){$('experiment-error').textContent=error.message;}

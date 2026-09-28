@@ -156,9 +156,13 @@ Session/access errors clear the private console view along with the dashboard.
 
 Choose **New**, select either bundled sample, and press **Create experiment**.
 The modal shows its description, trial budgets, current experiment model and
-application model settings. **Pull from VM** reads the selected application's
-current saved configuration; edit/save it and choose **Use for experiments** for
-CAF when needed. **Create experiment** saves a **Ready** row without starting it.
+CAF model settings. **Pull from VM** reads its current saved configuration;
+**Save** copies your settings to the VM and selects them for new experiments.
+**Create experiment** saves a **Ready** row with its participant VM and model
+configuration, without starting it. Reruns retain that configuration and credential
+reference instead of adopting newer defaults. If no VM is selected when creating
+the row, its configuration is captured on first run. Legacy rows without a saved
+runtime also capture settings on their next run.
 
 ![New experiment modal with simulated lab data](images/new-experiment.png)
 
@@ -297,32 +301,34 @@ alter any real scenario's preparation/reset steps.
 ### Application model settings
 
 After saving VM roles on Lab setup, open **Experiments → New**. Its
-**Application model settings** section has an editor for each selected application:
+**Application model settings** section currently contains only Cyber-agent-flow:
 
-- **Pull from VM** reads the saved model connection fields through QEMU guest exec.
-  CAF uses `<engine.path>/configs/cli.json`; ScenarioForge uses
-  `<monitoring.scenarioforge_path>/.scenarioforge.env` (or its configured repository
-  directory). Missing files can be created by saving.
-- **Save to VM** updates provider, base URL, model, TLS verification and optionally
-  the API key. It preserves unrelated JSON values and environment-file lines,
-  including network scope, tools and CoreVM settings. Each existing file gets a
-  private `.caf-model-<id>.bak` backup before an atomic replacement. A changed
-  file or VM selection invalidates the loaded draft; pull again to continue.
-- **Use for experiments** on the CAF card adopts the saved values for this account
-  and participant VM. Save edits first. This updates future samples and `user-run`
-  materialization; already-created run configurations remain frozen. Standalone
-  evaluator and unscoped orchestrator CLI runs still use their explicit YAML.
+- **Pull from VM** reads model connection fields from
+  `<engine.path>/configs/cli.json` through QEMU guest exec. A missing file can be
+  created by saving.
+- **Save** updates provider, base URL, model, TLS verification and optionally the
+  API key in the VM, and adopts them for this account and participant VM in one
+  action. It preserves unrelated JSON values, including network scope and tools.
+  An existing file gets a private `.caf-model-<id>.bak` backup before atomic
+  replacement. A changed file or VM selection invalidates the loaded draft;
+  pull again to continue.
+- **Create experiment** captures the selected VM and runtime, including model
+  settings and the guest credential reference. Both its first run and subsequent
+  reruns use this snapshot. Reruns still require current access to the saved VM;
+  changing the Lab setup selection does not silently move an old experiment.
+  Create a new experiment to use changed settings. Existing `user-run`
+  materialization uses saved defaults; standalone evaluator and unscoped CLI runs
+  continue to use explicit YAML.
 
-For an OpenAI-compatible server, CAF's provider is `openai`; the base URL generally
-includes `/v1`, and the model name must match the server. ScenarioForge supports
-`litellm` and `openai` for compatible APIs. The URL is used inside the VM, so a host
-or remote model service needs an address reachable from that VM.
+For an OpenAI-compatible server, select **OpenAI / compatible** (`openai`). The
+base URL generally includes `/v1`, and the model name must match the server.
+The URL is used inside the participant VM and must be reachable from there.
 
 Pulling shows only whether a file contains an API key. Enter a replacement to
 change it, leave the field empty to preserve it, or explicitly select **Clear
 stored API key**. Keys travel through `qm --pass-stdin` and are not returned in the
 browser response, host preference files, or troubleshooting console. The application
-file and backups are mode 0600 with the original owner. When adopting CAF settings
+file and backups are mode 0600 with the original owner. When saving CAF settings
 with a stored key, the guest creates a separate immutable mode-0600 EnvironmentFile
 under `/var/lib/caf-model-config/`; the host stores only its path and variable name.
 These snapshots are retained so old runs can continue to reference them.
@@ -333,14 +339,13 @@ only in an interactive terminal is not inherited by the systemd evaluation worke
 Either configure that guest EnvironmentFile or save a replacement key through this
 editor. Clearing the file's key does not clear an independently configured environment.
 
-Reading requires access to the selected VM. Saving/adopting additionally requires
+Reading requires access to the selected VM. Saving additionally requires
 the configured application maintenance group (default `caf-maintainers`); `updates:
 false` disables writes. Mutations refuse while the VM's evaluator lock or guest
 maintenance lock is held. No application restart is automatic: open a new CAF
 session or restart a long-running app as appropriate. CAF browser-saved settings,
-ScenarioForge browser state, explicit CLI flags, process environment, custom
-`CORETG_ENV_FILE` paths and ScenarioForge's encrypted per-user credential store are
-not imported or overwritten by this file editor and can take precedence.
+explicit CLI flags and process environment are not imported or overwritten by
+this file editor and can take precedence for interactive app sessions.
 
 In PVE mode, **Choose your lab VMs** lists only your available QEMU VMs on the
 current node. Save your ScenarioForge, participant and CoreVM selections; they

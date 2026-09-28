@@ -144,7 +144,7 @@ def dispatch(data):
         result = dict(settings=values, revision=identity, path=str(path), exists=path.exists(), api_key_set=bool(secret),
                       api_key_env=variable,
                       backup=str(backup) if backup else None)
-        if op == 'use':
+        if role == 'participant' and op in ('save', 'use'):
             validate(role, values)
             # A unique, immutable secret snapshot keeps subsequent trials reproducible.
             # Environment-only keys remain supplied by the host runtime's guest environment_file.

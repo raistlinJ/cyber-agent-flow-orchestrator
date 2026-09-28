@@ -85,7 +85,7 @@ class ModelConfigs:
                 access.current()
                 token = uuid.uuid4().hex
                 private_file(draft_path, json.dumps(dict(token=token, vmid=vmid, root=definition['root'], revision=result['revision'])).encode(), replace=draft_path.exists())
-                if action == 'use':
+                if role == 'participant' and action in ('save', 'use'):
                     values = validate(role, result['settings'])
                     model = dict(provider=values['provider'], url=values['url'], name=values['model'], ssl_verify=values['ssl_verify'], api_key_env=result['api_key_env'])
                     saved = dict(model=model, engine_path=self.runtime['engine']['path'], environment_file=result.get('environment_file'))

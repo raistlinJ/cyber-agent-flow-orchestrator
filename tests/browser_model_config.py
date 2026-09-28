@@ -65,20 +65,17 @@ def main():
                     expect(page.locator('#model-participant-key')).to_have_value('')
                     assert 'never-show-this' not in page.locator('body').inner_text()
                     page.locator('#model-participant-model').fill('updated-model')
-                    expect(page.locator('#model-participant-use')).to_be_disabled()
+                    expect(page.locator('#model-participant-use')).to_have_count(0)
+                    expect(page.locator('#model-config-scenarioforge')).to_have_count(0)
+                    page.get_by_role('button',name='Create experiment',exact=True).click()
+                    expect(page.locator('#experiment-error')).to_contain_text('Save the model settings')
                     page.locator('#model-participant-key').fill('replacement-key')
                     page.locator('#model-participant-save').click()
-                    expect(page.locator('#model-participant-message')).to_contain_text('Saved in the VM',timeout=30000)
+                    expect(page.locator('#model-participant-message')).to_contain_text('Saved. Settings copied to the VM',timeout=30000)
+                    expect(page.locator('#experiment-error')).to_have_text('')
                     assert ev.read_json(roots[9403]/'configs/cli.json')['api_key']=='replacement-key'
                     assert ev.read_json(roots[9403]/'configs/cli.json')['network_policy']['disallow']==['10.0.0.1']
                     expect(page.locator('#model-participant-key')).to_have_value('')
-                    page.locator('#model-participant-use').click()
-                    expect(page.locator('#model-participant-message')).to_contain_text('Future experiments will use',timeout=30000)
-                    page.locator('#model-scenarioforge-read').click()
-                    expect(page.locator('#model-scenarioforge-model')).to_have_value('scenario-model',timeout=30000)
-                    page.locator('#model-scenarioforge-model').fill('new-scenario-model');page.locator('#model-scenarioforge-save').click()
-                    expect(page.locator('#model-scenarioforge-message')).to_contain_text('Saved in the VM',timeout=30000)
-                    assert 'CORE_HOST=10.0.0.2' in (roots[9402]/'.scenarioforge.env').read_text()
                     page.locator('#model-config-panel').scroll_into_view_if_needed()
                     page.screenshot(path=str(destination/'model-settings.png'))
                     expect(page.locator('#experiment-model-context')).to_contain_text('openai / updated-model')
@@ -89,6 +86,7 @@ def main():
                     page.get_by_role('button',name='Create experiment',exact=True).click()
                     page.get_by_role('button',name='Run experiment',exact=True).click()
                     expect(page.locator('#runs')).to_contain_text('completed',timeout=30000)
+                    expect(page.locator('#runs')).to_contain_text('VM 9403 · openai / updated-model')
                     workspace=Workspace(root/'runs','operator@pve')
                     run=next(workspace.runs.glob('sample-*/workflow.json'))
                     assert ev.read_json(run)['runtime']['model']['name']=='updated-model'
@@ -103,7 +101,7 @@ def main():
                     assert not errors,errors
                     browser.close()
             finally: dashboard.close()
-    print('PASS: read/save both guest configs, hidden keys, model adoption, reload and sample execution, mobile layout')
+    print('PASS: CAF-only editor, combined Save, unsaved guard, hidden keys, reload and sample execution, mobile layout')
     print(destination)
 
 if __name__=='__main__': main()

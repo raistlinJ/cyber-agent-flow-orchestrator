@@ -52,11 +52,17 @@ def status(output):
         from .sample_progress import build
         sample_progress = build(root, data, evaluation_status, state, coordinator_active)
         if evaluation_status: evaluation_status.pop('attempts', None)
+    runtime = data.get('runtime') or {}
+    saved_settings = None
+    if data.get('sample_id') and runtime:
+        saved_settings = {'participant_vmid': runtime['backend']['participant_vmid'],
+                          'provider': runtime['model']['provider'], 'model': runtime['model']['name']}
     return {'output': str(root), 'workflow_id': data['workflow']['id'],
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,
             'coordinator_active': coordinator_active,
             'sample_id': data.get('sample_id'), 'message': 'Stop requested; finishing the current trial, collecting results and cleaning up' if stopping else data.get('message'),
             'sample_progress': sample_progress,
+            'saved_settings': saved_settings,
             'error': data.get('error') if data['status'] in ('failed', 'interrupted') else None,
             'stages': {key: {'status': stage['status'], 'attempt_count': len(stage.get('attempts', [])),
                              'error': stage.get('error') if stage['status'] == 'failed' else None, 'log': stage.get('log')}

@@ -380,12 +380,16 @@ See [setup, source configuration, CLI and recovery](docs/application-updates.md)
 Open **Experiments → New → Application model settings**, then choose **Pull from VM** for
 Cyber-agent-flow. The editor reads `configs/cli.json` from the selected participant.
 For an OpenAI-compatible endpoint, select **OpenAI / compatible**, enter the API
-base URL (usually `https://your-server/v1`) and its exact model name, then **Save
-to VM** and **Use for experiments**. If the pulled settings are already correct,
-choose **Use for experiments** directly. Future samples and authenticated
-`user-run` workflows for your account and that VM use the selected model.
+base URL (usually `https://your-server/v1`) and its exact model name, then **Save**.
+Save copies the settings to the participant VM and selects them for new experiments
+and authenticated `user-run` workflows for your account and that VM. Use Save even
+when the pulled values are already correct.
 
-The same modal can read/save ScenarioForge's model settings in `.scenarioforge.env`.
+**Create experiment** captures the selected participant VM and model settings.
+Rerunning that experiment reuses its captured settings and credential reference,
+even after you change defaults for a new experiment. Existing results are preserved.
+ScenarioForge model settings are not included in this modal.
+
 Other config fields are preserved. API keys are never shown when pulled; a blank
 replacement field preserves the key. Saving requires the configured maintenance
 group (default `caf-maintainers`). See [model configuration and credential handling](docs/webui.md#application-model-settings).
