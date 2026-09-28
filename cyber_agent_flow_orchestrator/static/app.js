@@ -135,7 +135,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;selectedResults=null;resultsVersion=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').close();$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;selectedResults=null;resultsVersion=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
@@ -172,11 +172,15 @@ async function loadResults(id){
 }
 async function showResults(id){
  if(isBusy())return;operation='Loading experiment results…';syncBusy();
- try{await finishDashboardRead();selectedResults=id;resultsVersion=null;$('result-panel').hidden=false;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren();$('download-dataset').hidden=true;await loadResults(id);}
- catch(error){if(!redirecting){$('result-panel').hidden=false;$('result-summary').replaceChildren(el('p',error.message,'error'));}}
- finally{operation=null;syncBusy();schedulePoll();if(location.hash==='#experiments')$('result-panel').scrollIntoView({block:'start'});}
+ selectedResults=id;resultsVersion=null;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren(el('p','Loading saved results…','small'));$('download-dataset').hidden=true;$('result-panel').showModal();
+ try{await finishDashboardRead();if(selectedResults===id)await loadResults(id);}
+ catch(error){if(!redirecting&&selectedResults===id)$('result-summary').replaceChildren(el('p',error.message,'error'));}
+ finally{operation=null;syncBusy();schedulePoll();}
 }
-$('close-results').addEventListener('click',()=>{selectedResults=null;resultsVersion=null;$('result-panel').hidden=true;$('result-content').textContent='';});
+function clearResults(){selectedResults=null;resultsVersion=null;$('result-content').textContent='';$('result-summary').replaceChildren();$('download-dataset').hidden=true;}
+$('close-results').addEventListener('click',()=>{clearResults();$('result-panel').close();});
+$('result-panel').addEventListener('cancel',clearResults);
+$('result-panel').addEventListener('close',()=>{if(!$('result-panel').open)clearResults();});
 
 function runActive(run){return run.coordinator_active||run.sample_progress?.active||['queued','stopping'].includes(run.recorded_status);}
 function renderSamples(data){

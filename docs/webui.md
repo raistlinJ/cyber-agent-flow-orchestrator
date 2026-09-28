@@ -17,7 +17,7 @@ The screenshot uses simulated data for browser verification, not a live Proxmox 
   and application maintenance.
 - **Experiments** (`/#experiments`): an experiment table with Run, Stop, View results
   and Open progress icons. **New** opens a sample configuration modal. Condition
-  summaries and CSV downloads are available in results; full JSON is under
+  summaries and CSV downloads are available in the results modal; full JSON is under
   **Full result details**.
 - **Applications** (`/#applications`): version checks, Update with process-stop
   confirmation, rollback and the latest maintenance outcome. Expand **Maintenance
@@ -197,9 +197,15 @@ automatically. **Close progress** hides the panel without stopping execution.
   and when that stage was last recorded, when supported by the host evaluator.
 - Per-trial outcomes and scores, recent timestamped events, and a link to results.
 - Recorded trial errors appear directly below the trial table and in results.
-  An open results panel refreshes from saved host files when the run status or
+  An open results modal refreshes from saved host files when the run status or
   trial summary changes, including its final outcome. Viewing results does not
   fetch outputs from the participant VM.
+
+**View results** opens a modal over the current page, with condition summaries,
+trial errors, CSV download and expandable full JSON. Close it with **Close results**
+or Escape to return to the experiment table. Closing the modal does not stop the run.
+
+![Results modal with simulated trial results](images/results-modal.png)
 
 A compact status notice follows the active sample across all pages. The full
 panel and console update with the existing five-second progress reads, including

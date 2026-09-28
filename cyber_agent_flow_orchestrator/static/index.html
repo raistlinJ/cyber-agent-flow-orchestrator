@@ -27,7 +27,7 @@
 <p id="sample-message" class="small" role="status" aria-live="polite"></p>
 <div class="panel scroll"><table class="experiments-table"><thead><tr><th>Experiment</th><th>Status</th><th>Trials finished</th><th>Verified successes</th><th>Actions</th></tr></thead><tbody id="runs"></tbody></table><p id="no-runs" class="empty">No experiments yet. Choose New to configure one of the included samples.</p></div></section>
 <section id="sample-activity-panel" aria-labelledby="sample-activity-title" hidden><div class="section-title"><h2 id="sample-activity-title">Experiment progress</h2><button id="close-progress" type="button">Close progress</button></div><div id="sample-activity"></div></section>
-<section id="result-panel" class="panel result-panel" hidden><div class="result-actions"><h2>Run results</h2><a id="download-dataset" hidden>Download CSV</a><button id="close-results" type="button">Close results</button></div><div id="result-summary"></div><details class="result-details"><summary>Full result details</summary><pre id="result-content"></pre></details></section>
+
 </div>
 <div data-page="applications" hidden><p id="applications-unavailable" class="empty" hidden>Application maintenance is unavailable for this server configuration.</p><section id="updates-panel" aria-labelledby="updates-title" hidden>
 <div class="section-title"><h2 id="updates-title">Application versions</h2><span>Host downloads · guest-agent transfer</span></div>
@@ -50,6 +50,7 @@
 </section></div>
 <footer><span>VM power, guest access, and application presence are checked separately.</span><span>Included samples run in your selected participant VM</span></footer>
 </main>
+<dialog id="result-panel" class="result-panel" aria-labelledby="results-title"><div class="result-actions"><h2 id="results-title">Run results</h2><a id="download-dataset" hidden>Download CSV</a><button id="close-results" type="button">Close results</button></div><div id="result-summary"></div><details class="result-details"><summary>Full result details</summary><pre id="result-content"></pre></details></dialog>
 <dialog id="experiment-dialog" aria-labelledby="experiment-dialog-title">
 <form id="experiment-form"><div class="result-actions"><h2 id="experiment-dialog-title">New experiment</h2><button id="cancel-experiment" type="button" aria-label="Close new experiment">×</button></div>
 <p class="small">Choose a sample now. More experiment settings will be available here later.</p>

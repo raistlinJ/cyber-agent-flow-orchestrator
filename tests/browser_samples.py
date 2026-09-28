@@ -92,6 +92,10 @@ def main():
                     smoke.get_by_role('button', name='View results', exact=True).click()
                     expect(page.locator('#result-summary')).to_contain_text('no-tools')
                     expect(page.locator('#result-summary')).to_contain_text('1 / 1')
+                    expect(page.get_by_role('dialog', name='Run results')).to_be_visible()
+                    assert page.locator('#result-panel').evaluate('(n)=>n.matches(":modal")')
+                    page.keyboard.press('Escape')
+                    expect(page.locator('#result-panel')).to_be_hidden()
                     helper=create('tools-vs-helper','Tools vs. added helper')
                     helper.get_by_role('button', name='Run experiment', exact=True).click()
                     row=helper
@@ -122,6 +126,7 @@ def main():
                     expect(page.locator('#result-summary')).not_to_contain_text('evaluating')
                     expect(page.locator('#sample-global-status')).to_be_hidden()
                     expect(row).to_contain_text('6 / 6')
+                    page.get_by_role('button', name='Close results', exact=True).click()
                     page.locator('#close-progress').click()
                     page.evaluate('scrollTo(0, 0)')
                     page.screenshot(path=str(destination / 'experiment-table.png'))
@@ -141,6 +146,8 @@ def main():
                     expect(page.locator('#result-summary')).to_contain_text('added-helper')
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     page.screenshot(path=str(destination / 'samples-mobile.png'), full_page=True)
+                    assert page.locator('#result-panel').evaluate('(n)=>n.getBoundingClientRect().width<=innerWidth && n.getBoundingClientRect().height<=innerHeight')
+                    page.get_by_role('button', name='Close results', exact=True).click()
                     trials.clear();release.clear()
                     row=page.locator('#runs tr').filter(has_text='Tools vs. added helper').first
                     row.get_by_role('button', name='Run again', exact=True).click()
@@ -154,6 +161,7 @@ def main():
                     expect(cancelled).to_contain_text('3 / 6')
                     cancelled.get_by_role('button', name='View results', exact=True).click()
                     expect(page.locator('#result-summary')).to_contain_text('cancelled')
+                    page.get_by_role('button', name='Close results', exact=True).click()
                     release.clear();fail_next.set()
                     smoke=page.locator('#runs tr').filter(has_text='Model smoke test').first
                     smoke.get_by_role('button', name='Run again', exact=True).click()
