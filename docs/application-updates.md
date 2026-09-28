@@ -70,6 +70,16 @@ role changes affect subsequent requests. Up to two maintenance jobs can run per
 server, with at most one per account. The browser accepts neither guest commands,
 repository URLs, filesystem paths nor VM IDs for these operations.
 
+Each application card explains why its controls are disabled. **Update permission
+required** means the signed-in PVE account needs the configured maintenance group
+(default `caf-maintainers`), even if it already has orchestration access. Missing
+evaluator controls indicate an incompatible CAF installation; that finding does
+not grant update permission. After an administrator adds the group, the next
+dashboard poll picks up the membership without restarting the orchestrator.
+**Please wait** shows the current request or VM/maintenance status while controls
+are temporarily locked. If no VM is saved for the application, the card asks you
+to select one.
+
 ## Paths, sources and disabling the feature
 
 CAF uses the runtime YAML's `engine.path` and `engine.python`. ScenarioForge uses

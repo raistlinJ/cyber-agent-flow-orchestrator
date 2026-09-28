@@ -59,12 +59,29 @@ def main():
                     button = lambda role, action: page.locator(f'[data-update-role="{role}"][data-update-action="{action}"]')
                     expect(button('participant', 'inspect')).to_be_enabled(timeout=30000)
                     expect(button('participant', 'update')).to_be_disabled()
+                    status = page.locator('#update-status-participant')
+                    expect(status).to_contain_text('Update permission required:')
+                    expect(status).to_contain_text('caf-maintainers PVE group')
+                    assert button('participant', 'update').evaluate("node => getComputedStyle(node).cursor") == 'not-allowed'
+                    page.screenshot(path=str(destination / 'updates-permission.png'), full_page=True)
+                    pending = []
+                    page.route('**/api/applications', lambda route: pending.append(route))
                     button('participant', 'inspect').click()
+                    expect(status).to_contain_text('Please wait: Submitting application maintenance')
+                    expect(button('participant', 'inspect')).to_be_disabled()
+                    page.wait_for_timeout(100)
+                    assert len(pending) == 1
+                    pending.pop().continue_()
+                    page.unroute('**/api/applications')
                     expect(page.locator('#update-cards')).to_contain_text('Missing evaluator controls', timeout=30000)
+                    expect(button('participant', 'inspect')).to_be_enabled(timeout=30000)
+                    expect(button('participant', 'update')).to_be_disabled()
+                    expect(status).to_contain_text('Update permission required:')
                     pve[0]['groups'] += ',caf-maintainers'
                     page.locator('#refresh').click()
                     for role in ('participant', 'scenarioforge'):
                         expect(button(role, 'update')).to_be_enabled(timeout=30000)
+                        expect(page.locator(f'#update-status-{role}')).to_have_text('Ready to check, update or roll back this application.')
                         button(role, 'update').click()
                         expect(page.locator('#update-cards')).to_contain_text('bbbbbbbbbbbb', timeout=30000)
                         # Wait for this specific application to finish before rollback.
@@ -82,7 +99,7 @@ def main():
                     browser.close()
             finally:
                 dashboard.close()
-    print('PASS: version check, maintenance permission, both application updates/rollback, responsive UI')
+    print('PASS: version check, explicit permission/loading reasons, permission refresh, both application updates/rollback, responsive UI')
     print(destination)
 
 

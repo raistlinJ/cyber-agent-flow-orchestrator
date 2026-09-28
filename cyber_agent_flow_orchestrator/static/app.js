@@ -19,6 +19,7 @@ function syncBusy(){
  else{label='Dashboard ready · 100%';percent=100;}
  if(percent==null)bar.removeAttribute('value');else bar.value=percent;
  $('loading-label').textContent=label;$('loading-elapsed').textContent=busy?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
+ syncUpdateControls(busy?label:null);
 }
 function sessionExpired(){redirecting=true;clearPrivateView();syncBusy();location.replace('/login');throw Error('Your session expired. Sign in again.');}
 async function loadSession(){
@@ -155,10 +156,26 @@ function renderResultSummary(data){
 }
 
 const maintenanceRefs={};
+function syncUpdateControls(loadingLabel){
+ const updates=snapshot?.updates;if(!updates)return;
+ for(const app of updates.applications){
+  const status=$(`update-status-${app.role}`);if(!status)continue;
+  const permission=updates.can_update?'':`Update permission required: your signed-in account must belong to the ${updates.group} PVE group. Orchestration access alone does not grant update access.`;
+  const selection=app.vmid?'':'Select and save a VM for this application above.';
+  const waiting=loadingLabel?`Please wait: ${loadingLabel}`:'';
+  status.textContent=[permission,selection,waiting].filter(Boolean).join(' ')||'Ready to check, update or roll back this application.';
+  status.classList.toggle('error',Boolean(permission));
+  const input=document.querySelector(`[data-update-ref="${app.role}"]`);
+  input.disabled=Boolean(permission||selection||waiting);
+  for(const button of document.querySelectorAll(`[data-update-role="${app.role}"]`)){
+   const reason=[button.dataset.updateAction==='inspect'?'':permission,selection,waiting].filter(Boolean).join(' ');
+   button.disabled=Boolean(reason);button.title=reason;
+  }
+ }
+}
 function renderUpdates(data){
  const updates=data.updates;$('updates-panel').hidden=!updates;if(!updates)return;
  $('updates-context').textContent=updates.can_update?'Updates preserve local data and reuse installed dependencies. The application must be idle; its configured service is restarted when necessary.':`Check installed versions here. Updates and rollback require membership in the ${updates.group} PVE group.`;
- const busy=maintenanceStarting||(updates.jobs||[]).some(job=>['queued','running'].includes(job.status));
  const cards=$('update-cards');
  // Preserve input focus while the dashboard polls.
  if(!document.activeElement?.matches('#update-cards input[data-update-ref]')){
@@ -167,9 +184,10 @@ function renderUpdates(data){
    const card=el('article',null,'card update-card');card.append(el('h3',app.role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',app.vmid?`VM ${app.vmid}`:'Choose and save a VM above','small'));
    const known=(updates.jobs||[]).find(job=>job.role===app.role&&job.vmid===app.vmid&&job.installed);
    if(known){const info=known.installed;card.append(el('p',`Last checked: ${info.revision.slice(0,12)}${info.modified?' · local edits':''}`,'small'));if(info.missing_controls?.length)card.append(el('p',`Missing evaluator controls: ${info.missing_controls.join(', ')}`,'error'));}
-   const label=el('label','Branch, tag or commit','small'),input=el('input');input.type='text';input.value=maintenanceRefs[app.role]||app.ref;input.dataset.updateRef=app.role;input.disabled=!updates.can_update||busy;input.addEventListener('input',()=>{maintenanceRefs[app.role]=input.value;});label.append(input);card.append(label);
+   const label=el('label','Branch, tag or commit','small'),input=el('input');input.type='text';input.value=maintenanceRefs[app.role]||app.ref;input.dataset.updateRef=app.role;input.addEventListener('input',()=>{maintenanceRefs[app.role]=input.value;});label.append(input);card.append(label);
+   const status=el('p',null,'small');status.id=`update-status-${app.role}`;card.append(status);input.setAttribute('aria-describedby',status.id);
    const actions=el('div',null,'update-actions');
-   for(const [action,title] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.disabled=!app.vmid||busy||(action!=='inspect'&&!updates.can_update);button.addEventListener('click',()=>maintain(app.role,action,input.value));actions.append(button);}card.append(actions);cards.append(card);
+   for(const [action,title] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>maintain(app.role,action,input.value));actions.append(button);}card.append(actions);cards.append(card);
   }
  }
  const jobs=$('update-jobs');jobs.replaceChildren();
