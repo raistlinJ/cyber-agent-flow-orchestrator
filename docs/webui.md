@@ -107,8 +107,10 @@ average KiB/s and the last acknowledgement time. This percentage describes the
 file transfer, not the whole update. Reaching 100% written is followed by a guest
 size/SHA-256 check, then application validation and activation. No new acknowledgement
 means the current command or authorization check may still be waiting; consult the
-timestamped console. The existing 16 KiB chunks and per-command permission checks
-can require many round trips. This adds visibility, not a faster transfer protocol.
+timestamped console. Evaluator 0.4.2+ uses 512 KiB stdin upload blocks and synchronous
+write acknowledgements to reduce round trips. Downloads still use 16 KiB blocks.
+Fresh per-dispatch permission checks and full-file checksum verification remain;
+see [upload performance and installation](application-updates.md#upload-performance).
 
 Maintenance traces are private to the signed-in account, persisted as
 `RUNS_ROOT/_users/<owner-hash>/updates/<job-id>/console.json`. Each file keeps the

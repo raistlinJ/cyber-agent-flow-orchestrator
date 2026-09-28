@@ -14,8 +14,8 @@ def check_evaluator():
                             'resolve_backend', 'resolve', 'source_identity', 'lease', 'run',
                             'digest', 'fields', 'identifier', 'positive', 'read_json', 'write_json'),
             'reporting': ('active', 'status', 'results', 'logs', 'tail'),
-            'proxmox': ('authorized_operations',),
-            'guest_agent': ('MAINTENANCE_LOCK', 'MAINTENANCE_PENDING'),
+            'proxmox': ('authorized_operations', 'UPLOAD_CHUNK'),
+            'guest_agent': ('MAINTENANCE_LOCK', 'MAINTENANCE_PENDING', 'RPC_INPUT_LIMIT'),
         }
         for name, symbols in modules.items():
             module = importlib.import_module('cyber_agent_flow_eval.' + name)
@@ -25,8 +25,8 @@ def check_evaluator():
     except ImportError as exc:
         raise RuntimeError(
             f'Incompatible evaluator at {location}: {exc}. '
-            'This orchestrator requires the evaluator host API (0.4.1+), including integration.py, '
-            'reporting.py, Proxmox authorization and guest maintenance locking. Update the evaluator checkout '
+            'This orchestrator requires the evaluator host API (0.4.2+), including integration.py, '
+            'reporting.py, Proxmox authorization, guest maintenance locking and stdin uploads. Update the evaluator checkout '
             'to a revision containing those files, then rerun python3 install.py. '
             'uv sync alone cannot restore missing source files.'
         ) from exc

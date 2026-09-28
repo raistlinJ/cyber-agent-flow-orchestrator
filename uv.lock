@@ -427,7 +427,7 @@ wheels = [
 
 [[package]]
 name = "cyber-agent-flow-eval"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "../cyber-agent-flow-eval" }
 dependencies = [
     { name = "psutil" },

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from cyber_agent_flow_eval.proxmox import GuestAgent, CHUNK
+from cyber_agent_flow_eval.proxmox import GuestAgent, UPLOAD_CHUNK as CHUNK
 from cyber_agent_flow_orchestrator.diagnostics import Trace, clean
 
 
@@ -15,9 +15,9 @@ def test_transfer_trace_tracks_acknowledgements_and_verification_without_payload
     observed = []
 
     class Agent(GuestAgent):
-        def qm(self, args):
+        def qm(self, args, *, input_data=None):
             if args[1] == 'exec':
-                data = json.loads(args[-1])
+                data = json.loads(input_data if input_data is not None else args[-1])
                 observed.append((data['op'], trace.transfer['sent_bytes']))
                 if data['op'] == 'write':
                     self.output = {'written': len(base64.b64decode(data['content']))}
@@ -27,7 +27,7 @@ def test_transfer_trace_tracks_acknowledgements_and_verification_without_payload
             return {'exited': True, 'exitcode': 0, 'out-data': json.dumps(self.output)}
 
     agent = trace.instrument(Agent(dict(command_timeout=5, poll_seconds=.01,
-                                       guest_python='/usr/bin/python3', max_transfer_bytes=100000)))
+                                       guest_python='/usr/bin/python3', max_transfer_bytes=2000000)))
     agent.script = 'PRIVATE_HELPER_SCRIPT'
     if mismatch:
         with pytest.raises(ValueError, match='checksum mismatch'):
@@ -48,7 +48,7 @@ def test_transfer_trace_tracks_acknowledgements_and_verification_without_payload
 def test_command_failures_are_recorded_without_argv_payloads(tmp_path):
     trace = Trace(tmp_path)
     class Agent(GuestAgent):
-        def qm(self, args):
+        def qm(self, args, *, input_data=None):
             raise ValueError('Secret full argv and payload PRIVATE_BUNDLE')
     agent = trace.instrument(Agent(dict(command_timeout=1, guest_python='python3')))
     with pytest.raises(ValueError):

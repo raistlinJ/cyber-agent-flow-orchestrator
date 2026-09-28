@@ -15,11 +15,12 @@ runs `pip install`, `uv sync`, or network Git fetches inside the VM.
 
 ## Update the host installation
 
-This feature requires evaluator **0.4.1+**, whose guest launch guard coordinates
-updates with experiment startup. From your existing host checkouts:
+This feature requires evaluator **0.4.2+**, including the guest launch guard and
+optimized stdin uploads. Update both host checkouts after active work finishes:
 
 ```bash
 cd /root/cyber-agent-flow-eval
+git switch main
 git pull --ff-only
 cd /root/cyber-agent-flow-orchestrator
 git pull --ff-only
@@ -30,6 +31,31 @@ Restart the orchestrator using your existing command/configuration. Existing
 certificates, settings, VM selections and results are preserved. Other host
 orchestrators or standalone evaluators controlling these VMs must also use the
 updated evaluator for the guest-side launch guard to apply.
+
+### Upload performance
+
+Uploads use 512 KiB blocks, sent as base64 JSON through `qm guest exec --pass-stdin`.
+The complete request remains below Proxmox's documented 1 MiB stdin limit and
+file contents are kept out of command-line arguments. Small writes use synchronous
+execution with a bounded wait; if Proxmox returns a PID, the host polls that PID
+without replaying the write. Downloads keep 16 KiB blocks because QGA captures
+their file contents in its bounded output buffer.
+
+A 3,213,005-byte source bundle now needs seven writes rather than 197. With
+immediately completed writes, the upload plus final checksum uses nine `qm`
+invocations instead of at least 396. Maintenance authorization shares one
+identity/inventory/VM check sequence, reducing PVE requests from seven to five
+per dispatch. Checks remain fresh before every chunk and external status poll;
+there is no permission cache across commands. An already authorized chunk can
+finish if permissions change mid-command, but the next dispatch is denied.
+
+The guest still verifies the complete file size and SHA-256 before activation.
+Progress remains acknowledged bytes. These are tested command-count reductions,
+not a timing guarantee on a real Proxmox host. No guest network or persistent
+transfer service is required. The new helper is sent from the host evaluator;
+updating a full evaluator installation inside the VM is unnecessary.
+
+Protocol reference: [Proxmox `qm guest exec` options](https://github.com/proxmox/pve-docs/blob/master/generated/qm.1-synopsis.adoc).
 
 ## Give an operator maintenance access
 

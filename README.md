@@ -140,7 +140,7 @@ ssh -N -L 8443:127.0.0.1:8443 root@YOUR_PROXMOX_HOST
 Open **https://localhost:8443**. Trust the generated certificate or replace the
 `/certs` pair with a signed chain/key and restart. Keep the key mode `0600`.
 
-This requires the updated evaluator (0.4.1+) from this workspace. Neither project
+This requires the updated evaluator (0.4.2+) from this workspace. Neither project
 needs to be installed as a coordinator inside a guest. ScenarioForge belongs in
 app-vm; CAF and its environment belong in participant-vm. Guests need Python 3,
 enabled QEMU guest agents, and Linux/systemd 250+ for transient commands. The

@@ -50,7 +50,7 @@ class PVEAccess:
     def require_vm(self, vmid):
         self.require_vms([vmid])
 
-    def require_vms(self, vmids):
+    def require_vms(self, vmids, *, required_group=None):
         """Check one role selection against fresh identity/inventory and each ACL.
 
         Nothing is cached across calls or guest commands. Sharing the inventory
@@ -71,12 +71,18 @@ class PVEAccess:
             # Values are propagation bits: 0 still means the privilege is granted.
             if not isinstance(data, dict) or not isinstance(data.get(path), dict) or 'VM.Audit' not in data[path]:
                 raise AccessDenied('VM access not granted')
+        if required_group:
+            users = self.provider.request('GET', '/access/users?full=1', ticket=record['credential'])
+            if not isinstance(users, list) or not any(
+                    isinstance(user, dict) and user.get('userid') == self.username
+                    and isinstance(user.get('groups'), str) and required_group in user['groups'].split(',') for user in users):
+                raise AccessDenied('Application updates require the ' + required_group + ' PVE group')
         self.current()
 
-    def qm(self, args):
+    def qm(self, args, *, required_group=None):
         if len(args) < 3 or args[0] != 'guest' or args[1] not in ('exec', 'exec-status'):
             raise AccessDenied('Unsupported host operation')
         value = str(args[2])
         if not value.isascii() or not value.isdecimal():
             raise AccessDenied('Invalid VM identity')
-        self.require_vm(int(value))
+        self.require_vms([int(value)], required_group=required_group)

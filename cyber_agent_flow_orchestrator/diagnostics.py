@@ -54,7 +54,7 @@ class Trace:
     def instrument(self, agent):
         call, qm, put = agent.call, agent.qm, agent.put
 
-        def traced_qm(args):
+        def traced_qm(args, **options):
             # qm guest exec contains an entire Python script and an RPC JSON
             # argument. Only show the command prefix; the operation is logged below.
             visible = list(map(str, args))
@@ -63,7 +63,7 @@ class Trace:
             self.emit('command', redact(['qm', *visible]) + ' (includes authorization check)', force=True)
             start = time.monotonic()
             try:
-                result = qm(args)
+                result = qm(args, **options)  # stdin payload is deliberately never logged.
                 safe = {k: result[k] for k in ('pid', 'exited', 'exitcode', 'out-truncated', 'err-truncated') if k in result}
                 self.emit('response', f'qm completed in {time.monotonic()-start:.2f}s: {json.dumps(safe)}')
                 return result

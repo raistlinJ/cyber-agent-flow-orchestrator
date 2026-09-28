@@ -190,9 +190,7 @@ class UpdateManager:
             start = time.monotonic()
             trace.emit('authorization', 'Checking current PVE group and VM permissions', force=True)
             try:
-                if job['action'] != 'inspect':
-                    require_maintenance(access, self.config['group'])
-                access.qm(args)
+                access.qm(args, required_group=self.config['group'] if job['action'] != 'inspect' else None)
             except Exception:
                 trace.emit('error', f'PVE authorization failed after {time.monotonic()-start:.2f}s', force=True)
                 raise

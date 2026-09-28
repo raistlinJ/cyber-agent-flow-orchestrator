@@ -293,3 +293,27 @@ def test_observation_progress_counts_completed_authorized_vms_and_forced_refresh
     finally:
         for event in release.values(): event.set()
         dash.close()
+
+
+def test_maintenance_dispatch_combines_fresh_checks_and_observes_revocation(pve, monkeypatch):
+    state = pve[0]
+    state['groups'] += ',caf-maintainers'
+    state['resources']['operator@pve'] = [vm(101)]
+    user = access(pve)
+    state['requests'].clear()
+    user.qm(['guest', 'exec', 101], required_group='caf-maintainers')
+    assert len(state['requests']) == 5  # Previously two overlapping sequences totaling seven.
+    assert [r[0] for r in state['requests']].count('/api2/json/cluster/resources?type=vm') == 1
+    state['groups'] = 'caf-orchestration'
+    with pytest.raises(AccessDenied, match='caf-maintainers'):
+        user.qm(['guest', 'exec-status', 101, 12], required_group='caf-maintainers')
+    state['groups'] += ',caf-maintainers'
+    original = user.provider.request
+    def revoke_during_check(method, path, **kwargs):
+        response = original(method, path, **kwargs)
+        if path.endswith('/vms/101'):
+            state['groups'] = 'caf-orchestration'
+        return response
+    monkeypatch.setattr(user.provider, 'request', revoke_during_check)
+    with pytest.raises(AccessDenied, match='caf-maintainers'):
+        user.qm(['guest', 'exec', 101], required_group='caf-maintainers')
