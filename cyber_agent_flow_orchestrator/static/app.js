@@ -263,6 +263,15 @@ function renderResultSummary(data){
  if(workflow.error)target.append(el('p',workflow.error,'error'));
  if(!data.evaluation){target.append(el('p','Trial results will appear here once evaluation starts.','small'));return;}
  for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
+ for(const item of data.failure_diagnostics||[]){
+  const section=el('section',null,'failure-diagnostics');section.append(el('h3',`${item.trial_id} · attempt ${item.attempt} · Failure details`));
+  section.append(el('p','Saved on the orchestrator host. Log tails are limited to 80 lines; common credential fields are redacted.','small'));
+  for(const record of item.model_errors||[])section.append(el('p',record.error,'error'));
+  for(const log of item.logs||[]){const details=el('details');details.append(el('summary','Collected worker log'),el('div',log.path,'small'),el('pre',log.text||'(Log is empty)'));section.append(details);}
+  for(const note of item.notes||[])section.append(el('p',note,'small'));
+  target.append(section);
+ }
+
  const groups=Object.entries(data.evaluation.conditions||{});
  const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
  for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);

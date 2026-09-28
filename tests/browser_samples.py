@@ -31,6 +31,11 @@ def main():
         def paused_trial(self, directory, seconds):
             if self.spec['id'] == 'sample-smoke' and fail_next.is_set():
                 assert release.wait(90)
+                guest = directory / 'guest-output'
+                guest.mkdir()
+                (guest / 'worker.log').write_text('Traceback:\nRuntimeError: example provider unavailable\n')
+                ev.write_json(guest / 'model_calls/call-000001.json', dict(
+                    request={'prompt':'PRIVATE TEST PROMPT'}, error='Provider unavailable; token=private-test-token'))
                 return {'status':'error', 'errors':['Example model connection failure'], 'execution_seconds':1}
             if self.spec['id'] == 'sample-tools-vs-helper':
                 trials.append(directory)
@@ -172,6 +177,11 @@ def main():
                     release.set()
                     expect(page.locator('#result-summary')).to_contain_text('completed_with_errors', timeout=30000)
                     expect(page.locator('#result-summary')).to_contain_text('Example model connection failure')
+                    expect(page.locator('#result-summary')).to_contain_text('Provider unavailable; token=[redacted]')
+                    page.get_by_text('Collected worker log', exact=True).click()
+                    expect(page.locator('#result-summary')).to_contain_text('RuntimeError: example provider unavailable')
+                    expect(page.locator('#result-summary')).not_to_contain_text('PRIVATE TEST PROMPT')
+                    page.screenshot(path=str(destination / 'failure-diagnostics.png'))
                     expect(page.locator('#sample-activity')).to_contain_text('Example model connection failure')
                     assert any(op == 'sample_stop' for _, op, _ in calls)
                     assert not errors, errors

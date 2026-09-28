@@ -207,6 +207,15 @@ or Escape to return to the experiment table. Closing the modal does not stop the
 
 ![Results modal with simulated trial results](images/results-modal.png)
 
+Failed attempts also show **Failure details** from files already collected on
+the host: model-call error messages and expandable **Collected worker log** tails.
+This works for existing failed runs after updating the orchestrator; no rerun or
+VM connection is required. Model-call previews include only the error, not request
+or response bodies. Common credential fields are redacted. Previews cover up to
+20 failed attempts, the last 10 call records per output location, and the last
+80 log lines (up to 12,000 characters). Missing or unreadable diagnostics are
+reported explicitly; opening results does not attempt remote recovery.
+
 A compact status notice follows the active sample across all pages. The full
 panel and console update with the existing five-second progress reads, including
 when Automatic refresh is Never. Run/trial elapsed clocks advance between reads.

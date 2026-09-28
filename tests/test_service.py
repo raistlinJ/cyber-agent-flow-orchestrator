@@ -62,3 +62,42 @@ def test_resume_alias_routes_options_and_errors_go_to_stderr(monkeypatch, capsys
     assert main(['status', str(tmp_path / 'missing')]) == 2
     captured = capsys.readouterr()
     assert not captured.out and 'No workflow journal' in captured.err
+
+
+def test_failed_results_include_collected_diagnostics_without_guest_calls(lab):
+    config, output, agent, _ = lab
+    service.run(config, output, agent=agent)
+    evaluation = output / 'evaluation'
+    record_path = next(evaluation.glob('trials/*/attempt-*/attempt.json'))
+    record = ev.read_json(record_path)
+    record.update(status='error', errors=['The session hit an internal runtime error.'])
+    ev.write_json(record_path, record)
+    guest = record_path.parent / 'guest-output'
+    guest.mkdir()
+    (guest / 'worker.log').write_text('discard-me\n' * 100 + 'Traceback:\nValueError: model unavailable; token=secret-value\n')
+    ev.write_json(guest / 'model_calls/call-000001.json', dict(
+        request={'prompt':'PRIVATE PROMPT', 'api_key':'PRIVATE KEY'},
+        response={'text':'PRIVATE RESPONSE'}, error='Model missing; api_key=secret-value'))
+    calls = len(agent.calls)
+    result = service.results(output)
+    diagnostic = result['failure_diagnostics'][0]
+    assert diagnostic['model_errors'][0]['error'] == 'Model missing; api_key=[redacted]'
+    assert 'ValueError: model unavailable' in diagnostic['logs'][0]['text']
+    assert len(diagnostic['logs'][0]['text'].splitlines()) <= 80
+    encoded = json.dumps(diagnostic)
+    assert 'secret-value' not in encoded and 'PRIVATE' not in encoded
+    assert len(agent.calls) == calls
+
+
+def test_failure_diagnostics_do_not_follow_paths_outside_attempt(tmp_path):
+    from cyber_agent_flow_orchestrator.failure_details import collected_failures
+    root = tmp_path / 'evaluation'
+    folder = root / 'trials/trial-000001/attempt-0001'
+    folder.mkdir(parents=True)
+    private = tmp_path / 'another-user.log'
+    private.write_text('PRIVATE OTHER USER')
+    (folder / 'worker.log').symlink_to(private)
+    rows = [dict(status='error', trial_id='trial-000001', attempt=1, attempt_path=str(folder.relative_to(root)))]
+    result = collected_failures(root, rows)
+    assert result[0]['notes'] and not result[0]['logs']
+    assert 'PRIVATE OTHER USER' not in json.dumps(result)

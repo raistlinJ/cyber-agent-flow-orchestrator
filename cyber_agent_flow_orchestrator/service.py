@@ -81,7 +81,10 @@ def list_runs(root):
 
 def results(output, *, all_attempts=False):
     root, _ = journal(output)
-    return {'workflow': status(root), 'evaluation': reporting.results(root / 'evaluation', all_attempts=all_attempts)}
+    report = reporting.results(root / 'evaluation', all_attempts=all_attempts)
+    from .failure_details import collected_failures
+    return {'workflow': status(root), 'evaluation': report,
+            'failure_diagnostics': collected_failures(root / 'evaluation', report['attempts'])}
 
 
 def logs(output, *, stage=None, trial=None, attempt=None, lines=100):
