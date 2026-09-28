@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pwd
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -130,6 +131,7 @@ def active_jobs():
 def application_processes(root, proc_root='/proc'):
     # Fail closed on unreadable processes. Ignore only this helper and its ancestors.
     proc_root = Path(proc_root)
+    boot = (proc_root / 'sys/kernel/random/boot_id').read_bytes().strip()
     ignored, pid = {os.getpid()}, os.getppid()
     while pid > 1 and pid not in ignored:
         ignored.add(pid)
@@ -142,10 +144,16 @@ def application_processes(root, proc_root='/proc'):
         if not proc.name.isdecimal() or int(proc.name) in ignored:
             continue
         try:
-            argv = (proc / 'cmdline').read_bytes().split(b'\0')
+            started = (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+            raw_command = (proc / 'cmdline').read_bytes()
+            argv = raw_command.split(b'\0')
             command = b' '.join(argv).decode(errors='replace')
             cwd = os.readlink(proc / 'cwd')
             name = (proc / 'comm').read_text().strip()
+            executable = os.readlink(proc / 'exe')
+            uid = proc.stat().st_uid
+            if started != (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]:
+                continue  # PID changed while reading; the final idle check rechecks.
         except FileNotFoundError:
             continue
         if len(argv) > 2 and argv[1] == b'-c' and argv[2].startswith(b'"""Read-only, stdlib-only Linux guest probe, sent through QEMU Guest Agent.'):
@@ -159,7 +167,9 @@ def application_processes(root, proc_root='/proc'):
             # Names and reasons identify blockers without exposing command arguments,
             # which can contain API keys, inline scripts or other credentials.
             found.append(dict(pid=int(proc.name), name=re.sub(r'[^A-Za-z0-9_. -]', '?', name)[:60],
-                              reason='; '.join(reasons)))
+                              reason='; '.join(reasons),
+                              identity=hashlib.sha256(b'\0'.join([boot, started.encode(), raw_command,
+                                                                cwd.encode(), executable.encode(), str(uid).encode()])).hexdigest()))
             if len(found) == 12:
                 break
     return found
@@ -171,6 +181,51 @@ def active_processes(root):
         labels = '; '.join(f"PID {p['pid']} ({p['name']}: {p['reason']})" for p in found)
         raise ValueError('Processes still reference the application checkout: ' + labels +
                          '. Stop the application/workers or move idle shells out of the checkout, then retry.')
+
+
+def stop_confirmed_processes(root, approved, record_signal, timeout=15):
+    """Signal only confirmed process instances; pidfds prevent PID-reuse races."""
+    if (not isinstance(approved, list) or not 1 <= len(approved) <= 12 or
+            any(not isinstance(p, dict) or type(p.get('pid')) is not int or p['pid'] <= 1 or
+                not isinstance(p.get('identity'), str) or not re.fullmatch('[0-9a-f]{64}', p['identity']) for p in approved)):
+        raise ValueError('A fresh process inspection and confirmation are required')
+    expected = {p['pid']: p['identity'] for p in approved}
+    if len(expected) != len(approved):
+        raise ValueError('Duplicate process confirmation')
+    if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
+        raise ValueError('Guest requires Linux pidfd support for confirmed process stopping')
+    handles = {}
+    def checked():
+        found = application_processes(root)
+        if any(expected.get(p['pid']) != p['identity'] for p in found):
+            raise ValueError('Application processes changed; check version and confirm the new process list')
+        return found
+    try:
+        for process in checked():
+            try:
+                handles[process['pid']] = os.pidfd_open(process['pid'])
+            except ProcessLookupError:
+                pass
+        # Recheck after acquiring handles, before sending any signals.
+        live = {p['pid'] for p in checked()}
+        for pid, handle in handles.items():
+            if pid not in live:
+                continue
+            current = {p['pid']: p['identity'] for p in checked()}
+            if current.get(pid) != expected[pid]:
+                continue  # The confirmed process already exited or left the checkout.
+            try:
+                signal.pidfd_send_signal(handle, signal.SIGTERM)
+                record_signal(pid)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + timeout
+        while application_processes(root) and time.monotonic() < deadline:
+            time.sleep(0.25)
+        active_processes(root)
+    finally:
+        for handle in handles.values():
+            os.close(handle)
 
 
 def validate_checkout(stage, original, python, role, *, rollback=False):
@@ -211,6 +266,8 @@ def dispatch(data):
     directory = state_dir(root)
     journal = directory / 'state.json'
     op = data['op']
+    if 'stop_processes' in data and op != 'app_update':
+        raise ValueError('Confirmed process stopping is only supported for updates')
     if op == 'app_inspect':
         return dict(identity(root, role), root=str(root), processes=application_processes(root),
                     update=read(journal), rollback=read(directory / 'last-success.json'))
@@ -302,6 +359,12 @@ def dispatch(data):
                         save(PENDING, dict(record, root=str(root)))
                     run(['systemctl', 'stop', service], timeout=60)
             active_jobs()
+            if data.get('stop_processes'):
+                def record_signal(pid):
+                    record.setdefault('signaled_pids', []).append(pid)
+                    save(journal, record)
+                    save(PENDING, dict(record, root=str(root)))
+                stop_confirmed_processes(root, data['stop_processes'], record_signal)
             active_processes(root)
             if replace_tools:
                 if value(stage, 'ls-files', '--', 'kali_tools.json') or not (stage / 'kali_tools.default.json').is_file():

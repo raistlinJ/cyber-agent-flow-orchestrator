@@ -226,7 +226,9 @@ function renderUpdates(data){
    const label=el('label','Branch, tag or commit','small'),input=el('input');input.type='text';input.value=maintenanceRefs[app.role]||app.ref;input.dataset.updateRef=app.role;input.addEventListener('input',()=>{maintenanceRefs[app.role]=input.value;});label.append(input);card.append(label);
    const status=el('p',null,'small');status.id=`update-status-${app.role}`;card.append(status);input.setAttribute('aria-describedby',status.id);
    const actions=el('div',null,'update-actions');
-   for(const [action,title] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>maintain(app.role,action,input.value));actions.append(button);}card.append(actions);cards.append(card);
+   for(const [action,title] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>maintain(app.role,action,input.value));actions.append(button);}
+   if(known?.installed.processes?.length&&known.installed.processes.every(p=>/^[0-9a-f]{64}$/.test(p.identity||''))){const button=el('button','Stop processes and update');button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction='stop-update';button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>maintain(app.role,'update',input.value,known));actions.append(button);}
+   card.append(actions);cards.append(card);
   }
  }
  const jobs=$('update-jobs');jobs.replaceChildren();
@@ -235,14 +237,15 @@ function renderUpdates(data){
  for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));if(job.console?.transfer){const transfer=job.console.transfer,progress=el('progress');progress.max=100;progress.value=transfer.percent;progress.setAttribute('aria-label',`${job.role} source bundle upload`);row.append(el('p',`${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes acknowledged · ${transfer.percent}% · ${(transfer.bytes_per_second/1024).toFixed(1)} KiB/s · ${transfer.verified?'Upload checksum verified; see activation outcome below':['queued','running'].includes(job.status)?'Awaiting verified completion':'Transfer stopped; file not verified'}`,'small'),progress);if(!transfer.verified)row.append(el('p',`${transfer.sent_bytes?'Last acknowledgement':'Transfer started'}: ${transfer.updated_at}. Open the troubleshooting console below for command history.`,'small'));}if(job.revision)row.append(el('p',`Target revision: ${job.revision}`,'small'));if(job.action!=='inspect')row.append(el('p',job.status==='completed'?'Activation completed':['failed','interrupted'].includes(job.status)?'Activation not confirmed. Check version for the current installed revision.':'Activation pending','small'));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
  if(!(updates.jobs||[]).length)jobs.append(el('p','No application maintenance recorded for your account.','empty'));
 }
-async function maintain(role,action,ref){
+async function maintain(role,action,ref,confirmation=null){
  if(isBusy()||maintenanceStarting)return;
  if(rolesDirty){$('update-message').textContent='Save VM role changes before application maintenance.';return;}
+ if(confirmation&&!window.confirm(`Stop these ${role} processes on VM ${confirmation.vmid} and update to ${ref}?\n\n${confirmation.installed.processes.map(p=>`PID ${p.pid} · ${p.name} · ${p.reason}`).join('\n')}\n\nThis sends SIGTERM. Listed terminal windows/sessions may close and unsaved work may be lost. Unmanaged applications will not restart automatically. Changed processes require a fresh confirmation.`))return;
  maintenanceStarting=true;operation='Submitting application maintenance…';syncBusy();if(snapshot)renderUpdates(snapshot);
  try{
   await finishDashboardRead();
   if(!csrfToken)await loadSession();
-  const response=await apiFetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action,ref,request_id:crypto.randomUUID().replaceAll('-','')})});
+  const response=await apiFetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action,ref,request_id:crypto.randomUUID().replaceAll('-',''),...(confirmation?{process_confirmation:confirmation.id}:{})})});
   const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||`Maintenance request failed (HTTP ${response.status})`);
   $('update-message').textContent=`Maintenance ${result.id} submitted. Follow its status below.`;await refresh();
  }catch(error){$('update-message').textContent=error.message;}

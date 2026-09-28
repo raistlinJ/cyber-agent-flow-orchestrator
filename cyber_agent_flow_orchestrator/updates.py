@@ -146,7 +146,7 @@ class UpdateManager:
         return dict(can_update=permitted, group=self.config['group'], jobs=rows,
                     applications=[dict(role=role, vmid=roles.get(role), **self.config[role]) for role in ('participant', 'scenarioforge')])
 
-    def submit(self, access, role, action, ref, request_id):
+    def submit(self, access, role, action, ref, request_id, process_confirmation=None):
         if self.config is None or role not in ('participant', 'scenarioforge') or action not in ('inspect', 'update', 'rollback'):
             raise UpdateError('This application maintenance action is not enabled')
         ref_name(ref)
@@ -161,16 +161,35 @@ class UpdateManager:
         access.require_vm(vmid)
         definition = next(item for item in definitions(self.cfg, self.runtime) if item['role'] == role)
         root = definition['root']
+        approved = None
+        if process_confirmation is not None:
+            if action != 'update' or not isinstance(process_confirmation, str) or not re.fullmatch('[0-9a-f]{32}', process_confirmation):
+                raise UpdateError('Process confirmation requires an update and a valid inspection ID')
+            prior_path = workspace.path / 'updates' / process_confirmation / 'job.json'
+            if not prior_path.is_file():
+                raise UpdateError('Check version and confirm its process list first')
+            prior = ev.read_json(prior_path)
+            approved = prior.get('installed', {}).get('processes')
+            if (prior.get('status') not in ('completed', 'failed') or
+                    any(prior.get(k) != v for k, v in dict(role=role, vmid=vmid, root=root).items()) or
+                    not isinstance(approved, list) or not 1 <= len(approved) <= 12 or
+                    any(type(p.get('pid')) is not int or p['pid'] <= 1 or
+                        not re.fullmatch('[0-9a-f]{64}', p.get('identity', '')) for p in approved)):
+                raise UpdateError('Check version and confirm a fresh process list for this application')
         python = self.runtime['engine']['python'] if role == 'participant' else self.cfg['scenarioforge'].get('python', root + '/.venv/bin/python')
         job = dict(id=request_id, role=role, action=action, ref=ref, vmid=vmid, root=root,
                    source=self.config[role]['url'],
                    status='queued', created_at=now(), message='Waiting for maintenance worker')
+        if approved:
+            job.update(process_confirmation=process_confirmation, stop_processes=approved)
         directory = workspace.path / 'updates' / request_id
         with self.lock:
             if directory.exists():
                 old = ev.read_json(directory / 'job.json')
                 if any(old[k] != job[k] for k in ('role', 'action', 'ref', 'vmid')):
                     raise UpdateError('Request ID already belongs to another operation')
+                if old.get('process_confirmation') != process_confirmation:
+                    raise UpdateError('Request ID already belongs to another process confirmation')
                 return {'id': request_id}
             self.jobs = {key: future for key, future in self.jobs.items() if not future.done()}
             if self.closed or access.username in self.jobs or len(self.jobs) >= 2:
@@ -212,7 +231,12 @@ class UpdateManager:
                 replace_tools = job['action'] == 'update' and installed.get('tools_config_replaceable')
                 if installed.get('modified') and not replace_tools:
                     raise UpdateError('Tracked local edits exist; review the changed files under Check version and preserve/commit them before retrying. No source bundle downloaded or transferred; application files unchanged.')
-                if installed.get('processes') and not service:
+                approved = job.get('stop_processes')
+                if approved:
+                    expected = {p['pid']: p['identity'] for p in approved}
+                    if any(expected.get(p['pid']) != p.get('identity') for p in installed.get('processes', [])):
+                        raise UpdateError('Application processes changed; check version and confirm the new process list. No source bundle downloaded or transferred.')
+                if installed.get('processes') and not service and not approved:
                     processes = '; '.join(f"PID {p['pid']} ({p['name']}: {p['reason']})" for p in installed['processes'])
                     raise UpdateError('Processes reference the application checkout: ' + processes +
                                       '. No managed service is configured. Stop the application/workers or move idle shells out of the checkout, then retry. No source bundle downloaded or transferred.')
@@ -221,6 +245,8 @@ class UpdateManager:
                         raise UpdateError('Server stopped before maintenance began')
                     require_maintenance(access, self.config['group'])
                     update = dict(args, token=job['id'], expected_revision=installed['revision'], python=python, service=service)
+                    if approved:
+                        update['stop_processes'] = approved
                     if job['action'] == 'update':
                         save('Downloading the selected source revision on the host')
                         revision, bundle = package(self.config[job['role']], job['ref'], installed['revision'], directory, trace=trace)

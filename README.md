@@ -354,6 +354,11 @@ or app-to-participant connection is required. Updates preserve local runtime dat
 and use the existing Python environment. Changed dependency manifests or conflicting
 local edits block activation.
 
+If an application is running, **Check version** lists its blocking PIDs. Choose
+**Stop processes and update** to review and confirm that list. The updater requests
+a graceful stop before activation; it never force-kills a process. Listed terminals
+may close, and unmanaged applications must be restarted manually afterward.
+
 Version checks use ordinary VM access. Updating/rolling back additionally requires
 the `caf-maintainers` PVE group. Choose a branch, tag or commit and follow the
 background job on the page. `updates: false` in `web.yaml` disables the feature.

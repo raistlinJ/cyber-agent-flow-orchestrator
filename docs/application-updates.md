@@ -90,7 +90,9 @@ the VM, not just the operator's private experiment results.
    the filename list is also bounded to fit guest-agent output. Filenames are
    quoted and file contents are never included.
 3. Enter a branch, tag or full commit SHA from its configured repository. The
-   default is `main`. Click **Update**.
+   default is `main`. Click **Update**. If running processes are listed, use
+   **Stop processes and update** and confirm the displayed PIDs to stop them
+   during activation. Canceling the confirmation submits no request.
 4. Watch the maintenance job below the cards. **Details** includes the source URL,
    requested ref, resolved commit, bundle checksum, guest outcome and errors.
    The bottom **Troubleshooting console** shows commands, responses and timing;
@@ -148,7 +150,8 @@ The updater manages `monitoring.scenarioforge_service`, default
 `scenarioforge-web.service`, and an optional `monitoring.caf_service`. An active
 configured service is stopped just before activation and restarted afterward.
 A previously inactive service remains inactive. Other application processes
-must be stopped before updating; the updater will not kill arbitrary processes.
+must exit before activation, either manually or through the explicit confirmation
+described below.
 
 **Check version** lists up to 12 processes that reference the checkout, including
 PIDs, process names and the matching reason. Arguments are omitted because they
@@ -158,11 +161,41 @@ directory is inside the checkout also appears. Move such a shell elsewhere with
 Closing a browser tab does not stop the server process.
 
 When no service is configured (for example `service: null` for a desktop-launched
-CAF), these blockers stop the host update before downloading or transferring a
-bundle. If a real service is configured, the updater proceeds and stops that
+CAF), ordinary updates stop before downloading or transferring a
+bundle when blockers exist. If a real service is configured, the updater proceeds and stops that
 service during activation, then checks again for remaining processes. The final
 check always remains in place and reports PIDs if new or unmanaged processes still
 block activation. It never guesses a service name or kills an arbitrary process.
+
+### Confirm stopping running processes
+
+After **Check version**, **Stop processes and update** shows the exact PIDs,
+names, matching reasons, VM and selected revision for confirmation. This applies
+to both CAF and ScenarioForge and requires the same maintenance permissions as
+Update. Terminal emulators and shells may be listed alongside application workers:
+confirming can close those terminals and their sessions, and lose unsaved work.
+Unmanaged desktop applications are not restarted automatically, including if
+activation subsequently fails. Configured services retain their existing restart
+behavior. Active orchestrated experiments still block maintenance.
+
+The browser sends a saved inspection ID, not arbitrary PIDs or a shell command.
+The server accepts only an inspection in the signed-in account's history for the
+currently selected application, VM and checkout. It checks process identities
+again before downloading. The guest validates the target source, takes the
+maintenance lock, and rechecks identities immediately before sending **SIGTERM**.
+Identities include the guest boot, process start time, command, working directory,
+executable and user; only the hash is returned, keeping arguments out of the UI.
+Linux process descriptors prevent signaling a different process after PID reuse
+([Python pidfd API](https://docs.python.org/3/library/os.html#os.pidfd_open)).
+
+The guest waits up to 15 seconds for the checkout to become idle. It never escalates
+to SIGKILL. Changed or additional processes require another inspection and
+confirmation; a process that refuses to exit blocks activation. Guests without
+Python/Linux pidfd support must be stopped manually. Signals already sent cannot
+be undone if a later check or activation fails. Guest maintenance details record
+`signaled_pids`; use **Check version** to retrieve the journal after a failure.
+Older inspections without identity hashes need a new **Check version** before
+the confirmation button appears.
 
 Optional overrides in `web.yaml` (restart after editing):
 

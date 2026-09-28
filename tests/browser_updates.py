@@ -37,6 +37,9 @@ def main():
             if op == 'app_stage': return {'path': '/tmp/test-source.bundle'}
             if op == 'app_update' and vmid in activation_failures: raise ValueError('Tracked local edits appeared before activation. No files changed.')
             if op == 'app_update':
+                if data.get('stop_processes'):
+                    assert data['stop_processes'] == process_blockers[vmid]
+                    process_blockers.pop(vmid)
                 revisions[vmid] = 'b' * 40
                 dirty.discard(vmid)
                 replaceable.discard(vmid)
@@ -145,14 +148,27 @@ def main():
                     expect(latest).to_contain_text('Target revision: ' + 'b' * 40)
                     expect(page.locator('#update-cards article').filter(has=button('participant', 'update'))).to_contain_text('Installed revision (last checked): aaaaaaaaaaaa')
                     expect(page.locator('#loading-label')).to_contain_text('participant update failed')
-                    process_blockers[9403] = [{'pid': 4242, 'name': 'python3', 'reason': 'working directory is in checkout'}]
+                    process_blockers[9403] = [{'pid': 4242, 'name': 'python3', 'reason': 'working directory is in checkout', 'identity': 'a' * 64}]
                     before_process_check = len(calls)
                     button('participant', 'update').click()
                     expect(page.locator('#update-message')).to_contain_text('PID 4242', timeout=30000)
                     expect(page.locator('#update-message')).to_contain_text('No source bundle downloaded or transferred')
                     expect(page.locator('#update-cards')).to_contain_text('PID 4242 · python3')
                     assert [op for _, op, _ in calls[before_process_check:]] == ['app_inspect']
-                    process_blockers.clear()
+                    before_confirmation = len(calls)
+                    def cancel(dialog):
+                        assert 'PID 4242' in dialog.message and 'VM 9403' in dialog.message
+                        assert 'will not restart automatically' in dialog.message
+                        dialog.dismiss()
+                    page.once('dialog', cancel)
+                    button('participant', 'stop-update').click()
+                    assert len(calls) == before_confirmation
+                    activation_failures.clear()
+                    page.once('dialog', lambda dialog: dialog.accept())
+                    button('participant', 'stop-update').click()
+                    expect(page.locator('#update-message')).to_contain_text('update: completed', timeout=30000)
+                    assert not process_blockers
+                    assert any(op == 'app_update' and data.get('stop_processes') for _, op, data in calls[before_confirmation:])
                     page.screenshot(path=str(destination / 'updates-desktop.png'), full_page=True)
                     activation_failures.clear()
                     dirty.add(9403)

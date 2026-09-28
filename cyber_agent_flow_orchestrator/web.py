@@ -237,8 +237,9 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         return
                     self.respond(202, dashboard.run_sample(auth.access(token, revalidate=False), data['sample_id'], data['request_id']))
                 elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
-                    if set(data) != {'role', 'action', 'ref', 'request_id'} or any(not isinstance(v, str) for v in data.values()):
-                        raise UpdateError('Supply role, action, ref and request_id only')
+                    if (set(data) - {'process_confirmation'} != {'role', 'action', 'ref', 'request_id'}
+                            or any(not isinstance(v, str) for v in data.values())):
+                        raise UpdateError('Supply role, action, ref, request_id and optional process_confirmation only')
                     self.respond(202, dashboard.maintain(auth.access(token, revalidate=False), data))
                 else:
                     self.respond(404, {'error': 'No such action is enabled'})

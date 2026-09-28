@@ -199,6 +199,10 @@ def test_https_maintenance_whitelist_csrf_group_and_scoped_inspection(pve, lab, 
             assert request(server, '/api/applications', data, cookie=cookie)[0] == 403
             assert request(server, '/api/applications', data, cookie=cookie, headers=headers)[0] == 403
             assert request(server, '/api/applications', dict(data, vmid=999), cookie=cookie, headers=headers)[0] == 400
+            confirmed = dict(data, process_confirmation='b' * 32)
+            assert request(server, '/api/applications', confirmed, cookie=cookie)[0] == 403
+            assert request(server, '/api/applications', confirmed, cookie=cookie, headers=headers)[0] == 403
+            assert request(server, '/api/applications', dict(data, stop_processes=[42]), cookie=cookie, headers=headers)[0] == 400
             data['action'] = 'inspect'
             assert request(server, '/api/applications', data, cookie=cookie, headers=headers)[0] == 202
             dash.updates.jobs['operator@pve'].result(timeout=10)
@@ -381,11 +385,16 @@ def test_runtime_catalog_replacement_refusals_and_failure(installation, tmp_path
 
 
 def fake_process(proc_root, pid, argv, cwd, name='python3'):
+    boot = proc_root / 'sys/kernel/random/boot_id'
+    boot.parent.mkdir(parents=True, exist_ok=True)
+    boot.write_text('test-boot')
     folder = proc_root / str(pid)
     folder.mkdir()
     (folder / 'cmdline').write_bytes(b'\0'.join(arg.encode() for arg in argv) + b'\0')
     (folder / 'cwd').symlink_to(cwd)
     (folder / 'comm').write_text(name + '\n')
+    (folder / 'exe').symlink_to('/usr/bin/' + name)
+    (folder / 'stat').write_text(f'{pid} ({name}) S 1 ' + '0 ' * 17 + '1234')
     return folder
 
 
@@ -403,6 +412,10 @@ def test_process_inspection_identifies_blockers_without_arguments(tmp_path):
     assert 'secret-token' not in json.dumps(found)
     assert 'app.py' not in json.dumps(found)
     assert next(p for p in found if p['pid'] == 900002)['reason'] == 'working directory is in checkout'
+    old_identity = next(p for p in found if p['pid'] == 900002)['identity']
+    stat = proc / '900002/stat'
+    stat.write_text(stat.read_text().replace('1234', '5678'))
+    assert next(p for p in guest.application_processes(root, proc_root=proc) if p['pid'] == 900002)['identity'] != old_identity
 
 
 def test_process_guard_has_actionable_error_and_inspect_is_read_only(installation, monkeypatch):
@@ -455,5 +468,109 @@ def test_manager_checks_unmanaged_processes_before_source_download(pve, lab, tmp
             assert 'PID 42 (python3' in row['error']
             assert 'No source bundle downloaded or transferred' in row['error']
         assert [op for _, op, _ in calls] == ['app_inspect']
+    finally:
+        manager.close()
+
+
+def process_record(pid=42, identity='a' * 64):
+    return dict(pid=pid, identity=identity, name='python3', reason='working directory is in checkout')
+
+
+@pytest.mark.parametrize('mode', ['exit', 'stale', 'reused', 'timeout', 'gone'])
+def test_confirmed_stop_revalidates_instances_and_never_force_kills(monkeypatch, mode):
+    approved = [process_record()]
+    live = [process_record(identity='b' * 64)] if mode == 'stale' else approved.copy()
+    if mode == 'gone': live.clear()
+    signals, closed, recorded = [], [], []
+    monkeypatch.setattr(guest, 'application_processes', lambda root: live.copy())
+    def open_pid(pid):
+        if mode == 'reused': live[:] = [process_record(identity='c' * 64)]
+        return 999
+    def send(handle, sig):
+        signals.append((handle, sig))
+        if mode == 'exit': live.clear()
+    monkeypatch.setattr(guest.os, 'pidfd_open', open_pid, raising=False)
+    monkeypatch.setattr(guest.signal, 'pidfd_send_signal', send, raising=False)
+    monkeypatch.setattr(guest.os, 'close', closed.append)
+    if mode in ('stale', 'reused', 'timeout'):
+        with pytest.raises(ValueError, match='processes changed|Processes still reference'):
+            guest.stop_confirmed_processes(Path('/opt/caf'), approved, recorded.append, timeout=0)
+    else:
+        guest.stop_confirmed_processes(Path('/opt/caf'), approved, recorded.append, timeout=0)
+    assert signals == ([(999, guest.signal.SIGTERM)] if mode in ('exit', 'timeout') else [])
+    assert recorded == ([42] if signals else [])
+    assert closed == ([] if mode in ('stale', 'gone') else [999])
+
+
+def test_confirmed_stop_rejects_missing_pidfd_support(monkeypatch):
+    monkeypatch.delattr(guest.os, 'pidfd_open', raising=False)
+    with pytest.raises(ValueError, match='pidfd support'):
+        guest.stop_confirmed_processes(Path('/opt/caf'), [process_record()], lambda pid: None)
+
+
+def test_confirmed_stop_is_journaled_before_source_activation(installation, tmp_path, monkeypatch):
+    args = stage(installation, tmp_path)
+    args['service'] = None
+    root, original = installation[2:4]
+    def stop(path, approved, record_signal):
+        assert path == root and approved == [process_record()]
+        assert git(root, 'rev-parse', 'HEAD') == original
+        assert guest.PENDING.exists()
+        record_signal(42)
+        assert guest.read(guest.PENDING)['signaled_pids'] == [42]
+    monkeypatch.setattr(guest, 'stop_confirmed_processes', stop)
+    result = guest.dispatch(dict(args, op='app_update', stop_processes=[process_record()]))
+    assert result['update']['signaled_pids'] == [42]
+    assert result['revision'] == args['revision']
+    assert not any(argv[:2] == ['systemctl', 'start'] for argv in installation[4])
+
+
+@pytest.mark.parametrize('case', ['accepted', 'changed', 'wrong-vm', 'wrong-root', 'other-user', 'rollback'])
+def test_manager_scopes_confirmation_and_rechecks_before_transfer(pve, lab, tmp_path, monkeypatch, case):
+    pve[0]['groups'] += ',caf-maintainers'
+    pve[0]['resources']['operator@pve'] = [vm(9403)]
+    user = access(pve)
+    workspace = Workspace(tmp_path / 'runs', user.username)
+    workspace.save_roles(dict(scenarioforge=None, participant=9403, core=None), user)
+    calls, agent, _ = install_backend(monkeypatch, tmp_path)
+    original = agent.call
+    def call(self, vmid, op, **data):
+        original(self, vmid, op, **data)
+        return {'revision': 'a' * 40, 'modified': False,
+                'processes': [process_record(identity=('b' if case == 'changed' else 'a') * 64)]}
+    monkeypatch.setattr(agent, 'call', call)
+    packages = []
+    def package(*args, **kwargs):
+        packages.append(args)
+        raise updates.UpdateError('Reached packaging after confirmation')
+    monkeypatch.setattr(updates, 'package', package)
+    cfg, runtime, _, _ = load(lab[0])
+    manager = updates.UpdateManager(cfg, runtime, tmp_path / 'runs')
+    try:
+        manager.submit(user, 'participant', 'inspect', 'main', 'a' * 32)
+        manager.jobs[user.username].result(timeout=10)
+        path = workspace.path / 'updates' / ('a' * 32) / 'job.json'
+        prior = ev.read_json(path)
+        prior['installed']['processes'] = [process_record()]
+        if case == 'wrong-vm': prior['vmid'] = 9402
+        if case == 'wrong-root': prior['root'] = '/somewhere/else'
+        ev.write_json(path, prior)
+        if case == 'other-user':
+            other = Workspace(tmp_path / 'runs', 'other@pve').path / 'updates' / ('a' * 32)
+            other.mkdir(parents=True)
+            path.rename(other / 'job.json')
+        if case in ('wrong-vm', 'wrong-root', 'other-user', 'rollback'):
+            with pytest.raises(updates.UpdateError):
+                manager.submit(user, 'participant', 'rollback' if case == 'rollback' else 'update', 'main', 'b' * 32, 'a' * 32)
+            assert not packages
+        else:
+            manager.submit(user, 'participant', 'update', 'main', 'b' * 32, 'a' * 32)
+            manager.jobs[user.username].result(timeout=10)
+            row = ev.read_json(workspace.path / 'updates' / ('b' * 32) / 'job.json')
+            assert row['stop_processes'] == [process_record()]
+            assert bool(packages) == (case == 'accepted')
+            assert ('processes changed' if case == 'changed' else 'Reached packaging') in row['error']
+            with pytest.raises(updates.UpdateError, match='another process confirmation'):
+                manager.submit(user, 'participant', 'update', 'main', 'b' * 32)
     finally:
         manager.close()
