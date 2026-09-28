@@ -380,10 +380,11 @@ See [setup, source configuration, CLI and recovery](docs/application-updates.md)
 Open **Experiments → New → Application model settings**, then choose **Pull from VM** for
 Cyber-agent-flow. The editor reads `configs/cli.json` from the selected participant.
 For an OpenAI-compatible endpoint, select **OpenAI / compatible**, enter the API
-base URL (usually `https://your-server/v1`) and its exact model name, then **Save**.
-Save copies the settings to the participant VM and selects them for new experiments
-and authenticated `user-run` workflows for your account and that VM. Use Save even
-when the pulled values are already correct.
+base URL (usually `https://your-server/v1`) and its exact model name, then press
+**Create experiment**. This saves the edited settings to the participant VM and
+captures them in the experiment, with no separate Save action. If saving fails,
+the modal stays open and no experiment is created. Without pulling a configuration,
+creation uses the current experiment defaults.
 
 **Create experiment** captures the selected participant VM and model settings.
 Rerunning that experiment reuses its captured settings and credential reference,

@@ -157,9 +157,10 @@ Session/access errors clear the private console view along with the dashboard.
 Choose **New**, select either bundled sample, and press **Create experiment**.
 The modal shows its description, trial budgets, current experiment model and
 CAF model settings. **Pull from VM** reads its current saved configuration;
-**Save** copies your settings to the VM and selects them for new experiments.
-**Create experiment** saves a **Ready** row with its participant VM and model
-configuration, without starting it. Reruns retain that configuration and credential
+**Create experiment** saves the loaded/edited settings to the VM, then creates a
+**Ready** row with its participant VM and model configuration, without starting it.
+If saving fails, no row is created and the modal shows the error for retry. Without
+pulling, creation uses current experiment defaults. Reruns retain that configuration and credential
 reference instead of adopting newer defaults. If no VM is selected when creating
 the row, its configuration is captured on first run. Legacy rows without a saved
 runtime also capture settings on their next run.
@@ -303,21 +304,21 @@ alter any real scenario's preparation/reset steps.
 After saving VM roles on Lab setup, open **Experiments → New**. Its
 **Application model settings** section currently contains only Cyber-agent-flow:
 
-- **Pull from VM** reads model connection fields from
+- **Pull from VM**, next to the Cyber-agent-flow card title, reads model connection fields from
   `<engine.path>/configs/cli.json` through QEMU guest exec. A missing file can be
-  created by saving.
-- **Save** updates provider, base URL, model, TLS verification and optionally the
+  created when you press Create experiment.
+- **Create experiment** first saves provider, base URL, model, TLS verification and optionally the
   API key in the VM, and adopts them for this account and participant VM in one
   action. It preserves unrelated JSON values, including network scope and tools.
   An existing file gets a private `.caf-model-<id>.bak` backup before atomic
   replacement. A changed file or VM selection invalidates the loaded draft;
   pull again to continue.
-- **Create experiment** captures the selected VM and runtime, including model
+  It then captures the selected VM and runtime, including model
   settings and the guest credential reference. Both its first run and subsequent
   reruns use this snapshot. Reruns still require current access to the saved VM;
   changing the Lab setup selection does not silently move an old experiment.
   Create a new experiment to use changed settings. Existing `user-run`
-  materialization uses saved defaults; standalone evaluator and unscoped CLI runs
+  materialization uses the defaults saved during creation; standalone evaluator and unscoped CLI runs
   continue to use explicit YAML.
 
 For an OpenAI-compatible server, select **OpenAI / compatible** (`openai`). The
