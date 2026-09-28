@@ -255,3 +255,39 @@ def test_three_selected_guests_do_not_block_https_status(pve, lab, tmp_path):
     finally:
         release.set()
         dash.close()
+
+
+def test_observation_progress_counts_completed_authorized_vms_and_forced_refresh(pve, lab, tmp_path):
+    pve[0]['resources']['operator@pve'] = [vm(101), vm(102), vm(103)]
+    user = access(pve)
+    release = {vmid: threading.Event() for vmid in (101, 102, 103)}
+    class ControlledProbe(Probe):
+        def guest(self, vmid, definition, units):
+            assert release[vmid].wait(10)
+            return super().guest(vmid, definition, units)
+    dash = UserDashboard(lab[0], tmp_path / 'runs', 300, lambda b, a: ControlledProbe(b, a, []))
+    try:
+        dash.select(user, dict(scenarioforge=101, participant=102, core=103))
+        first = dash.read(user)
+        assert first['loading']['percent'] == 0
+        release[101].set()
+        for _ in range(100):
+            with dash.lock:
+                completed = dash.entries[user.username]['completed'][:]
+            if completed == [101]: break
+            time.sleep(.02)
+        partial = dash.read(user)
+        assert partial['loading']['completed'] == 1
+        assert partial['loading']['total'] == 3
+        assert partial['loading']['percent'] == 33
+        release[102].set()
+        release[103].set()
+        dash.entries[user.username]['future'].result(timeout=5)
+        finished = dash.read(user)
+        assert not finished['refreshing']
+        assert finished['loading']['percent'] == 100
+        assert not dash.read(user)['refreshing']  # Respect ordinary observation interval.
+        assert dash.read(user, force=True)['refreshing']  # Manual refresh starts fresh checks.
+    finally:
+        for event in release.values(): event.set()
+        dash.close()

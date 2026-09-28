@@ -1,5 +1,5 @@
 """Live, read-only Proxmox monitoring separate from workflow execution."""
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
@@ -101,7 +101,7 @@ def recorded_commands(root):
     return jobs, errors
 
 
-def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None):
+def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None, progress=None):
     probe = probe or ProxmoxProbe(runtime['backend'])
     jobs, errors = recorded_commands(runs_root)
     def check(definition):
@@ -139,8 +139,20 @@ def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None):
         except Exception as exc:
             row.update(guest_access='unavailable', guest_error=str(exc))
         return row
+    items = selected if selected is not None else definitions(cfg, runtime)
+    completed = []
+    if progress:
+        progress(completed)
     with ThreadPoolExecutor(max_workers=3) as pool:
-        vms = list(pool.map(check, selected if selected is not None else definitions(cfg, runtime)))
+        pending = {pool.submit(check, item): index for index, item in enumerate(items)}
+        vms = [None] * len(items)
+        for future in as_completed(pending):
+            row = future.result()
+            vms[pending[future]] = row
+            if row['vmid'] is not None:
+                completed.append(row['vmid'])
+                if progress:
+                    progress(list(completed))
     try:
         runs = service.list_runs(runs_root) if Path(runs_root).is_dir() else []
     except Exception as exc:

@@ -47,7 +47,7 @@ class UserDashboard:
             self.entries.pop(access.username, None)
         return {'roles': result}
 
-    def read(self, access):
+    def read(self, access, *, force=False):
         available = access.inventory()
         permitted = {row['vmid'] for row in available}
         # inventory() has just checked this identity. Recheck inventory/identity
@@ -61,7 +61,7 @@ class UserDashboard:
         with self.lock:
             entry = self.entries.get(access.username)
             if entry is None or entry['key'] != key:
-                entry = {'key': key, 'value': None, 'future': None, 'at': 0}
+                entry = {'key': key, 'value': None, 'future': None, 'at': 0, 'completed': []}
                 self.entries[access.username] = entry
             future = entry['future']
             if future and future.done():
@@ -70,15 +70,20 @@ class UserDashboard:
                 except Exception:
                     entry['value'] = None
                 entry['future'], entry['at'] = None, time.monotonic()
-            if entry['future'] is None and time.monotonic() - entry['at'] >= self.interval:
+            if entry['future'] is None and (force or time.monotonic() - entry['at'] >= self.interval):
                 # Bound queued work, including login/session churn.
                 if self.slots.acquire(blocking=False):
                     selected = definitions(self.cfg, self.runtime)
                     for item, role in zip(selected, ROLES):
                         item['vmid'] = roles[role]
+                    entry['completed'] = []
+                    def progress(completed):
+                        with self.lock:
+                            entry['completed'] = completed
                     try:
                         entry['future'] = self.pool.submit(snapshot, self.cfg, self.runtime, workspace.runs,
-                                                          self.probe_factory(self.runtime['backend'], access), selected=selected)
+                                                          self.probe_factory(self.runtime['backend'], access), selected=selected,
+                                                          progress=progress)
                     except BaseException:
                         self.slots.release()
                         raise
@@ -87,6 +92,7 @@ class UserDashboard:
                 'checked_at': None, 'workflow_id': self.cfg['id'], 'vms': [], 'runs': [], 'errors': []}
             value.update(refreshing=entry['future'] is not None, poll_seconds=self.interval,
                          available_vms=available, roles=roles, owner=access.username)
+            completed = set(entry['completed'])
             # No completed result from a different user's scope is ever reused.
             if len(self.entries) > 256:
                 for name in list(self.entries):
@@ -98,6 +104,11 @@ class UserDashboard:
         value['vms'] = [vm for vm in value['vms'] if vm['vmid'] is None or vm['vmid'] in latest]
         value['available_vms'] = [vm for vm in available if vm['vmid'] in latest]
         value['roles'] = {k: v if v in latest else None for k, v in roles.items()}
+        selected_ids = {vmid for vmid in value['roles'].values() if vmid is not None}
+        total, done = len(selected_ids), len(completed & selected_ids)
+        value['loading'] = {'completed': done, 'total': total,
+                            'percent': round(100 * done / total) if total else 100,
+                            'status': 'Checking VM power, guest access and applications' if value['refreshing'] else 'VM checks complete'}
         # Trial progress is independent of a potentially slow guest observation.
         value['runs'] = service.list_runs(workspace.runs)
         value['samples'] = self.samples.catalog(value['roles'])

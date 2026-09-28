@@ -14,7 +14,7 @@ from test_pve_auth import pve_server, make_auth
 class PVEFakeDashboard(FakeDashboard):
     scoped = True
 
-    def read(self, access):
+    def read(self, access, *, force=False):
         access.current()
         return super().read()
 

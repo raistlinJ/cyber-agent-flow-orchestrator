@@ -4,6 +4,8 @@
 <body>
 <header><a class="brand" href="/" aria-label="Orchestrator home"><span class="brand-mark">C</span>CYBER AGENT FLOW<span class="brand-divider">/</span><span class="brand-sub">Orchestrator</span></a><div class="user-menu"><span class="readonly">LAB MONITOR</span><span id="username-label"></span><button id="sign-out" type="button">Sign out</button></div></header>
 <main>
+<div id="loading-status" class="loading-status" role="status" aria-live="polite"><span id="loading-label">Preparing dashboard…</span><span id="loading-elapsed"></span><progress id="loading-progress" max="100" aria-label="Dashboard loading progress"></progress></div>
+<fieldset id="dashboard-controls" class="workspace-controls" aria-label="Dashboard controls" disabled>
 <div class="heading"><div><p class="eyebrow">LAB OPERATIONS</p><h1>Your lab, at a glance.</h1><p class="intro">Virtual machines, application processes, and experiment activity.</p></div><button id="refresh" type="button">↻ Refresh view</button></div>
 <div class="statusbar"><span><span id="pulse" class="dot muted"></span><strong id="connection">Connecting to monitor…</strong></span><span id="workflow"></span><span id="checked">Waiting for first check</span></div>
 <div id="notice" class="notice" role="status" hidden></div>
@@ -32,4 +34,4 @@
 <section aria-labelledby="runs-title"><div class="section-title"><h2 id="runs-title">Experiment runs</h2><span>Your saved runs · select one for results</span></div><div class="panel scroll"><table><thead><tr><th>Run</th><th>Recorded status</th><th>Coordinator</th><th>Trials observed / planned</th><th>Verified successes</th></tr></thead><tbody id="runs"></tbody></table><p id="no-runs" class="empty">No visible runs yet. Run an included sample or start a workflow from the CLI.</p></div></section>
 <section id="result-panel" class="panel result-panel" hidden><div class="result-actions"><h2>Run results</h2><a id="download-dataset" hidden>Download CSV</a><button id="close-results" type="button">Close results</button></div><div id="result-summary"></div><pre id="result-content"></pre></section>
 <footer><span>VM power, guest access, and application presence are checked separately.</span><span>Included samples run in your selected participant VM</span></footer>
-</main></body></html>
+</fieldset></main></body></html>

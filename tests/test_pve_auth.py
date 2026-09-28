@@ -204,7 +204,7 @@ def test_logout_during_group_check_cannot_restore_session(pve):
 def test_https_webui_pve_login_totp_revocation_and_no_fallback(pve, tmp_path):
     class Dashboard:
         scoped = True
-        def read(self, access):
+        def read(self, access, *, force=False):
             access.current()
             return {'private_lab_data': True}
     auth = make_auth(pve)

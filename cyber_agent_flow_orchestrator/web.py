@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import threading
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .config import load
 from .monitor import snapshot
@@ -134,7 +134,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     if auth.provider.name == 'pve':
                         if not getattr(dashboard, 'scoped', False):
                             raise AccessDenied('A per-user dashboard is required for PVE login')
-                        self.respond(200, dashboard.read(auth.access(token, revalidate=False)))
+                        force = parse_qs(urlsplit(self.path).query).get('refresh') == ['1']
+                        self.respond(200, dashboard.read(auth.access(token, revalidate=False), force=force))
                     else:
                         self.respond(200, dashboard.read())
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):

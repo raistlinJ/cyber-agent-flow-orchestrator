@@ -54,6 +54,28 @@ To reuse ScenarioForge VM IDs and model settings, add
 profile and initializes eligible roles once per user; saved selections are
 preserved. See [provision import](provision-config.md).
 
+## Loading and progress
+
+The login form locks its fields and buttons while authentication is pending, and
+keeps them locked while navigating after success. Duplicate submissions are
+ignored. The dashboard verifies its session before requesting VM status.
+
+During dashboard retrieval, VM checks, role saves, result loading and application
+maintenance, edit/submit/refresh controls are disabled. A status banner shows the
+current step and elapsed time. VM-check percentages count finished checks for the
+currently authorized selected VMs (for example, 1 of 3 is 33%); they are not an
+estimate of remaining time or a claim that every VM is healthy. Authentication,
+HTTP requests and maintenance operations use an indeterminate indicator and their
+current status because their total work is unknown. Maintenance details remain
+readable while an operation is active.
+
+Manual **Refresh view** starts fresh VM checks in PVE mode. Automatic reads do not
+overlap, and polling pauses during a save or other foreground action. The browser
+resumes polling after the action and its follow-up read finish. On a request
+failure, controls unlock for retry; temporary service errors do not themselves
+send the user back to login. A confirmed expired session still requires login.
+Experiment jobs continue in the background with their existing run controls.
+
 ## Application versions
 
 Use **Check version**, **Update** and **Roll back** for the selected CAF and
@@ -195,7 +217,8 @@ between probe batches is 10 seconds (`--poll-seconds`, minimum 2, maximum 300).
 Guest checks have timeouts. PVE HTTP requests revalidate access and may schedule
 a bounded background refresh for that user; host probes run off the request path.
 Each user has a separate cached snapshot. Local-account requests read the existing
-shared cache. The browser reads the cache every 3 seconds;
+shared cache. The browser waits five seconds after each completed read before
+polling again;
 “Refresh view” reads the latest cache immediately. Check age and stale/unavailable
 indicators distinguish fresh results from the last successful observation.
 
@@ -260,3 +283,11 @@ to work around a timeout.
 
 Regression tests cover all three roles over HTTPS with blocked guest probes,
 per-VM ACL denial, group revocation during a batch, and the reduced PVE call count.
+
+The optional slow-response browser regression checks locked login/role/refresh
+controls, duplicate-submission suppression, measured 0/33/67/100 VM progress,
+nonoverlapping requests, transient-error recovery and mobile layout:
+
+```bash
+uv run --group dev python tests/browser_loading.py /tmp/caf-loading-preview
+```
