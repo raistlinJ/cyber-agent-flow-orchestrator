@@ -72,7 +72,7 @@ function badge(text, tone='') {return el('span', text, 'badge '+tone);}
 function timer(seconds, observed, live, sample=false) {const node=el('span',duration(seconds),'clock'); if(seconds!=null){node.dataset.seconds=seconds;node.dataset.observed=observed||'';node.dataset.live=live?'yes':'no';if(sample)node.dataset.source='sample';} return node;}
 function detail(list,label,value) {const row=el('div');row.append(el('dt',label),el('dd',value));list.append(row);}
 function render(data) {
- snapshot=data; renderRoles(data); renderSamples(data); renderSampleActivity(data); renderUpdates(data); renderConsole();$('workflow').textContent=data.workflow_id||'';
+ snapshot=data; renderRoles(data); renderModelConfigs(data); renderSamples(data); renderSampleActivity(data); renderUpdates(data); renderConsole();$('workflow').textContent=data.workflow_id||'';
  const notice=$('notice'); const errors=(data.errors||[]).map(x=>x.error);notice.hidden=!errors.length;notice.textContent=errors.join(' · ');
  const cards=$('machines');cards.replaceChildren();
  if(!data.vms.length)cards.append(el('div','Checking configured machines…','empty'));
@@ -135,7 +135,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').close();$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;selectedResults=null;resultsVersion=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;modelDrafts={};$('model-config-cards').replaceChildren();$('model-config-panel').hidden=true;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').close();$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;selectedResults=null;resultsVersion=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
@@ -159,6 +159,62 @@ $('role-form').addEventListener('submit',async event=>{
   rolesDirty=false;operation='Loading your updated VM selections…';syncBusy();$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh(true);
  }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;operation=null;syncBusy();schedulePoll();}
 });
+let modelDrafts={};
+function renderModelConfigs(data){
+ $('model-config-panel').hidden=!data.owner;
+ if(!data.owner)return;
+ for(const role of ['participant','scenarioforge']){
+  const vmid=data.roles?.[role];let card=$('model-config-'+role);
+  if(card&&card.dataset.vmid===String(vmid??'')){syncModelControls(role);continue;}
+  delete modelDrafts[role];
+  const form=el('form',null,'card model-config');form.id='model-config-'+role;form.dataset.vmid=vmid??'';
+  form.append(el('h3',role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',vmid?`VM ${vmid} · ${role==='participant'?'configs/cli.json':'.scenarioforge.env'}`:'Select and save a VM first.','small'));
+  const fields=[['provider','Provider'],['url','API base URL'],['model','Model name']];
+  for(const [key,title] of fields){const label=el('label',title);const input=el(key==='provider'?'select':'input');input.id=`model-${role}-${key}`;input.name=key;input.required=true;
+   if(key==='provider')for(const value of role==='participant'?['openai','litellm','ollama_direct','claude']:['litellm','openai','ollama'])input.add(new Option(value==='openai'?'OpenAI / compatible':value,value));
+   else{input.type=key==='url'?'url':'text';input.maxLength=2048;input.placeholder=key==='url'?'https://model-server.example/v1':'Model ID from your server';}
+   label.append(input);form.append(label);
+  }
+  const tls=el('label','Verify TLS certificates '),checkbox=el('input');checkbox.type='checkbox';checkbox.checked=true;checkbox.id=`model-${role}-ssl`;tls.append(checkbox);form.append(tls);
+  const keyLabel=el('label','Replacement API key'),key=el('input');key.type='password';key.autocomplete='new-password';key.maxLength=8192;key.placeholder='Leave blank to preserve the guest key';key.id=`model-${role}-key`;keyLabel.append(key);form.append(keyLabel);
+  const clearLabel=el('label','Clear stored API key '),clear=el('input');clear.type='checkbox';clear.id=`model-${role}-clear`;clearLabel.append(clear);form.append(clearLabel);
+  const message=el('p','Pull the configuration before editing.','small');message.id=`model-${role}-message`;message.setAttribute('role','status');form.append(message);
+  const buttons=el('div',null,'model-buttons');
+  for(const [action,label] of [['read','Pull from VM'],['save','Save to VM'],...(role==='participant'?[['use','Use for experiments']]:[])]){const button=el('button',label);button.type=action==='save'?'submit':'button';button.id=`model-${role}-${action}`;if(action!=='save')button.addEventListener('click',()=>modelConfigAction(role,action));buttons.append(button);}form.append(buttons);
+  form.addEventListener('input',()=>{if(modelDrafts[role])modelDrafts[role].dirty=true;syncModelControls(role);});
+  form.addEventListener('submit',event=>{event.preventDefault();modelConfigAction(role,'save');});
+  if(card)card.replaceWith(form);else $('model-config-cards').append(form);syncModelControls(role);
+ }
+}
+function syncModelControls(role){
+ const form=$('model-config-'+role);if(!form)return;const available=Boolean(form.dataset.vmid),draft=modelDrafts[role],canWrite=Boolean(snapshot?.updates?.can_update);
+ for(const input of form.querySelectorAll('input,select'))input.disabled=!draft||!canWrite;
+ $(`model-${role}-read`).disabled=!available;
+ $(`model-${role}-save`).disabled=!draft||!canWrite;
+ if(role==='participant')$(`model-${role}-use`).disabled=!draft||draft.dirty||!canWrite;
+ if(!canWrite)$(`model-${role}-message`).textContent=`Saving and using model settings requires the ${snapshot?.updates?.group||'caf-maintainers'} group and enabled application maintenance.`;
+}
+async function modelConfigAction(role,action){
+ if(isBusy())return;
+ if(rolesDirty){$(`model-${role}-message`).textContent='Save VM role selections before changing model settings.';return;}
+ if(action==='read'&&modelDrafts[role]?.dirty&&!confirm('Discard unsaved model settings and pull from the VM?'))return;
+ const body={role,action};if(action!=='read')body.token=modelDrafts[role]?.token;
+ if(action==='save'){
+  body.settings={provider:$(`model-${role}-provider`).value,url:$(`model-${role}-url`).value.trim(),model:$(`model-${role}-model`).value.trim(),ssl_verify:$(`model-${role}-ssl`).checked};
+  const key=$(`model-${role}-key`);if($(`model-${role}-clear`).checked)body.api_key='';else if(key.value)body.api_key=key.value;key.value='';
+ }
+ operation=action==='read'?'Reading model configuration from the VM…':action==='save'?'Saving model configuration in the VM…':'Saving model settings for future experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
+ try{
+  await finishDashboardRead();const response=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(body)});delete body.api_key;
+  const data=await response.json();if(!response.ok)throw Error(data.error||'Model configuration operation failed');
+  modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:false};
+  for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=data.settings[key];$(`model-${role}-ssl`).checked=data.settings.ssl_verify;$(`model-${role}-key`).value='';$(`model-${role}-clear`).checked=false;
+  $(`model-${role}-message`).textContent=(action==='use'?'Future experiments will use these settings. ':action==='save'?'Saved in the VM. Start a new app session to load file changes. ':data.exists?'Configuration loaded. ':'No configuration file yet; saving will create it. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.backup?'Backup: '+data.backup:'');
+  if(action==='use')await refresh();
+ }catch(error){$(`model-${role}-message`).textContent=error.message;}
+ finally{delete body.api_key;operation=null;syncModelControls(role);syncBusy();schedulePoll();}
+}
+
 function resultVersion(run){return JSON.stringify([run.recorded_status,run.coordinator_active,run.message,run.error,run.evaluation?.summary]);}
 async function loadResults(id){
  try{

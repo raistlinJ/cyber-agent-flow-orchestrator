@@ -375,6 +375,27 @@ See [setup, source configuration, CLI and recovery](docs/application-updates.md)
 
 ## Run bundled samples in the WebUI
 
+### Choose your model before running
+
+On **Lab setup → Application model settings**, choose **Pull from VM** for
+Cyber-agent-flow. The editor reads `configs/cli.json` from the selected participant.
+For an OpenAI-compatible endpoint, select **OpenAI / compatible**, enter the API
+base URL (usually `https://your-server/v1`) and its exact model name, then **Save
+to VM** and **Use for experiments**. If the pulled settings are already correct,
+choose **Use for experiments** directly. Future samples and authenticated
+`user-run` workflows for your account and that VM use the selected model.
+
+The same page can read/save ScenarioForge's model settings in `.scenarioforge.env`.
+Other config fields are preserved. API keys are never shown when pulled; a blank
+replacement field preserves the key. Saving requires the configured maintenance
+group (default `caf-maintainers`). See [model configuration and credential handling](docs/webui.md#application-model-settings).
+
+The endpoint must be reachable from the participant VM. `localhost` means that
+VM, not the Proxmox host. Samples otherwise use the host runtime YAML, whose
+shipped example specifies Ollama; they do not automatically inherit app settings.
+
+### Create and run a sample
+
 Sign in with PVE, select your **Cyber-agent-flow** participant VM on **Lab setup**, and **Save VM
 roles**. On **Experiments**, choose **New**, select a sample and **Create experiment**.
 The new table row stays **Ready** until you press its **Run** icon. Nothing needs to be

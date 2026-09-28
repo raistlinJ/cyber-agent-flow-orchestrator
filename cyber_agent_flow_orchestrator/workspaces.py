@@ -96,7 +96,8 @@ class Workspace:
         roles = self.roles()
         if any(roles[k] is None for k in ('scenarioforge', 'participant')):
             raise ValueError('Select ScenarioForge and participant VMs in the WebUI first')
-        cfg, runtime = deepcopy(cfg), deepcopy(runtime)
+        from .model_config import apply_model
+        cfg, runtime = deepcopy(cfg), apply_model(self, runtime, roles['participant'])
         backend = runtime['backend']
         mapping = {backend['app_vmid']: roles['scenarioforge'], backend['participant_vmid']: roles['participant']}
         old_core = cfg.get('monitoring', {}).get('core_vmid')

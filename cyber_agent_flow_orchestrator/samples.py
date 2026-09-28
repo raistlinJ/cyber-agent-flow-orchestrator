@@ -113,10 +113,12 @@ class SampleManager:
         self.lock, self.stopping = threading.Lock(), threading.Event()
         self.jobs = {}
 
-    def catalog(self, roles):
+    def catalog(self, roles, workspace=None):
+        from .model_config import apply_model
+        runtime = apply_model(workspace, self.runtime, roles.get('participant')) if workspace else self.runtime
         return {'items': [dict(id=name, **CATALOG[name]) for name in self.enabled],
-                'participant_vmid': roles.get('participant'), 'model': self.runtime['model']['name'],
-                'provider': self.runtime['model']['provider']}
+                'participant_vmid': roles.get('participant'), 'model': runtime['model']['name'],
+                'provider': runtime['model']['provider']}
 
     def close(self):
         self.stopping.set()
@@ -197,7 +199,8 @@ class SampleManager:
         if vmid is None:
             raise SampleRequestError('Save a Cyber-agent-flow VM selection first')
         access.require_vm(vmid)
-        runtime = deepcopy(self.runtime)
+        from .model_config import apply_model
+        runtime = apply_model(workspace, self.runtime, vmid)
         runtime['backend'].update(participant_vmid=vmid, before_trial=[])
         runtime['backend'].pop('app_vmid', None)
         # These samples use only participant loopback; no real-scenario reset hooks.

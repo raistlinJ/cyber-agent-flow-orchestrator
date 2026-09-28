@@ -27,6 +27,8 @@ class UserDashboard:
         self.samples = SampleManager(self.runtime, runs_root, samples)
         from .updates import UpdateManager
         self.updates = UpdateManager(self.cfg, self.runtime, runs_root, updates)
+        from .model_config import ModelConfigs
+        self.model_configs = ModelConfigs(self.cfg, self.runtime, runs_root, (self.updates.config or {}).get('group', 'caf-maintainers'), enabled=self.updates.config is not None)
 
     def start(self):
         pass  # Monitoring begins only with an authenticated request.
@@ -111,7 +113,7 @@ class UserDashboard:
                             'status': 'Checking VM power, guest access and applications' if value['refreshing'] else 'VM checks complete'}
         # Trial progress is independent of a potentially slow guest observation.
         value['runs'] = service.list_runs(workspace.runs)
-        value['samples'] = self.samples.catalog(value['roles'])
+        value['samples'] = self.samples.catalog(value['roles'], workspace)
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         access.current()
         return value

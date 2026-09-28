@@ -293,6 +293,54 @@ alter any real scenario's preparation/reset steps.
 
 ## Select machines and application checks
 
+### Application model settings
+
+After saving VM roles, **Lab setup → Application model settings** has an editor
+for each selected application:
+
+- **Pull from VM** reads the saved model connection fields through QEMU guest exec.
+  CAF uses `<engine.path>/configs/cli.json`; ScenarioForge uses
+  `<monitoring.scenarioforge_path>/.scenarioforge.env` (or its configured repository
+  directory). Missing files can be created by saving.
+- **Save to VM** updates provider, base URL, model, TLS verification and optionally
+  the API key. It preserves unrelated JSON values and environment-file lines,
+  including network scope, tools and CoreVM settings. Each existing file gets a
+  private `.caf-model-<id>.bak` backup before an atomic replacement. A changed
+  file or VM selection invalidates the loaded draft; pull again to continue.
+- **Use for experiments** on the CAF card adopts the saved values for this account
+  and participant VM. Save edits first. This updates future samples and `user-run`
+  materialization; already-created run configurations remain frozen. Standalone
+  evaluator and unscoped orchestrator CLI runs still use their explicit YAML.
+
+For an OpenAI-compatible server, CAF's provider is `openai`; the base URL generally
+includes `/v1`, and the model name must match the server. ScenarioForge supports
+`litellm` and `openai` for compatible APIs. The URL is used inside the VM, so a host
+or remote model service needs an address reachable from that VM.
+
+Pulling shows only whether a file contains an API key. Enter a replacement to
+change it, leave the field empty to preserve it, or explicitly select **Clear
+stored API key**. Keys travel through `qm --pass-stdin` and are not returned in the
+browser response, host preference files, or troubleshooting console. The application
+file and backups are mode 0600 with the original owner. When adopting CAF settings
+with a stored key, the guest creates a separate immutable mode-0600 EnvironmentFile
+under `/var/lib/caf-model-config/`; the host stores only its path and variable name.
+These snapshots are retained so old runs can continue to reference them.
+
+If CAF uses an environment-only key, its `api_key_env` name is adopted and the
+runtime's existing guest `backend.environment_file` remains in use. A key exported
+only in an interactive terminal is not inherited by the systemd evaluation worker.
+Either configure that guest EnvironmentFile or save a replacement key through this
+editor. Clearing the file's key does not clear an independently configured environment.
+
+Reading requires access to the selected VM. Saving/adopting additionally requires
+the configured application maintenance group (default `caf-maintainers`); `updates:
+false` disables writes. Mutations refuse while the VM's evaluator lock or guest
+maintenance lock is held. No application restart is automatic: open a new CAF
+session or restart a long-running app as appropriate. CAF browser-saved settings,
+ScenarioForge browser state, explicit CLI flags, process environment, custom
+`CORETG_ENV_FILE` paths and ScenarioForge's encrypted per-user credential store are
+not imported or overwritten by this file editor and can take precedence.
+
 In PVE mode, **Choose your lab VMs** lists only your available QEMU VMs on the
 current node. Save your ScenarioForge, participant and CoreVM selections; they
 persist for your account and the dashboard refreshes automatically. Revoked or

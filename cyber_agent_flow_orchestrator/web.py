@@ -6,6 +6,7 @@ from pathlib import Path
 import threading
 from urllib.parse import parse_qs, urlsplit
 
+from .model_config import ModelConfigError
 from .config import load
 from .monitor import snapshot
 
@@ -242,6 +243,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     if set(data) != expected or any(not isinstance(v, str) for v in data.values()):
                         raise SampleRequestError('Invalid experiment request fields')
                     self.respond(202, dashboard.experiment(auth.access(token, revalidate=False), action, data))
+                elif path == '/api/model-config' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                    self.respond(200, dashboard.model_configs.exchange(auth.access(token, revalidate=False), data))
                 elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
                     if (set(data) - {'process_confirmation'} != {'role', 'action', 'ref', 'request_id'}
                             or any(not isinstance(v, str) for v in data.values())):
@@ -253,7 +256,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 self.respond(403, {'error': 'Access not granted'})
             except SampleBusy as exc:
                 self.respond(409, {'error': str(exc)})
-            except SampleRequestError as exc:
+            except (SampleRequestError, ModelConfigError) as exc:
                 self.respond(400, {'error': str(exc)})
             except UpdateError as exc:
                 self.respond(400, {'error': str(exc)})
