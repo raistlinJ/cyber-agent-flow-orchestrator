@@ -134,8 +134,9 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     if auth.provider.name == 'pve':
                         if not getattr(dashboard, 'scoped', False):
                             raise AccessDenied('A per-user dashboard is required for PVE login')
-                        force = parse_qs(urlsplit(self.path).query).get('refresh') == ['1']
-                        self.respond(200, dashboard.read(auth.access(token, revalidate=False), force=force))
+                        refresh = parse_qs(urlsplit(self.path).query).get('refresh')
+                        options = {'observe': False} if refresh == ['0'] else {'force': refresh == ['1']}
+                        self.respond(200, dashboard.read(auth.access(token, revalidate=False), **options))
                     else:
                         self.respond(200, dashboard.read())
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):

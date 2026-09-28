@@ -47,7 +47,7 @@ class UserDashboard:
             self.entries.pop(access.username, None)
         return {'roles': result}
 
-    def read(self, access, *, force=False):
+    def read(self, access, *, force=False, observe=True):
         available = access.inventory()
         permitted = {row['vmid'] for row in available}
         # inventory() has just checked this identity. Recheck inventory/identity
@@ -70,7 +70,7 @@ class UserDashboard:
                 except Exception:
                     entry['value'] = None
                 entry['future'], entry['at'] = None, time.monotonic()
-            if entry['future'] is None and (force or time.monotonic() - entry['at'] >= self.interval):
+            if entry['future'] is None and (force or (observe and time.monotonic() - entry['at'] >= self.interval)):
                 # Bound queued work, including login/session churn.
                 if self.slots.acquire(blocking=False):
                     selected = definitions(self.cfg, self.runtime)

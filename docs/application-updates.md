@@ -84,6 +84,12 @@ dashboard poll picks up the membership without restarting the orchestrator.
 are temporarily locked. If no VM is saved for the application, the card asks you
 to select one.
 
+Scheduled background refreshes leave the application buttons usable. Use
+**Automatic refresh** to select Never or every 1, 2, 5, or 10 minutes. An explicit
+version check/update still locks duplicate submissions and reports job progress
+until it finishes, even with Never selected. Progress reads no longer schedule
+repeated VM checks that keep the dashboard locked.
+
 ## Paths, sources and disabling the feature
 
 CAF uses the runtime YAML's `engine.path` and `engine.python`. ScenarioForge uses

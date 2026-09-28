@@ -287,6 +287,8 @@ def test_observation_progress_counts_completed_authorized_vms_and_forced_refresh
         assert not finished['refreshing']
         assert finished['loading']['percent'] == 100
         assert not dash.read(user)['refreshing']  # Respect ordinary observation interval.
+        dash.entries[user.username]['at'] = 0  # The cached observation is now due.
+        assert not dash.read(user, observe=False)['refreshing']  # Progress reads never restart probes.
         assert dash.read(user, force=True)['refreshing']  # Manual refresh starts fresh checks.
     finally:
         for event in release.values(): event.set()

@@ -4,11 +4,14 @@ const el = (tag, text, cls) => {const node = document.createElement(tag); if (te
 let snapshot = null, fetching = false, failed = false, rolesDirty = false, rolesSaving = false, sampleStarting = false;
 let initialized=false, operation=null, waitingForObservation=false, waitingForMaintenance=false, redirecting=false, maintenanceStarting=false;
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
-function isBusy(){return !initialized||fetching||Boolean(operation)||waitingForObservation||waitingForMaintenance||redirecting;}
+let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
+const refreshPeriods=['0','1','2','5','10'];
+try{const saved=localStorage.getItem('caf-refresh-minutes');if(refreshPeriods.includes(saved))$('refresh-period').value=saved;}catch{}
+function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||foregroundChecks||waitingForMaintenance||redirecting;}
 function syncBusy(){
- const busy=isBusy();if(busy&&!wasBusy)busySince=performance.now();wasBusy=busy;
+ const busy=isBusy(), loading=busy||fetching||waitingForObservation;if(loading&&!wasBusy)busySince=performance.now();wasBusy=loading;
  $('dashboard-controls').disabled=busy;$('dashboard-controls').setAttribute('aria-busy',String(busy));$('sign-out').disabled=busy;
- const bar=$('loading-progress');bar.hidden=false;$('loading-status').classList.toggle('complete',!busy&&!failed);
+ const bar=$('loading-progress');bar.hidden=false;$('loading-status').classList.toggle('complete',!loading&&!failed);
  let label, percent=null;
  if(redirecting)label='Opening sign-in…';
  else if(operation)label=operation;
@@ -18,7 +21,7 @@ function syncBusy(){
  else if(failed){label='Loading failed. Use Refresh view to try again.';bar.hidden=true;}
  else{label='Dashboard ready · 100%';percent=100;}
  if(percent==null)bar.removeAttribute('value');else bar.value=percent;
- $('loading-label').textContent=label;$('loading-elapsed').textContent=busy?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
+ $('loading-label').textContent=!busy&&loading?`Background refresh · ${label} · controls available`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
  syncUpdateControls(busy?label:null);
 }
 function sessionExpired(){redirecting=true;clearPrivateView();syncBusy();location.replace('/login');throw Error('Your session expired. Sign in again.');}
@@ -60,31 +63,40 @@ function render(data) {
  if(!jobs.length)commands.append(el('p','No unfinished workflow commands recorded. Applications may still be running above.','empty'));
  const runs=$('runs');runs.replaceChildren(); $('no-runs').hidden=Boolean(data.runs.length);
  for(const run of data.runs){const row=el('tr'),evaluation=run.evaluation,summary=evaluation?.summary;const title=el('td'); if(data.owner){const id=run.output.split('/').pop();const button=el('button',run.workflow_id||id);button.type='button';button.addEventListener('click',()=>showResults(id));title.append(button,el('div',id,'small'));if(run.message)title.append(el('div',run.message,'small'));}else{title.textContent=run.workflow_id||run.output;}row.append(title);const state=el('td');state.append(badge(run.recorded_status||'read error',run.recorded_status==='completed'?'good':run.error?'warn':''));row.append(state,el('td',run.coordinator_active?'Active':'Idle'),el('td',evaluation?`${summary.trials_observed} / ${evaluation.planned_trials}`:'Not started'),el('td',summary?String(summary.verified_successes):'—'));if(run.error)row.title=run.error;runs.append(row);}
- waitingForMaintenance=Boolean((data.updates?.jobs||[]).some(job=>['queued','running'].includes(job.status)));waitingForObservation=Boolean(data.refreshing&&(data.loading?data.loading.total>0:(!data.checked_at||data.vms.length>0)));tick();syncBusy();
+ waitingForMaintenance=Boolean((data.updates?.jobs||[]).some(job=>['queued','running'].includes(job.status)));waitingForObservation=Boolean(data.refreshing&&(data.loading?data.loading.total>0:(!data.checked_at||data.vms.length>0)));if(!waitingForObservation)foregroundChecks=false;tick();syncBusy();
 }
-function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,(snapshot.poll_seconds||10)*3));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&!stale&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale?'Last observation; refresh required':'Elapsed time since process start';}}
-async function refresh(force=false){
+function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,Number($('refresh-period').value)*120));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&!stale&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale?'Last observation; refresh required':'Elapsed time since process start';}}
+async function refresh(force=false, background=false){
  if(refreshPromise)return refreshPromise;
- fetching=true;syncBusy();
+ clearTimeout(pollTimer);fetching=true;blockingRefresh=!background;if(force&&!background)foregroundChecks=true;syncBusy();
  refreshPromise=(async()=>{
   try{
    if(!csrfToken){await loadSession();syncBusy();}
-   const response=await fetch(force?'/api/status?refresh=1':'/api/status',{cache:'no-store'});
+   const response=await fetch(force?'/api/status?refresh=1':'/api/status?refresh=0',{cache:'no-store'});
    if(response.status===401)sessionExpired();
    if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);
    const data=await response.json();failed=false;render(data);return true;
-  }catch(error){failed=true;waitingForObservation=false;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();return false;}
-  finally{fetching=false;initialized=true;syncBusy();}
+  }catch(error){failed=true;foregroundChecks=false;waitingForObservation=false;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();return false;}
+  finally{fetching=false;blockingRefresh=false;initialized=true;syncBusy();}
  })();
- try{return await refreshPromise;}finally{refreshPromise=null;}
+ try{return await refreshPromise;}finally{refreshPromise=null;schedulePoll();}
 }
-$('refresh').addEventListener('click',()=>{if(!isBusy())refresh(true);});
+$('refresh').addEventListener('click',async()=>{
+ if(isBusy())return;operation='Refreshing dashboard…';syncBusy();
+ try{await finishDashboardRead(true);await refresh(true);}
+ catch(error){if(!redirecting){$('notice').hidden=false;$('notice').textContent=error.message;}}
+ finally{operation=null;syncBusy();schedulePoll();}
+});
+async function finishDashboardRead(allowFailure=false){
+ if(refreshPromise&&!await refreshPromise&&!allowFailure)throw Error('Dashboard refresh failed. Refresh the view before retrying.');
+ if(redirecting)throw Error('Your session expired. Sign in again.');
+}
 $('dashboard-controls').addEventListener('click',event=>{if(isBusy()&&!event.target.closest('summary')){event.preventDefault();event.stopImmediatePropagation();}},true);
 $('sign-out').addEventListener('click',async()=>{
  if(isBusy())return;operation='Signing out…';syncBusy();
- try{const response=await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});if(response.ok||response.status===401){redirecting=true;clearPrivateView();location.replace('/login');return;}throw Error('Sign out failed');}
+ try{await finishDashboardRead();const response=await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});if(response.ok||response.status===401){redirecting=true;clearPrivateView();location.replace('/login');return;}throw Error('Sign out failed');}
  catch(error){$('notice').hidden=false;$('notice').textContent='Unable to sign out. Please try again.';}
- finally{operation=null;syncBusy();}
+ finally{operation=null;syncBusy();schedulePoll();}
 });
 
 function clearPrivateView(){snapshot=null;waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
@@ -102,19 +114,20 @@ for(const role of ['scenarioforge','participant','core'])$('role-'+role).addEven
 $('role-form').addEventListener('submit',async event=>{
  event.preventDefault();if(isBusy()||rolesSaving)return;rolesSaving=true;operation='Saving VM roles and checking access…';syncBusy();
  try{
+  await finishDashboardRead();
   if(!csrfToken)await loadSession();
   const roles=Object.fromEntries(['scenarioforge','participant','core'].map(role=>[role,$('role-'+role).value?Number($('role-'+role).value):null]));
   const response=await fetch('/api/roles',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(roles)});
   const body=await response.json().catch(()=>({}));if(!response.ok)throw Error(response.status===504?'Saving VM roles timed out. Refresh to check whether they were saved.':body.error||'Unable to save roles');
-  rolesDirty=false;operation='Loading your updated VM selections…';syncBusy();$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh();
- }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;operation=null;syncBusy();}
+  rolesDirty=false;operation='Loading your updated VM selections…';syncBusy();$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh(true);
+ }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;operation=null;syncBusy();schedulePoll();}
 });
 async function showResults(id){
  if(isBusy())return;operation='Loading experiment results…';syncBusy();
  $('result-panel').hidden=false;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren();$('download-dataset').hidden=true;
- try{const response=await fetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});if(!response.ok)throw Error('Results unavailable or access not granted');const data=await response.json();renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);if(data.evaluation){$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;$('download-dataset').hidden=false;}}
+ try{await finishDashboardRead();const response=await fetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});if(!response.ok)throw Error('Results unavailable or access not granted');const data=await response.json();renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);if(data.evaluation){$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;$('download-dataset').hidden=false;}}
  catch(error){$('result-content').textContent=error.message;}
- finally{operation=null;syncBusy();}
+ finally{operation=null;syncBusy();schedulePoll();}
 }
 $('close-results').addEventListener('click',()=>{$('result-panel').hidden=true;$('result-content').textContent='';});
 
@@ -137,13 +150,14 @@ async function startSample(id){
  if(rolesDirty){$('sample-message').textContent='Save your VM role changes before starting a sample.';return;}
  sampleStarting=true;operation='Submitting sample experiment…';syncBusy();if(snapshot)renderSamples(snapshot);$('sample-message').textContent='Starting sample…';
  try{
+  await finishDashboardRead();
   const requestId=crypto.randomUUID().replaceAll('-','');
   if(!csrfToken)await loadSession();
   const response=await fetch('/api/samples/run',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:id,request_id:requestId})});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||`Request failed (HTTP ${response.status}); refresh to check your runs before retrying`);
   $('sample-message').textContent=`Started ${data.run_id}. Follow progress in Experiment runs below.`;await refresh();
  }catch(error){$('sample-message').textContent=error.message;}
- finally{sampleStarting=false;operation=null;if(snapshot)renderSamples(snapshot);syncBusy();}
+ finally{sampleStarting=false;operation=null;if(snapshot)renderSamples(snapshot);syncBusy();schedulePoll();}
 }
 function renderResultSummary(data){
  const target=$('result-summary');target.replaceChildren();
@@ -199,16 +213,25 @@ async function maintain(role,action,ref){
  if(rolesDirty){$('update-message').textContent='Save VM role changes before application maintenance.';return;}
  maintenanceStarting=true;operation='Submitting application maintenance…';syncBusy();if(snapshot)renderUpdates(snapshot);
  try{
+  await finishDashboardRead();
   if(!csrfToken)await loadSession();
   const response=await fetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action,ref,request_id:crypto.randomUUID().replaceAll('-','')})});
   const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||`Maintenance request failed (HTTP ${response.status})`);
   $('update-message').textContent=`Maintenance ${result.id} submitted. Follow its status below.`;await refresh();
  }catch(error){$('update-message').textContent=error.message;}
- finally{maintenanceStarting=false;operation=null;if(snapshot)renderUpdates(snapshot);syncBusy();}
+ finally{maintenanceStarting=false;operation=null;if(snapshot)renderUpdates(snapshot);syncBusy();schedulePoll();}
 }
 
-// Schedule the next poll after completion: slow PVE calls never pile up. Actions
-// own the request slot until their follow-up dashboard read finishes.
-async function poll(){if(!fetching&&!operation&&!redirecting)await refresh();if(!redirecting)setTimeout(poll,5000);}
+// Progress reads collect an existing check/job without starting another VM probe.
+// Idle automatic refreshes start a new batch at the selected cadence.
+function schedulePoll(){
+ clearTimeout(pollTimer);
+ if(fetching||operation||redirecting)return;
+ const active=Boolean(snapshot?.refreshing||waitingForMaintenance||(snapshot?.runs||[]).some(run=>run.coordinator_active||run.recorded_status==='queued'));
+ const minutes=Number($('refresh-period').value);
+ if(!active&&!minutes)return;
+ pollTimer=setTimeout(()=>{if(!fetching&&!operation&&!redirecting)refresh(!active,true);},active?5000:minutes*60000);
+}
+$('refresh-period').addEventListener('change',()=>{try{localStorage.setItem('caf-refresh-minutes',$('refresh-period').value);}catch{}schedulePoll();tick();});
 setInterval(()=>{tick();syncBusy();},1000);
-syncBusy();poll();
+syncBusy();refresh(true);

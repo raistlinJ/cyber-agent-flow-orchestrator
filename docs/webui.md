@@ -60,8 +60,11 @@ The login form locks its fields and buttons while authentication is pending, and
 keeps them locked while navigating after success. Duplicate submissions are
 ignored. The dashboard verifies its session before requesting VM status.
 
-During dashboard retrieval, VM checks, role saves, result loading and application
-maintenance, edit/submit/refresh controls are disabled. A status banner shows the
+During initial/manual dashboard retrieval and VM checks, role saves, result loading
+and application maintenance, edit/submit/refresh controls are disabled. Scheduled
+background refreshes keep controls usable. If you submit an action during an
+in-flight background read, it waits for that read before dispatching; duplicate
+submissions are blocked. A status banner shows the
 current step and elapsed time. VM-check percentages count finished checks for the
 currently authorized selected VMs (for example, 1 of 3 is 33%); they are not an
 estimate of remaining time or a claim that every VM is healthy. Authentication,
@@ -69,9 +72,14 @@ HTTP requests and maintenance operations use an indeterminate indicator and thei
 current status because their total work is unknown. Maintenance details remain
 readable while an operation is active.
 
-Manual **Refresh view** starts fresh VM checks in PVE mode. Automatic reads do not
-overlap, and polling pauses during a save or other foreground action. The browser
-resumes polling after the action and its follow-up read finish. On a request
+Manual **Refresh view** starts fresh VM checks in PVE mode. **Automatic refresh**
+offers Never or every 1, 2, 5, or 10 minutes, defaulting to 1 minute. The preference
+is saved in this browser and can be changed while a check is running. Never stops
+idle polling; it does not cancel a check or job already started. Active checks,
+maintenance and experiments continue reporting progress every five seconds until
+finished. These progress reads do not start another VM check in PVE mode.
+Automatic reads do not overlap, and polling pauses during a save or other
+foreground action. On a request
 failure, controls unlock for retry; temporary service errors do not themselves
 send the user back to login. A confirmed expired session still requires login.
 Experiment jobs continue in the background with their existing run controls.
@@ -212,15 +220,21 @@ hypervisors are not implemented here.
 
 ## Refresh and timing
 
-A background monitor polls the three VM roles concurrently. The default pause
-between probe batches is 10 seconds (`--poll-seconds`, minimum 2, maximum 300).
-Guest checks have timeouts. PVE HTTP requests revalidate access and may schedule
-a bounded background refresh for that user; host probes run off the request path.
-Each user has a separate cached snapshot. Local-account requests read the existing
-shared cache. The browser waits five seconds after each completed read before
-polling again;
-“Refresh view” reads the latest cache immediately. Check age and stale/unavailable
-indicators distinguish fresh results from the last successful observation.
+The browser's **Automatic refresh** setting controls idle status requests and new
+PVE VM-check batches. Intervals start after the preceding check/action completes;
+slow calls never pile up. A page load, a saved role change or **Refresh view** also
+requests fresh PVE VM checks. The three roles are checked concurrently with bounded
+guest timeouts, off the HTTP request path. Every read still revalidates access.
+Each user has a separate cached snapshot. `/api/status?refresh=0` reads progress
+without scheduling probes; `?refresh=1` requests a fresh batch if none is running.
+The unqualified status API retains the server cache interval (`--poll-seconds`,
+default 10, minimum 2, maximum 300 seconds).
+
+In legacy local-account mode, the shared server monitor still runs on
+`--poll-seconds`; the browser setting controls only how often its cache is read.
+Check age and stale/unavailable indicators distinguish the last successful
+observation from current activity. Never still loads once when the page opens,
+and you can use **Refresh view** at any time the dashboard is idle.
 
 Elapsed process clocks advance between observations; exited processes disappear
 on the next successful poll. Unconfirmed job timers do not advance in the browser.
@@ -290,4 +304,5 @@ nonoverlapping requests, transient-error recovery and mobile layout:
 
 ```bash
 uv run --group dev python tests/browser_loading.py /tmp/caf-loading-preview
+uv run --group dev python tests/browser_refresh.py /tmp/caf-refresh-preview
 ```

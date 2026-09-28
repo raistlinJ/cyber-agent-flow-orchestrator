@@ -202,10 +202,12 @@ def test_logout_during_group_check_cannot_restore_session(pve):
 
 
 def test_https_webui_pve_login_totp_revocation_and_no_fallback(pve, tmp_path):
+    reads = []
     class Dashboard:
         scoped = True
-        def read(self, access, *, force=False):
+        def read(self, access, *, force=False, observe=True):
             access.current()
+            reads.append((force, observe))
             return {'private_lab_data': True}
     auth = make_auth(pve)
     with secure_server(Dashboard(), tmp_path / 'web', auth=auth) as server:
@@ -225,6 +227,9 @@ def test_https_webui_pve_login_totp_revocation_and_no_fallback(pve, tmp_path):
         cookie = headers['Set-Cookie'].split(';', 1)[0]
         assert 'PVE:' not in cookie
         assert request(server, '/api/status', cookie=cookie)[0] == 200
+        assert request(server, '/api/status?refresh=0', cookie=cookie)[0] == 200
+        assert request(server, '/api/status?refresh=1', cookie=cookie)[0] == 200
+        assert reads == [(False, True), (False, False), (True, True)]
         session = json.loads(request(server, '/api/session', cookie=cookie)[2])
         assert session['role'] == 'orchestrator'
         pve[0]['failure'] = 500

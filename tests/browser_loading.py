@@ -86,7 +86,7 @@ def main():
                     page.route('**/api/status?refresh=1', lambda route: refreshes.append(route))
                     page.locator('#refresh').click()
                     expect(page.locator('#role-participant')).to_be_disabled()
-                    expect(page.locator('#loading-label')).to_contain_text('Retrieving dashboard')
+                    expect(page.locator('#loading-label')).to_contain_text('Refreshing dashboard')
                     refreshes[0].fulfill(status=503, content_type='application/json', body='{"error":"Temporary outage"}')
                     expect(page.locator('#notice')).to_contain_text('503')
                     expect(page.locator('#refresh')).to_be_enabled()
