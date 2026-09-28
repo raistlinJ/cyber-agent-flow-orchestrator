@@ -46,7 +46,9 @@ pveum user modify researcher@pve --groups caf-maintainers --append 1
 Keep the user's existing `caf-orchestrator` membership and VM/pool permissions.
 The equivalent group membership can be configured in the PVE WebUI. Maintenance
 permission is checked again before each guest command and file-transfer chunk;
-removing either permission blocks further dispatch. Updates affect everyone using
+removing either permission blocks further dispatch. An already dispatched guest
+activation can finish its bounded transaction; an authorized maintainer can inspect
+and recover it afterward. Updates affect everyone using
 the VM, not just the operator's private experiment results.
 
 ## Use the WebUI
@@ -121,7 +123,8 @@ generated tools, scenario outputs and results at their existing locations. Track
 local edits and untracked files that conflict with the new revision cause refusal;
 there is no `reset --hard`, `git clean`, forced checkout or automatic stashing.
 Commit/preserve such edits or resolve the conflict deliberately before retrying.
-The guest branch and origin configuration are not rewritten; subsequent updates
+Previous revisions are pinned in `refs/caf-orchestrator/releases/` so Git garbage
+collection cannot discard rollback source. The guest branch and origin configuration are not rewritten; subsequent updates
 should use the orchestrator, rather than expecting `git pull` on a detached HEAD.
 
 A failed service restart triggers an attempt to restore the original commit and

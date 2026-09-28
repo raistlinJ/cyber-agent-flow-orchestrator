@@ -1,8 +1,8 @@
 # CLI and WebUI boundary
 
 The CLI and a WebUI with PVE VM-role selection and monitoring are available. Both use application services
-rather than invoke each other's command lines. Browser execution is restricted to
-a bundled sample catalog with background workers. See [the dashboard guide](webui.md).
+rather than invoke each other's command lines. Browser execution supports a bundled sample catalog and scoped application
+maintenance through background workers. See [the dashboard guide](webui.md).
 
 ```mermaid
 flowchart TD
@@ -97,3 +97,20 @@ run ID. Disabled IDs are rejected server-side. Repeated IDs return the existing
 run, and capacity conflicts return 409. `GET /api/runs/{id}/dataset.csv` resolves
 only beneath the requesting owner's workspace. The proxy preserves its download
 header. Model answers and trial files remain in the evaluator's normal format.
+
+## Application maintenance
+
+`POST /api/applications` accepts exactly `role` (`participant` or `scenarioforge`),
+`action` (`inspect`, `update`, `rollback`), `ref` and `request_id`. The role resolves
+to the account's saved VM; paths, service names and repository URLs come only from
+administrator configuration. Requests require PVE login, same-origin and CSRF
+checks. Update/rollback additionally recheck `updates.group` membership before
+each guest dispatch. Inspection uses ordinary scoped VM access.
+
+`UpdateManager` runs bounded background workers and persists private job records
+under the owner's workspace. `/api/status` includes those records and maintenance
+capabilities. `user-app` invokes the same manager. The host packages Git objects;
+`update_guest.py` stages and validates the release, coordinates service state and
+source checkout, and records rollback/recovery state. Host target/VM leases plus
+the evaluator's shared guest maintenance guard serialize updates with launches.
+See [application update behavior and limits](application-updates.md).

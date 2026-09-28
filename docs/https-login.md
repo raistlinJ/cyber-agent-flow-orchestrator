@@ -21,7 +21,8 @@ flowchart LR
 ![Orchestrator login page](images/login-preview.png)
 
 The dashboard monitors VMs, saves PVE users’ role selections and can run a fixed
-[sample catalog](webui.md#bundled-samples). Authentication protects its page and API;
+[sample catalog](webui.md#bundled-samples) or perform
+[application maintenance](application-updates.md). Authentication protects its page and API;
 PVE group and VM permissions gate each guest operation. The local-account dashboard
 remains a shared monitor without sample launch controls.
 
@@ -176,7 +177,7 @@ boundary. The backend requires a random per-start proxy secret that is never
 forwarded to the browser. Knowing its loopback port or supplying spoofed
 `X-Forwarded-*` headers does not grant access. The proxy forwards only to that fixed
 backend and uses no shared browser-cookie jar. POST requests enforce same-origin
-and CSRF checks before any authenticated action; logout, PVE VM-role selection and sample launch use these checks. Login uses same-origin checks before creating a session.
+and CSRF checks before any authenticated action; logout, PVE VM-role selection, sample launch and application maintenance use these checks. Login uses same-origin checks before creating a session.
 
 The password implementation uses the maintained
 [argon2-cffi PasswordHasher](https://argon2-cffi.readthedocs.io/en/stable/api.html).

@@ -125,7 +125,8 @@ def active_processes(root):
 def validate_checkout(stage, original, python, role, *, rollback=False):
     # Dependency installation is deliberately separate: offline updates must not
     # mutate a shared environment or download packages behind the user's back.
-    for name in DEPENDENCIES:
+    manifests = set(DEPENDENCIES) | {p.name for base in (original, stage) for p in base.glob('requirements*.txt')}
+    for name in sorted(manifests):
         old, new = original / name, stage / name
         if (old.read_bytes() if old.is_file() else None) != (new.read_bytes() if new.is_file() else None):
             raise ValueError(f'Dependency manifest changed: {name}. Prepare dependencies through provisioning before this source update.')
