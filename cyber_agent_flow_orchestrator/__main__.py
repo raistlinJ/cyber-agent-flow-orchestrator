@@ -2,7 +2,6 @@
 import argparse
 import json
 import sys
-from . import service
 
 
 def main(argv=None):
@@ -72,6 +71,9 @@ def main(argv=None):
     cert.add_argument('--days', type=int, default=30)
     args = parser.parse_args(argv)
     try:
+        from .compatibility import check_evaluator
+        check_evaluator()
+        from . import service
         if args.command == 'serve':
             from .bootstrap import prepare
             from .web import serve

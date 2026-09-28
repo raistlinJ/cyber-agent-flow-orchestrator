@@ -75,6 +75,12 @@ def main(argv=None, *, project=None):
         print('Installing orchestrator dependencies with uv sync...', flush=True)
         result = subprocess.run([uv, 'sync', *sync_args], cwd=project)
         if result.returncode == 0:
+            result = subprocess.run([uv, 'run', '--no-sync', 'python', '-m',
+                                     'cyber_agent_flow_orchestrator.compatibility'], cwd=project)
+            if result.returncode:
+                print('Dependencies synced, but the installation is not ready. '
+                      'The evaluator checkout was preserved; update it to a compatible revision.', file=sys.stderr)
+                return result.returncode
             print('Installed. Start from the orchestrator directory:\n'
                   '  uv run cyber-agent-flow-orchestrator\n'
                   'Missing certificates are created on first launch; existing pairs are preserved.', flush=True)

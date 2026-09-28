@@ -60,7 +60,9 @@ def test_existing_checkout_is_preserved_and_sync_runs(checkout, tmp_path, monkey
     monkeypatch.setattr(installer.shutil, 'which', lambda name: '/usr/bin/' + name)
     monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **k: calls.append((a, k)) or subprocess.CompletedProcess(a, 0))
     assert installer.main(['--', '--group', 'dev'], project=project) == 0
-    assert calls == [((['/usr/bin/uv', 'sync', '--group', 'dev'],), {'cwd': project})]
+    assert calls == [((['/usr/bin/uv', 'sync', '--group', 'dev'],), {'cwd': project}),
+                     ((['/usr/bin/uv', 'run', '--no-sync', 'python', '-m',
+                        'cyber_agent_flow_orchestrator.compatibility'],), {'cwd': project})]
     assert (destination / 'local-edit').read_text() == 'keep this'
 
 
@@ -90,4 +92,18 @@ def test_sync_failure_is_reported_and_download_is_preserved(checkout, tmp_path, 
     monkeypatch.setattr(installer.shutil, 'which', lambda name: '/usr/bin/' + name)
     monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a, 7))
     assert installer.main([], project=project) == 7
+    assert installer.valid_checkout(tmp_path / 'cyber-agent-flow-eval')
+
+
+def test_failed_import_check_does_not_report_installed(checkout, tmp_path, monkeypatch, capsys):
+    checkout.rename(tmp_path / 'cyber-agent-flow-eval')
+    project = tmp_path / 'orchestrator'
+    project.mkdir()
+    monkeypatch.setattr(installer.shutil, 'which', lambda name: '/usr/bin/' + name)
+    statuses = iter([0, 2])
+    monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a, next(statuses)))
+    assert installer.main([], project=project) == 2
+    output = capsys.readouterr()
+    assert 'Installed. Start' not in output.out
+    assert 'not ready' in output.err
     assert installer.valid_checkout(tmp_path / 'cyber-agent-flow-eval')
