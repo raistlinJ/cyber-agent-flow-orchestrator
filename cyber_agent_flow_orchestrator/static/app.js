@@ -44,6 +44,7 @@ try{const saved=localStorage.getItem('caf-refresh-minutes');if(refreshPeriods.in
 function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||foregroundChecks||waitingForMaintenance||redirecting;}
 function syncBusy(){
  const busy=isBusy(), loading=busy||fetching||waitingForObservation;if(loading&&!wasBusy)busySince=performance.now();wasBusy=loading;
+ $('experiment-controls').disabled=busy;$('cancel-experiment').disabled=Boolean(operation)||experimentCreating;
  $('dashboard-controls').disabled=busy;$('dashboard-controls').setAttribute('aria-busy',String(busy));$('sign-out').disabled=busy;
  const lastChange=(snapshot?.updates?.jobs||[]).find(job=>job.action!=='inspect'&&(snapshot.updates.applications||[]).some(app=>app.role===job.role&&app.vmid===job.vmid));
  const maintenanceFailed=['failed','interrupted'].includes(lastChange?.status);
@@ -242,6 +243,7 @@ function runActive(run){return run.coordinator_active||run.sample_progress?.acti
 function renderSamples(data){
  const samples=data.samples,vm=samples?.participant_vmid;
  $('new-experiment').disabled=!samples?.items?.length;
+ $('experiment-model-context').textContent=vm?`Current experiment model: ${samples.provider} / ${samples.model} · Participant VM ${vm}. Pull from VM below to read its saved application settings.`:'Select and save a participant VM on Lab setup to enable Pull from VM and run experiments.';
  $('samples-context').textContent=vm?`Participant VM ${vm} · ${samples.provider} / ${samples.model}.`:'Save a participant VM on Lab setup before running an experiment.';
 }
 function iconAction(label,icon,disabled,callback){const button=el('button',null,'icon-action');button.type='button';button.title=label;button.setAttribute('aria-label',label);const glyph=el('span',icon);glyph.setAttribute('aria-hidden','true');button.append(glyph);button.disabled=disabled;button.addEventListener('click',callback);return button;}
@@ -265,8 +267,8 @@ $('close-progress').addEventListener('click',()=>{selectedProgress=null;$('sampl
 function describeSample(){const sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);$('experiment-description').textContent=sample?.description||'';$('experiment-budget').textContent=sample?`${sample.trials} trial${sample.trials===1?'':'s'} · up to ${sample.max_turns} turns and ${sample.wall_seconds}s per trial`:'';}
 $('new-experiment').addEventListener('click',()=>{if(isBusy())return;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));$('experiment-error').textContent='';describeSample();$('experiment-dialog').showModal();});
 $('experiment-sample').addEventListener('change',describeSample);
-$('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating)$('experiment-dialog').close();});
-$('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating)event.preventDefault();});
+$('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating&&!operation)$('experiment-dialog').close();});
+$('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating||operation)event.preventDefault();});
 $('experiment-form').addEventListener('submit',async event=>{
  event.preventDefault();if(isBusy()||experimentCreating)return;
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;

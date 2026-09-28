@@ -155,9 +155,10 @@ Session/access errors clear the private console view along with the dashboard.
 ## Bundled samples
 
 Choose **New**, select either bundled sample, and press **Create experiment**.
-The modal shows its description and trial budgets. This saves a **Ready** row;
-it does not start a VM operation. Configuration currently consists of selecting
-the sample; future experiment settings can be added here.
+The modal shows its description, trial budgets, current experiment model and
+application model settings. **Pull from VM** reads the selected application's
+current saved configuration; edit/save it and choose **Use for experiments** for
+CAF when needed. **Create experiment** saves a **Ready** row without starting it.
 
 ![New experiment modal with simulated lab data](images/new-experiment.png)
 
@@ -295,8 +296,8 @@ alter any real scenario's preparation/reset steps.
 
 ### Application model settings
 
-After saving VM roles, **Lab setup → Application model settings** has an editor
-for each selected application:
+After saving VM roles on Lab setup, open **Experiments → New**. Its
+**Application model settings** section has an editor for each selected application:
 
 - **Pull from VM** reads the saved model connection fields through QEMU guest exec.
   CAF uses `<engine.path>/configs/cli.json`; ScenarioForge uses

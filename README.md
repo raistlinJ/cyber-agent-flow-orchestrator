@@ -377,7 +377,7 @@ See [setup, source configuration, CLI and recovery](docs/application-updates.md)
 
 ### Choose your model before running
 
-On **Lab setup → Application model settings**, choose **Pull from VM** for
+Open **Experiments → New → Application model settings**, then choose **Pull from VM** for
 Cyber-agent-flow. The editor reads `configs/cli.json` from the selected participant.
 For an OpenAI-compatible endpoint, select **OpenAI / compatible**, enter the API
 base URL (usually `https://your-server/v1`) and its exact model name, then **Save
@@ -385,7 +385,7 @@ to VM** and **Use for experiments**. If the pulled settings are already correct,
 choose **Use for experiments** directly. Future samples and authenticated
 `user-run` workflows for your account and that VM use the selected model.
 
-The same page can read/save ScenarioForge's model settings in `.scenarioforge.env`.
+The same modal can read/save ScenarioForge's model settings in `.scenarioforge.env`.
 Other config fields are preserved. API keys are never shown when pulled; a blank
 replacement field preserves the key. Saving requires the configured maintenance
 group (default `caf-maintainers`). See [model configuration and credential handling](docs/webui.md#application-model-settings).

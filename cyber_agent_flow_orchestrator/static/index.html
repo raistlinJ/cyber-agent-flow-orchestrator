@@ -44,7 +44,7 @@
 <button id="save-roles" type="submit">Save VM roles</button>
 <p id="roles-message" class="small" role="status">Select a VM for each role. These selections belong to your account.</p>
 </form></section>
-<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">Application model settings</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the saved VM configuration, edit model connection settings, then save it back. Use for experiments applies the saved CAF settings to future runs for your account and participant VM. Browser-saved application settings may override these files.</p><div id="model-config-cards" class="sample-cards"></div></section>
+
 </div>
 </fieldset>
 <div data-page="setup" hidden><section aria-labelledby="refresh-title"><div class="section-title"><h2 id="refresh-title">Refresh preferences</h2></div><div class="refresh-settings"><label for="refresh-period">Automatic refresh</label><select id="refresh-period"><option value="0">Never</option><option value="1" selected>Every 1 minute</option><option value="2">Every 2 minutes</option><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option></select><span class="small">Saved in this browser. Active operations still report progress.</span></div>
@@ -53,13 +53,18 @@
 </main>
 <dialog id="result-panel" class="result-panel" aria-labelledby="results-title"><div class="result-actions"><h2 id="results-title">Run results</h2><a id="download-dataset" hidden>Download CSV</a><button id="close-results" type="button">Close results</button></div><div id="result-summary"></div><details class="result-details"><summary>Full result details</summary><pre id="result-content"></pre></details></dialog>
 <dialog id="experiment-dialog" aria-labelledby="experiment-dialog-title">
-<form id="experiment-form"><div class="result-actions"><h2 id="experiment-dialog-title">New experiment</h2><button id="cancel-experiment" type="button" aria-label="Close new experiment">×</button></div>
-<p class="small">Choose a sample now. More experiment settings will be available here later.</p>
+<div class="result-actions experiment-dialog-heading"><h2 id="experiment-dialog-title">New experiment</h2><button id="cancel-experiment" type="button" aria-label="Close new experiment">×</button></div>
+<fieldset id="experiment-controls">
+<form id="experiment-form">
+<p class="small">Choose a sample and review its model settings before creating an experiment.</p>
 <label for="experiment-sample">Sample</label><select id="experiment-sample" required></select>
 <p id="experiment-description"></p><p id="experiment-budget" class="small"></p>
-<p class="small">Uses your saved participant VM and model settings when you press Run. Creating an experiment does not start it.</p>
-<p id="experiment-error" class="error" role="status"></p><button id="create-experiment" type="submit">Create experiment</button>
-</form></dialog>
+<p id="experiment-model-context" class="small"></p>
+</form>
+<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">Application model settings</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the saved VM configuration, edit model connection settings, then save it back. Use for experiments applies the saved CAF settings to future runs for your account and participant VM. Browser-saved application settings may override these files.</p><div id="model-config-cards" class="sample-cards"></div></section>
+<div class="experiment-dialog-footer"><p class="small">Creating an experiment does not start it. Run uses your saved participant VM and model settings.</p>
+<p id="experiment-error" class="error" role="status"></p><button id="create-experiment" type="submit" form="experiment-form">Create experiment</button></div>
+</fieldset></dialog>
 <details id="debug-console" class="debug-console" open><summary>Troubleshooting console <span class="small">Commands, sample events and transfer progress</span></summary>
 <div class="console-content">
 <div class="console-toolbar"><span class="small">Read-only. Latest 300 entries; sample and maintenance history is saved per account. Scripts, transfer payloads and login credentials are omitted.</span><button id="download-console" type="button">Download log</button></div>
