@@ -120,7 +120,7 @@ function renderUpdates(data){
  const busy=maintenanceStarting||(updates.jobs||[]).some(job=>['queued','running'].includes(job.status));
  const cards=$('update-cards');
  // Preserve input focus while the dashboard polls.
- if(!cards.contains(document.activeElement)){
+ if(!document.activeElement?.matches('#update-cards input[data-update-ref]')){
   cards.replaceChildren();
   for(const app of updates.applications){
    const card=el('article',null,'card update-card');card.append(el('h3',app.role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',app.vmid?`VM ${app.vmid}`:'Choose and save a VM above','small'));

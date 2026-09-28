@@ -213,3 +213,10 @@ Protocol references: Proxmox's [ticket API implementation](https://github.com/pr
 [user index and group membership](https://github.com/proxmox/pve-access-control/blob/master/src/PVE/API2/User.pm),
 [TOTP challenge client](https://github.com/proxmox/proxmox-widget-toolkit/blob/master/src/window/TfaWindow.js),
 and [user/realm management](https://github.com/proxmox/pve-docs/blob/master/pveum.adoc).
+
+## Application maintenance permission
+
+Version inspection uses ordinary scoped VM access. Application update and rollback
+also require the separate `caf-maintainers` group by default. See
+[application updates](application-updates.md) for enrollment, configuration and
+recovery; no new PVE root/native VM execution privilege is granted to the user.

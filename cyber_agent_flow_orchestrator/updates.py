@@ -1,12 +1,13 @@
 """Host source packaging and PVE-scoped, offline application maintenance."""
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
 import re
 import subprocess
 import threading
-import uuid
+import os
 from urllib.parse import urlsplit
 
 from cyber_agent_flow_eval import integration as ev, reporting
@@ -71,13 +72,13 @@ def package(source, ref, base, destination):
     def git(*args, timeout=300, check=True):
         process = subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', *args],
                                  stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
-                                 env={**__import__('os').environ, 'GIT_TERMINAL_PROMPT': '0'})
+                                 env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
         if check and process.returncode:
             raise UpdateError('Host Git download/package failed: ' + process.stderr.decode(errors='replace')[-1200:])
         return process
     git('init', '--bare', str(repository))
     git('-C', str(repository), 'fetch', '--no-tags', source['url'], ref_name(ref))
-    revision = git('-C', str(repository), 'rev-parse', 'FETCH_HEAD').stdout.decode().strip()
+    revision = git('-C', str(repository), 'rev-parse', 'FETCH_HEAD^{commit}').stdout.decode().strip()
     if not re.fullmatch('[0-9a-f]{40}', revision):
         raise UpdateError('Unsupported source revision')
     git('-C', str(repository), 'update-ref', 'refs/heads/caf-release', revision)
@@ -119,6 +120,8 @@ class UpdateManager:
                 row = ev.read_json(item)
                 if row['status'] == 'running' and not reporting.active(item.parent / '.lock'):
                     row['status'] = 'interrupted'
+                if row['status'] == 'queued' and (datetime.now(timezone.utc) - datetime.fromisoformat(row['created_at'])).total_seconds() > 15:
+                    row['status'] = 'interrupted'
                 rows.append(row)
         return dict(can_update=permitted, group=self.config['group'], jobs=rows,
                     applications=[dict(role=role, vmid=roles.get(role), **self.config[role]) for role in ('participant', 'scenarioforge')])
@@ -140,6 +143,7 @@ class UpdateManager:
         root = definition['root']
         python = self.runtime['engine']['python'] if role == 'participant' else self.cfg['scenarioforge'].get('python', root + '/.venv/bin/python')
         job = dict(id=request_id, role=role, action=action, ref=ref, vmid=vmid, root=root,
+                   source=self.config[role]['url'],
                    status='queued', created_at=now(), message='Waiting for maintenance worker')
         directory = workspace.path / 'updates' / request_id
         with self.lock:
@@ -179,6 +183,8 @@ class UpdateManager:
                     save('Installed revision and compatibility checked')
                     return
                 with ev.TargetReservation(self.runtime['execution']['target_lock']), ev.lease(f'/var/lock/cyber-agent-flow-eval-vm-{vmid}.lock'):
+                    if self.closed:
+                        raise UpdateError('Server stopped before maintenance began')
                     require_maintenance(access, self.config['group'])
                     update = dict(args, token=job['id'], expected_revision=installed['revision'], python=python, service=service)
                     if job['action'] == 'update':
@@ -192,9 +198,13 @@ class UpdateManager:
                         # Standard transfer RPC uses its own helper, with the same authorization callback.
                         transfer = ev.GuestAgent(self.runtime['backend'], authorize=authorize)
                         content = bundle.read_bytes()
+                        job['bundle_sha256'] = hashlib.sha256(content).hexdigest()
+                        save('Transferring verified source bundle through the guest agent')
                         transfer.put(vmid, upload['path'], content)
-                        update.update(revision=revision, sha256=hashlib.sha256(content).hexdigest())
+                        update.update(revision=revision, sha256=job['bundle_sha256'])
                     save('Validating and activating application source; preserving configuration and data')
+                    if self.closed:
+                        raise UpdateError('Server stopped before activation; application source was not changed')
                     result = agent.call(vmid, 'app_' + job['action'], timeout=360, **update)
                     job.update(status='completed', installed=result)
                     save('Application revision activated' if job['action'] == 'update' else 'Previous revision restored')

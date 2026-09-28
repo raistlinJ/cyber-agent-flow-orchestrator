@@ -60,6 +60,14 @@ def main(argv=None):
     provision.add_argument('provision_config')
     provision.add_argument('--workflow', help='Base workflow; defaults to workflow.yaml')
     provision.add_argument('--output', required=True, help='New profile directory; existing files are never replaced')
+    maintenance = commands.add_parser('user-app', help='Check, update or roll back a selected application through QGA')
+    maintenance.add_argument('action', choices=['inspect', 'update', 'rollback'])
+    maintenance.add_argument('--role', required=True, choices=['participant', 'scenarioforge'])
+    maintenance.add_argument('--ref', help='Branch, tag or commit (default: configured update ref)')
+    maintenance.add_argument('--config', default='workflow.yaml')
+    maintenance.add_argument('--web-config', default='web.yaml')
+    maintenance.add_argument('--runs-root', default='runs')
+    maintenance.add_argument('--username', required=True)
     user = commands.add_parser('create-user', help='Create a local login account using an interactive password prompt')
     user.add_argument('--file', required=True, help='Private JSON account file')
     user.add_argument('--username', required=True)
@@ -94,6 +102,28 @@ def main(argv=None):
                                       retry_steps=getattr(args, 'retry_steps', False),
                                       retry_failed=getattr(args, 'retry_failed', False),
                                       progress=lambda message: print(message, flush=True))
+        if args.command == 'user-app':
+            import uuid
+            from . import user_execution
+            from .config import load
+            from .tls import settings
+            from .updates import UpdateManager, UpdateError
+            from .workspaces import Workspace
+            from cyber_agent_flow_eval import integration as ev
+            web_settings = settings(args.web_config)
+            if web_settings['updates'] is None:
+                raise UpdateError('Application maintenance is disabled')
+            access = user_execution.login(args.web_config, args.username)
+            cfg, runtime, _, _ = load(args.config)
+            manager = UpdateManager(cfg, runtime, args.runs_root, web_settings['updates'])
+            try:
+                reply = manager.submit(access, args.role, args.action, args.ref or manager.config[args.role]['ref'], uuid.uuid4().hex)
+                manager.jobs[access.username].result()
+                result = ev.read_json(Workspace(args.runs_root, access.username).path / 'updates' / reply['id'] / 'job.json')
+                print(json.dumps(result, indent=2))
+                return 0 if result['status'] == 'completed' else 1
+            finally:
+                manager.close()
         if args.command == 'import-provision':
             from .bootstrap import prepare
             from .provision import import_profile

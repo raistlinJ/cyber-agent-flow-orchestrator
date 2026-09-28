@@ -12,6 +12,12 @@ session_idle_seconds: 1800
 session_max_seconds: 7200
 # Keep either ID, or use [] to hide and disable all bundled sample launches.
 samples: [smoke, tools-vs-helper]
+# Application maintenance defaults to the caf-maintainers PVE group.
+# updates: false  # Disable version/update/rollback controls.
+# updates:
+#   group: caf-maintainers
+#   participant: {url: https://github.com/raistlinJ/cyber-agent-flow.git, ref: main}
+#   scenarioforge: {url: https://github.com/raistlinJ/scenarioforge.git, ref: main}
 
 auth:
   provider: pve

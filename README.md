@@ -140,7 +140,7 @@ ssh -N -L 8443:127.0.0.1:8443 root@YOUR_PROXMOX_HOST
 Open **https://localhost:8443**. Trust the generated certificate or replace the
 `/certs` pair with a signed chain/key and restart. Keep the key mode `0600`.
 
-This requires the updated evaluator (0.4.0+) from this workspace. Neither project
+This requires the updated evaluator (0.4.1+) from this workspace. Neither project
 needs to be installed as a coordinator inside a guest. ScenarioForge belongs in
 app-vm; CAF and its environment belong in participant-vm. Guests need Python 3,
 enabled QEMU guest agents, and Linux/systemd 250+ for transient commands. The
@@ -337,6 +337,20 @@ artifacts remain private on the host under `RUNS_ROOT/_users/<owner-hash>/` (070
 Project sharing is not implemented; access is owner-only. PVE users who share a VM
 can observe its processes; private host results do not isolate workloads inside
 that shared guest. See [PVE authorization details](docs/pve-login.md).
+
+## Update applications in the VMs
+
+The WebUI's **Application versions** section can check, update and roll back
+Cyber-agent-flow in the participant VM and ScenarioForge in the app VM. Source is
+downloaded on the host and transferred through the guest agent; no guest internet
+or app-to-participant connection is required. Updates preserve local runtime data
+and use the existing Python environment. Changed dependency manifests or conflicting
+local edits block activation.
+
+Version checks use ordinary VM access. Updating/rolling back additionally requires
+the `caf-maintainers` PVE group. Choose a branch, tag or commit and follow the
+background job on the page. `updates: false` in `web.yaml` disables the feature.
+See [setup, source configuration, CLI and recovery](docs/application-updates.md).
 
 ## Run bundled samples in the WebUI
 

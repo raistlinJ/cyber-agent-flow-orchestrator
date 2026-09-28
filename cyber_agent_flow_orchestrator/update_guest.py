@@ -14,7 +14,7 @@ import time
 
 STATE_ROOT = Path('/var/lib/caf-application-updates')
 LOCK_PATH = Path('/run/caf-application-maintenance.lock')
-PENDING = Path('/run/caf-application-maintenance.pending')
+PENDING = Path('/var/lib/caf-application-maintenance.pending')
 DEPENDENCIES = ('pyproject.toml', 'uv.lock', 'requirements.txt', 'requirements-core.txt', 'requirements-llm.txt', 'setup.py', 'setup.cfg')
 
 
@@ -53,6 +53,11 @@ def save(path, data):
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def read(path):
@@ -106,9 +111,12 @@ def active_processes(root):
         if not proc.name.isdecimal() or int(proc.name) in ignored:
             continue
         try:
-            command = (proc / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')
+            argv = (proc / 'cmdline').read_bytes().split(b'\0')
+            command = b' '.join(argv).decode(errors='replace')
             cwd = os.readlink(proc / 'cwd')
         except FileNotFoundError:
+            continue
+        if len(argv) > 2 and argv[1] == b'-c' and argv[2].startswith(b'"""Read-only, stdlib-only Linux guest probe, sent through QEMU Guest Agent.'):
             continue
         if (str(root) in command or cwd == str(root) or cwd.startswith(str(root) + '/')):
             raise ValueError('Application processes are still running; stop them before maintenance')
@@ -182,11 +190,15 @@ def dispatch(data):
         if PENDING.exists() and (op != 'app_rollback' or read(PENDING).get('root') != str(root)):
             raise ValueError('Interrupted maintenance needs rollback before another update')
         before = current['revision']
+        if current['modified']:
+            raise ValueError('Tracked local edits exist; preserve/commit them before updating. No files changed.')
         if op == 'app_rollback':
             previous = pending if pending else read(directory / 'last-success.json')
             if not previous or before not in (previous.get('revision'), previous.get('previous_revision')):
                 raise ValueError('No matching completed update is available to roll back')
             target = previous['previous_revision']
+            service = previous.get('service')
+            python = Path(previous.get('python', str(python)))
         else:
             target = data['revision']
             if not re.fullmatch('[0-9a-f]{40}', target):
@@ -211,24 +223,25 @@ def dispatch(data):
                 return dict(identity(root, role), root=str(root), update=previous)
             raise ValueError('This revision is already installed')
         # Local edits remain untouched. Git checkout also refuses untracked-file collisions.
-        if current['modified']:
-            raise ValueError('Tracked local edits exist; preserve/commit them before updating. No files changed.')
         staging = directory / ('stage-' + token)
         staging.mkdir(mode=0o700)
         os.chown(staging, root.stat().st_uid, root.stat().st_gid)
         stage = staging / 'checkout'
         record = dict(status='validating', token=token, role=role, previous_revision=before, revision=target,
-                      service=service, service_was_active=False, started_at=time.time())
+                      service=service, python=str(python), service_was_active=False, started_at=time.time())
         save(journal, record)
         switched = False
         try:
             git(root, 'worktree', 'add', '--detach', str(stage), target)
             validate_checkout(stage, root, python, role, rollback=op == 'app_rollback')
+            # Keep both revisions reachable even after normal Git reflog expiry/GC.
+            for revision in (before, target):
+                git(root, 'update-ref', 'refs/caf-orchestrator/releases/' + revision, revision)
             if not pending:
                 save(PENDING, dict(record, root=str(root)))
             if service:
                 state = run(['systemctl', 'is-active', service], check=False).stdout.strip()
-                if state in (b'active', b'activating', b'reloading') or (op == 'app_rollback' and previous.get('service_was_active')):
+                if state in (b'active', b'activating', b'reloading') or (pending and previous.get('service_was_active')):
                     record['service_was_active'] = True
                     save(journal, record)
                     if not pending:

@@ -54,6 +54,14 @@ To reuse ScenarioForge VM IDs and model settings, add
 profile and initializes eligible roles once per user; saved selections are
 preserved. See [provision import](provision-config.md).
 
+## Application versions
+
+Use **Check version**, **Update** and **Roll back** for the selected CAF and
+ScenarioForge VMs. Updating/rolling back requires the `caf-maintainers` PVE group;
+checking versions uses ordinary VM access. Updates run in background workers and
+preserve local data. See [application maintenance](application-updates.md) for
+setup, dependency limits, service restarts, source repositories and recovery.
+
 ## Bundled samples
 
 In PVE mode, save a participant VM, then choose **Model smoke test** or **Tools vs.
