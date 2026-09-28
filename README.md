@@ -355,7 +355,7 @@ and use the existing Python environment. Changed dependency manifests or conflic
 local edits block activation.
 
 If an application is running, **Check version** lists its blocking PIDs. Choose
-**Stop processes and update** to review and confirm that list. The updater requests
+**Update** to review and confirm that list. The updater requests
 a graceful stop before activation; it never force-kills a process. Listed terminals
 may close, and unmanaged applications must be restarted manually afterward.
 

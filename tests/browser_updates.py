@@ -161,11 +161,13 @@ def main():
                         assert 'will not restart automatically' in dialog.message
                         dialog.dismiss()
                     page.once('dialog', cancel)
-                    button('participant', 'stop-update').click()
+                    expect(button('participant', 'update')).to_have_count(1)
+                    expect(page.get_by_role('button', name='Stop processes and update', exact=True)).to_have_count(0)
+                    button('participant', 'update').click()
                     assert len(calls) == before_confirmation
                     activation_failures.clear()
                     page.once('dialog', lambda dialog: dialog.accept())
-                    button('participant', 'stop-update').click()
+                    button('participant', 'update').click()
                     expect(page.locator('#update-message')).to_contain_text('update: completed', timeout=30000)
                     assert not process_blockers
                     assert any(op == 'app_update' and data.get('stop_processes') for _, op, data in calls[before_confirmation:])

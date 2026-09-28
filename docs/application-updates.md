@@ -90,8 +90,8 @@ the VM, not just the operator's private experiment results.
    the filename list is also bounded to fit guest-agent output. Filenames are
    quoted and file contents are never included.
 3. Enter a branch, tag or full commit SHA from its configured repository. The
-   default is `main`. Click **Update**. If running processes are listed, use
-   **Stop processes and update** and confirm the displayed PIDs to stop them
+   default is `main`. Click **Update**. If running processes are listed,
+   this same button asks you to confirm the displayed PIDs to stop them
    during activation. Canceling the confirmation submits no request.
 4. Watch the maintenance job below the cards. **Details** includes the source URL,
    requested ref, resolved commit, bundle checksum, guest outcome and errors.
@@ -169,7 +169,7 @@ block activation. It never guesses a service name or kills an arbitrary process.
 
 ### Confirm stopping running processes
 
-After **Check version**, **Stop processes and update** shows the exact PIDs,
+After **Check version**, **Update** shows the exact PIDs of any listed processes,
 names, matching reasons, VM and selected revision for confirmation. This applies
 to both CAF and ScenarioForge and requires the same maintenance permissions as
 Update. Terminal emulators and shells may be listed alongside application workers:
@@ -195,7 +195,8 @@ Python/Linux pidfd support must be stopped manually. Signals already sent cannot
 be undone if a later check or activation fails. Guest maintenance details record
 `signaled_pids`; use **Check version** to retrieve the journal after a failure.
 Older inspections without identity hashes need a new **Check version** before
-the confirmation button appears.
+**Update** can show the process-stop confirmation. There is only one Update button
+per application; when no processes were found, it submits the update directly.
 
 Optional overrides in `web.yaml` (restart after editing):
 

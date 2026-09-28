@@ -220,14 +220,13 @@ function renderUpdates(data){
    const card=el('article',null,'card update-card');card.append(el('h3',app.role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',app.vmid?`VM ${app.vmid}`:'Choose and save a VM above','small'));
    const known=(updates.jobs||[]).find(job=>job.role===app.role&&job.vmid===app.vmid&&job.installed);
    if(known){const info=known.installed;card.append(el('p',`Installed revision (last checked): ${info.revision.slice(0,12)}${info.modified?' · local edits':''}`,'small'));if(info.missing_controls?.length)card.append(el('p',`Missing evaluator controls: ${info.missing_controls.join(', ')}`,'error'));
-    if(info.processes?.length){card.append(el('p','Processes referencing this checkout (up to 12):','small'));for(const process of info.processes)card.append(el('p',`PID ${process.pid} · ${process.name} · ${process.reason}`,'small'));card.append(el('p','Stop the application/workers before updating, or move idle shells out of the checkout. A configured service is stopped during activation.','small'));}
+    if(info.processes?.length){card.append(el('p','Processes referencing this checkout (up to 12):','small'));for(const process of info.processes)card.append(el('p',`PID ${process.pid} · ${process.name} · ${process.reason}`,'small'));card.append(el('p','Update asks for confirmation before stopping these processes. A configured service is restarted after activation.','small'));}
     if(info.modified){card.append(el('p',info.tools_config_replaceable?'Legacy kali_tools.json change detected. Update will back up and replace this runtime catalog with shipped defaults.':'Tracked local edits block updates and rollback. Preserve/commit them in the VM, then check again.','error'));if(info.modified_files?.length){card.append(el('pre',info.modified_files.join('\n'),'small'));card.append(el('p',`Showing ${info.modified_files.length} of ${info.modified_file_count??info.modified_files.length} changed files (paths limited to 300 characters).`,'small'));}}
    }
    const label=el('label','Branch, tag or commit','small'),input=el('input');input.type='text';input.value=maintenanceRefs[app.role]||app.ref;input.dataset.updateRef=app.role;input.addEventListener('input',()=>{maintenanceRefs[app.role]=input.value;});label.append(input);card.append(label);
    const status=el('p',null,'small');status.id=`update-status-${app.role}`;card.append(status);input.setAttribute('aria-describedby',status.id);
    const actions=el('div',null,'update-actions');
-   for(const [action,title] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>maintain(app.role,action,input.value));actions.append(button);}
-   if(known?.installed.processes?.length&&known.installed.processes.every(p=>/^[0-9a-f]{64}$/.test(p.identity||''))){const button=el('button','Stop processes and update');button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction='stop-update';button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>maintain(app.role,'update',input.value,known));actions.append(button);}
+   for(const [action,title] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>maintain(app.role,action,input.value,action==='update'&&known?.installed.processes?.length?known:null));actions.append(button);}
    card.append(actions);cards.append(card);
   }
  }
@@ -240,6 +239,7 @@ function renderUpdates(data){
 async function maintain(role,action,ref,confirmation=null){
  if(isBusy()||maintenanceStarting)return;
  if(rolesDirty){$('update-message').textContent='Save VM role changes before application maintenance.';return;}
+ if(confirmation&&!confirmation.installed.processes.every(p=>/^[0-9a-f]{64}$/.test(p.identity||''))){$('update-message').textContent='Click Check version to refresh the process list, then click Update to confirm stopping it.';return;}
  if(confirmation&&!window.confirm(`Stop these ${role} processes on VM ${confirmation.vmid} and update to ${ref}?\n\n${confirmation.installed.processes.map(p=>`PID ${p.pid} · ${p.name} · ${p.reason}`).join('\n')}\n\nThis sends SIGTERM. Listed terminal windows/sessions may close and unsaved work may be lost. Unmanaged applications will not restart automatically. Changed processes require a fresh confirmation.`))return;
  maintenanceStarting=true;operation='Submitting application maintenance…';syncBusy();if(snapshot)renderUpdates(snapshot);
  try{
