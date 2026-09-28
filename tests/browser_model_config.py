@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 import tempfile
+import threading
 
 import pytest
 from playwright.sync_api import sync_playwright, expect
@@ -32,10 +33,15 @@ def main():
         patch.setattr(guest, 'LOCK', root/'guest-maintenance.lock')
         patch.setattr(guest, 'SECRETS', root/'guest-secrets')
         fail_save = [False]
+        push_entered, release_push = threading.Event(), threading.Event()
+        create_entered, release_create = threading.Event(), threading.Event()
         class Agent(original):
             def call(self, vmid, op, **data):
                 if op in ('model_config','write'):
                     self.authorize(['guest','exec',vmid])
+                    if data.get('action') == 'save':
+                        push_entered.set()
+                        assert release_push.wait(20)
                     if data.get('action') == 'save' and fail_save[0]:
                         raise ValueError('Model configuration save failed (fixture)')
                     return guest.dispatch(dict(data, root=str(roots[vmid])))
@@ -45,6 +51,12 @@ def main():
             pve[0]['groups'] += ',caf-maintainers'
             pve[0]['resources']['operator@pve'] = [vm(9403),vm(9402)]
             dashboard = UserDashboard(root/'examples/01-reuse-export.yaml',root/'runs',2,lambda b,a:Probe(b,a,[]))
+            original_create = dashboard.samples.create
+            def create(*args, **kwargs):
+                create_entered.set()
+                assert release_create.wait(20)
+                return original_create(*args, **kwargs)
+            patch.setattr(dashboard.samples, 'create', create)
             try:
                 with secure_server(dashboard,root/'web',auth=make_auth(pve)) as server,sync_playwright() as playwright:
                     browser=playwright.chromium.launch(channel='chrome',headless=True)
@@ -75,7 +87,19 @@ def main():
                     page.locator('#model-participant-key').fill('replacement-key')
                     fail_save[0] = True
                     page.get_by_role('button',name='Create experiment',exact=True).click()
+                    assert push_entered.wait(10)
+                    expect(page.locator('#experiment-save-local')).to_contain_text('File saved locally')
+                    expect(page.locator('#experiment-save-push')).to_contain_text('0% acknowledged')
+                    expect(page.locator('#experiment-save-status')).to_contain_text('33%')
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.screenshot(path=str(destination/'saving-progress.png'))
+                    page.set_viewport_size({'width':390,'height':844})
+                    assert page.locator('#experiment-save-progress').evaluate('(n)=>n.getBoundingClientRect().right<=innerWidth && n.getBoundingClientRect().bottom<innerHeight')
+                    page.screenshot(path=str(destination/'saving-progress-mobile.png'))
+                    page.set_viewport_size({'width':1440,'height':1080})
+                    release_push.set()
                     expect(page.locator('#experiment-error')).to_contain_text('Model configuration save failed',timeout=30000)
+                    expect(page.locator('#experiment-save-push')).to_have_attribute('data-state','failed')
                     expect(page.locator('#experiment-dialog')).to_be_visible()
                     expect(page.locator('#runs tr')).to_have_count(0)
                     expect(page.locator('#create-experiment')).to_be_enabled()
@@ -84,6 +108,11 @@ def main():
                     page.locator('#model-config-panel').scroll_into_view_if_needed()
                     page.screenshot(path=str(destination/'model-settings.png'))
                     page.get_by_role('button',name='Create experiment',exact=True).click()
+                    assert create_entered.wait(10)
+                    expect(page.locator('#experiment-save-push')).to_contain_text('100%')
+                    expect(page.locator('#experiment-save-record')).to_contain_text('Saving experiment')
+                    expect(page.locator('#experiment-save-status')).to_contain_text('67%')
+                    release_create.set()
                     expect(page.locator('#experiment-dialog')).not_to_be_visible(timeout=30000)
                     assert ev.read_json(roots[9403]/'configs/cli.json')['api_key']=='replacement-key'
                     assert ev.read_json(roots[9403]/'configs/cli.json')['model']=='updated-model'
@@ -106,8 +135,9 @@ def main():
                     page.screenshot(path=str(destination/'model-settings-mobile.png'),full_page=True)
                     assert not errors,errors
                     browser.close()
-            finally: dashboard.close()
-    print('PASS: save on Create, failure/retry, header Pull, hidden keys, reload and sample execution, mobile layout')
+            finally:
+                release_push.set(); release_create.set(); dashboard.close()
+    print('PASS: local save/VM percentage/experiment progress, failure/retry, hidden keys and sample execution, mobile layout')
     print(destination)
 
 if __name__=='__main__': main()

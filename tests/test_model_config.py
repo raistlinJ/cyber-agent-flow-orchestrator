@@ -186,3 +186,24 @@ def test_saved_experiment_rerun_preserves_model_credentials_and_vm(pve, lab, tmp
         with pytest.raises(AccessDenied):
             manager.run_saved(user, first['run_id'], 'd' * 32)
     finally: manager.close()
+
+
+def test_local_model_stage_is_private_and_does_not_activate_or_transfer(pve, lab, tmp_path, monkeypatch, guest_root):
+    manager, user, workspace, runtime, calls = fixture_manager(pve, lab, tmp_path, monkeypatch, guest_root)
+    ev.write_json(guest_root / 'configs/cli.json', dict(settings(), api_key='guest-secret'))
+    loaded = manager.exchange(user, dict(role='participant', action='read'))
+    request_data = dict(role='participant', action='stage', token=loaded['token'], settings=dict(settings(), model='draft-model'))
+    with pytest.raises(AccessDenied): manager.exchange(user, request_data)
+    pve[0]['groups'] += ',caf-maintainers'
+    with pytest.raises(ModelConfigError): manager.exchange(user, dict(request_data, api_key='must-not-store'))
+    before = len(calls)
+    result = manager.exchange(user, request_data)
+    assert result['local_saved'] and len(calls) == before
+    pending = workspace.path / 'model-pending-9403.json'
+    assert ev.read_json(pending)['settings']['model'] == 'draft-model'
+    assert stat.S_IMODE(pending.stat().st_mode) == 0o600
+    assert 'guest-secret' not in pending.read_text()
+    assert apply_model(workspace, runtime, 9403) == runtime
+    assert ev.read_json(guest_root / 'configs/cli.json')['model'] == 'lab-model'
+    with pytest.raises(ModelConfigError, match='draft changed'):
+        manager.exchange(user, dict(request_data, token='0' * 32))

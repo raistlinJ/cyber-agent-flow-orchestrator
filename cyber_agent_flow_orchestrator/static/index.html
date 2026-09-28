@@ -53,7 +53,11 @@
 </main>
 <dialog id="result-panel" class="result-panel" aria-labelledby="results-title"><div class="result-actions"><h2 id="results-title">Run results</h2><a id="download-dataset" hidden>Download CSV</a><button id="close-results" type="button">Close results</button></div><div id="result-summary"></div><details class="result-details"><summary>Full result details</summary><pre id="result-content"></pre></details></dialog>
 <dialog id="experiment-dialog" aria-labelledby="experiment-dialog-title">
-<div class="result-actions experiment-dialog-heading"><h2 id="experiment-dialog-title">New experiment</h2><button id="cancel-experiment" type="button" aria-label="Close new experiment">×</button></div>
+<div class="experiment-dialog-heading"><div class="result-actions"><h2 id="experiment-dialog-title">New experiment</h2><button id="cancel-experiment" type="button" aria-label="Close new experiment">×</button></div>
+<section id="experiment-save-progress" class="experiment-save-progress" hidden aria-label="Experiment creation progress" aria-live="polite">
+<strong id="experiment-save-status"></strong><progress id="experiment-save-bar" max="3" value="0" aria-label="Completed creation steps"></progress>
+<ol><li id="experiment-save-local">Save file locally on orchestrator</li><li id="experiment-save-push">Push settings to VM</li><li id="experiment-save-record">Save experiment</li></ol>
+<p class="small" id="experiment-save-note"></p></section></div>
 <fieldset id="experiment-controls">
 <form id="experiment-form">
 <p class="small">Choose a sample and review its model settings before creating an experiment.</p>

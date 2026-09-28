@@ -159,13 +159,22 @@ The modal shows its description, trial budgets, current experiment model and
 CAF model settings. **Pull from VM** reads its current saved configuration;
 **Create experiment** saves the loaded/edited settings to the VM, then creates a
 **Ready** row with its participant VM and model configuration, without starting it.
-If saving fails, no row is created and the modal shows the error for retry. Without
+If saving fails, no row is created and the modal shows the error for retry. The
+modal shows **Saving file locally**, **Pushing to VM**, and **Saving experiment**.
+The local draft lives on the orchestrator, excludes API keys, and does not replace
+active defaults until the VM save succeeds. VM push progress goes from **0% awaiting
+acknowledgement** to **100% saved**: this small config uses a single guest-agent
+request, so intermediate byte percentages are unavailable. Overall progress counts
+completed steps (0/3 through 3/3), not time. Failures retain the completed steps and
+mark the failed stage; retry starts a fresh progress display. Without
 pulling, creation uses current experiment defaults. Reruns retain that configuration and credential
 reference instead of adopting newer defaults. If no VM is selected when creating
 the row, its configuration is captured on first run. Legacy rows without a saved
 runtime also capture settings on their next run.
 
 ![New experiment modal with simulated lab data](images/new-experiment.png)
+
+![Saving an experiment with simulated VM acknowledgement progress](images/experiment-save-progress.png)
 
 Each row has four labeled icon buttons:
 

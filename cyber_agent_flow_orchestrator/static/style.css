@@ -48,3 +48,5 @@
 #model-config-cards{grid-template-columns:minmax(0,1fr)}
 
 .model-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.model-card-heading h3{margin:0}.model-card-heading button{margin:0}
+
+.experiment-save-progress{margin:8px 0 0;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px}.experiment-save-progress progress{display:block;width:100%;margin:8px 0}.experiment-save-progress ol{margin:4px 0;padding-left:22px;font-size:13px}.experiment-save-progress p{margin:6px 0 0}.experiment-save-progress li[data-state=complete]{color:var(--teal)}.experiment-save-progress li[data-state=failed]{color:#a32222}

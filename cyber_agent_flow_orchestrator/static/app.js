@@ -160,6 +160,19 @@ $('role-form').addEventListener('submit',async event=>{
   rolesDirty=false;operation='Loading your updated VM selections…';syncBusy();$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh(true);
  }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;operation=null;syncBusy();schedulePoll();}
 });
+let creationSteps=[];
+function creationProgress(index,state,message){
+ creationSteps[index]={state,message};const done=creationSteps.filter(step=>['complete','skipped'].includes(step.state)).length;
+ $('experiment-save-progress').hidden=false;$('experiment-save-bar').value=done;
+ $('experiment-save-status').textContent=state==='failed'?`Creation stopped · ${done} of 3 steps completed`:`${Math.round(done/3*100)}% · ${done} of 3 steps completed`;
+ for(const [i,id] of ['local','push','record'].entries()){const step=creationSteps[i];if(step){$('experiment-save-'+id).textContent=step.message;$('experiment-save-'+id).dataset.state=step.state;}}
+}
+function startCreationProgress(saveModel){
+ creationSteps=[{state:'pending',message:'Save file locally on orchestrator · pending'},{state:'pending',message:'Push settings to VM · pending'},{state:'pending',message:'Save experiment · pending'}];
+ $('experiment-save-note').textContent=saveModel?'VM transfer uses one small guest-agent request: 0% until acknowledged, then 100%. Overall progress counts completed steps, not elapsed time.':'Using saved defaults; no model file needs to be pushed.';
+ creationProgress(0,saveModel?'running':'skipped',saveModel?'Saving file locally on orchestrator…':'Local settings · using saved defaults');
+ if(!saveModel)creationProgress(1,'skipped','VM push · not needed');
+}
 let modelDrafts={};
 function renderModelConfigs(data){
  $('model-config-panel').hidden=!data.owner;
@@ -203,8 +216,17 @@ async function modelConfigAction(role,action,creating=false){
  }
  operation=action==='read'?'Reading model configuration from the VM…':'Saving model settings to the VM and experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
  try{
-  await finishDashboardRead();const response=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(body)});delete body.api_key;
+  await finishDashboardRead();
+  if(creating){
+   creationProgress(0,'running','Saving file locally on orchestrator…');
+   const staged=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action:'stage',token:body.token,settings:body.settings})});
+   const stagedData=await staged.json();if(!staged.ok)throw Error(stagedData.error||'Unable to save local model draft');
+   creationProgress(0,'complete','File saved locally on orchestrator · complete');
+   creationProgress(1,'running','Pushing to VM · 0% acknowledged · awaiting guest save');
+  }
+  const response=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(body)});delete body.api_key;
   const data=await response.json();if(!response.ok)throw Error(data.error||'Model configuration operation failed');
+  if(creating)creationProgress(1,'complete','VM push · 100% · guest save acknowledged');
   modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:action==='read'};
   for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=data.settings[key];$(`model-${role}-ssl`).checked=data.settings.ssl_verify;$(`model-${role}-key`).value='';$(`model-${role}-clear`).checked=false;
   $(`model-${role}-message`).textContent=(action==='save'?'Saved. Settings copied to the VM and selected for new experiments. ':data.exists?'Configuration loaded. Create experiment will save these settings. ':'No configuration file yet; saving will create it. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.backup?'Backup: '+data.backup:'');
@@ -262,7 +284,7 @@ function renderExperiments(data){
 function openProgress(id){selectedProgress=id;if(location.hash!=='#experiments')location.hash='experiments';if(snapshot)renderSampleActivity(snapshot);$('sample-activity-panel').scrollIntoView({block:'start'});}
 $('close-progress').addEventListener('click',()=>{selectedProgress=null;$('sample-activity-panel').hidden=true;});
 function describeSample(){const sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);$('experiment-description').textContent=sample?.description||'';$('experiment-budget').textContent=sample?`${sample.trials} trial${sample.trials===1?'':'s'} · up to ${sample.max_turns} turns and ${sample.wall_seconds}s per trial`:'';}
-$('new-experiment').addEventListener('click',()=>{if(isBusy())return;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));$('experiment-error').textContent='';describeSample();$('experiment-dialog').showModal();});
+$('new-experiment').addEventListener('click',()=>{if(isBusy())return;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();$('experiment-dialog').showModal();});
 $('experiment-sample').addEventListener('change',describeSample);
 $('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating&&!operation)$('experiment-dialog').close();});
 $('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating||operation)event.preventDefault();});
@@ -272,9 +294,10 @@ $('experiment-form').addEventListener('submit',async event=>{
  if(saveModel&&(!snapshot?.updates?.can_update||rolesDirty)){$('experiment-error').textContent=rolesDirty?'Save VM role selections before creating an experiment.':'Model settings cannot be saved without application maintenance access.';return;}
  if(saveModel&&!modelForm.reportValidity())return;
  $('experiment-error').textContent='';
+ startCreationProgress(saveModel);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:$('experiment-sample').value,request_id:crypto.randomUUID().replaceAll('-','')})});const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to create experiment');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
- catch(error){$('experiment-error').textContent=error.message;}
+ try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:$('experiment-sample').value,request_id:crypto.randomUUID().replaceAll('-','')})});const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed');$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });
 async function experimentAction(action,id){

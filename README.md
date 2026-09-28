@@ -383,7 +383,9 @@ For an OpenAI-compatible endpoint, select **OpenAI / compatible**, enter the API
 base URL (usually `https://your-server/v1`) and its exact model name, then press
 **Create experiment**. This saves the edited settings to the participant VM and
 captures them in the experiment, with no separate Save action. If saving fails,
-the modal stays open and no experiment is created. Without pulling a configuration,
+the modal stays open and no experiment is created. Progress in the modal shows
+the local draft save, VM push (0% until the guest acknowledges, then 100%), and
+experiment save. Without pulling a configuration,
 creation uses the current experiment defaults.
 
 **Create experiment** captures the selected participant VM and model settings.

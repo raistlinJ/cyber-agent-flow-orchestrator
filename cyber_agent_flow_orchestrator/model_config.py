@@ -39,14 +39,14 @@ class ModelConfigs:
         if not isinstance(data, dict) or set(data) - {'role', 'action', 'token', 'settings', 'api_key'}:
             raise ModelConfigError('Invalid model configuration request')
         role, action = data.get('role'), data.get('action')
-        if role not in ('participant', 'scenarioforge') or action not in ('read', 'save', 'use') or (action == 'use' and role != 'participant'):
+        if role not in ('participant', 'scenarioforge') or action not in ('read', 'stage', 'save', 'use') or (action in ('stage', 'use') and role != 'participant'):
             raise ModelConfigError('Unsupported model configuration action')
         if action != 'read' and not self.enabled:
             raise ModelConfigError('Application configuration writes are disabled by this server')
-        expected = {'role', 'action'} if action == 'read' else {'role', 'action', 'token', 'settings'} if action == 'save' else {'role', 'action', 'token'}
+        expected = {'role', 'action'} if action == 'read' else {'role', 'action', 'token', 'settings'} if action in ('stage', 'save') else {'role', 'action', 'token'}
         if set(data) - {'api_key'} != expected or ('api_key' in data and action != 'save'):
             raise ModelConfigError('Invalid model configuration fields')
-        if action == 'save':
+        if action in ('stage', 'save'):
             try: validate(role, data['settings'])
             except ValueError as exc: raise ModelConfigError(str(exc)) from None
             if 'api_key' in data and (not isinstance(data['api_key'], str) or len(data['api_key']) > 8192):
@@ -69,6 +69,13 @@ class ModelConfigs:
                             draft.get('token') != data['token'] or draft.get('vmid') != vmid or draft.get('root') != definition['root']):
                         raise ModelConfigError('VM selection or configuration draft changed. Pull the configuration again.')
                     args['revision'] = draft['revision']
+                    if action == 'stage':
+                        # Pending settings are not active defaults. Never persist an API key here.
+                        target = workspace.path / f'model-pending-{vmid}.json'
+                        if target.is_symlink(): raise ModelConfigError('Invalid pending model file')
+                        private_file(target, json.dumps(dict(settings=data['settings'], vmid=vmid,
+                            root=definition['root'], revision=draft['revision'])).encode(), replace=target.exists())
+                        return dict(action=action, role=role, vmid=vmid, token=data['token'], local_saved=True)
                     if action == 'save':
                         args['settings'] = data['settings']
                         if 'api_key' in data: args['api_key'] = data['api_key']
