@@ -4,7 +4,7 @@ const el = (tag, text, cls) => {const node = document.createElement(tag); if (te
 let snapshot = null, fetching = false, failed = false, rolesDirty = false, rolesSaving = false, sampleStarting = false;
 let initialized=false, operation=null, waitingForObservation=false, waitingForMaintenance=false, redirecting=false, maintenanceStarting=false;
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
-let selectedProgress=null, experimentCreating=false;
+let selectedProgress=null, experimentCreating=false, selectedResults=null, resultsVersion=null;
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
 const clientLog=[];
 const pages={overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
@@ -111,7 +111,7 @@ async function refresh(force=false, background=false){
    const response=await apiFetch(force?'/api/status?refresh=1':'/api/status?refresh=0',{cache:'no-store'});
    if(response.status===401)sessionExpired();
    if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);
-   const data=await response.json();failed=false;render(data);return true;
+   const data=await response.json();failed=false;render(data);const run=data.runs.find(r=>r.output?.split('/').pop()===selectedResults);if(selectedResults&&run&&resultVersion(run)!==resultsVersion)await loadResults(selectedResults);return true;
   }catch(error){failed=true;foregroundChecks=false;waitingForObservation=false;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();return false;}
   finally{fetching=false;blockingRefresh=false;initialized=true;syncBusy();}
  })();
@@ -135,7 +135,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;selectedResults=null;resultsVersion=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
@@ -159,14 +159,24 @@ $('role-form').addEventListener('submit',async event=>{
   rolesDirty=false;operation='Loading your updated VM selections…';syncBusy();$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh(true);
  }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;operation=null;syncBusy();schedulePoll();}
 });
+function resultVersion(run){return JSON.stringify([run.recorded_status,run.coordinator_active,run.message,run.error,run.evaluation?.summary]);}
+async function loadResults(id){
+ try{
+  const response=await apiFetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});
+  if(response.status===401)sessionExpired();
+  if(!response.ok)throw Error('Results unavailable or access not granted');
+  const data=await response.json();if(selectedResults!==id)return;
+  resultsVersion=resultVersion(data.workflow);renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);
+  $('download-dataset').hidden=!data.evaluation;if(data.evaluation)$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;
+ }catch(error){if(selectedResults!==id)return;resultsVersion=null;$('result-summary').replaceChildren(el('p',`Results refresh failed: ${error.message}. Reopen View results to retry.`,'error'));$('result-content').textContent='';$('download-dataset').hidden=true;}
+}
 async function showResults(id){
  if(isBusy())return;operation='Loading experiment results…';syncBusy();
- $('result-panel').hidden=false;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren();$('download-dataset').hidden=true;
- try{await finishDashboardRead();const response=await apiFetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});if(!response.ok)throw Error('Results unavailable or access not granted');const data=await response.json();renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);if(data.evaluation){$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;$('download-dataset').hidden=false;}}
- catch(error){$('result-content').textContent=error.message;}
+ try{await finishDashboardRead();selectedResults=id;resultsVersion=null;$('result-panel').hidden=false;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren();$('download-dataset').hidden=true;await loadResults(id);}
+ catch(error){if(!redirecting){$('result-panel').hidden=false;$('result-summary').replaceChildren(el('p',error.message,'error'));}}
  finally{operation=null;syncBusy();schedulePoll();if(location.hash==='#experiments')$('result-panel').scrollIntoView({block:'start'});}
 }
-$('close-results').addEventListener('click',()=>{$('result-panel').hidden=true;$('result-content').textContent='';});
+$('close-results').addEventListener('click',()=>{selectedResults=null;resultsVersion=null;$('result-panel').hidden=true;$('result-content').textContent='';});
 
 function runActive(run){return run.coordinator_active||run.sample_progress?.active||['queued','stopping'].includes(run.recorded_status);}
 function renderSamples(data){
@@ -238,6 +248,7 @@ function renderSampleActivity(data){
   }
   card.append(el('p',`Per-trial limits: ${p.max_turns} turns · ${p.wall_seconds}s worker budget. Live model tokens and tool calls are not streamed; scores appear after collection.`,'small'));
   if(p.trials.length){const wrap=el('div',null,'scroll'),table=el('table'),header=el('tr'),thead=el('thead'),body=el('tbody');for(const title of ['Trial','Condition','Status','Verified','Score'])header.append(el('th',title));thead.append(header);for(const trial of p.trials){const row=el('tr');for(const value of [trial.trial_id,trial.condition_id,trial.status,trial.verified_success===true?'Yes':trial.verified_success===false?'No':trial.status==='running'?'Pending':'Unavailable',trial.score??'—'])row.append(el('td',value));body.append(row);}table.append(thead,body);wrap.append(table);card.append(wrap);}
+  for(const trial of p.trials)for(const error of trial.errors||[])card.append(el('p',`${trial.trial_id} · ${error}`,'error'));
   if(run.error)card.append(el('p',run.error,'error'));
   const details=el('details'),summary=el('summary','Recent sample events');details.dataset.run=run.output;details.open=expanded.has(run.output);details.append(summary,el('pre',p.events.slice(-12).map(e=>`${e.at} · ${e.message}`).join('\n')));card.append(details);target.append(card);
  }
@@ -247,6 +258,7 @@ function renderResultSummary(data){
  const workflow=data.workflow||{};target.append(el('p',`${workflow.recorded_status||'Unknown'} · ${workflow.message||''}`));
  if(workflow.error)target.append(el('p',workflow.error,'error'));
  if(!data.evaluation){target.append(el('p','Trial results will appear here once evaluation starts.','small'));return;}
+ for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
  const groups=Object.entries(data.evaluation.conditions||{});
  const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
  for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);

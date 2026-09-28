@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from cyber_agent_flow_eval import integration as ev, reporting
 from .samples import CATALOG
+from .diagnostics import clean
 
 PHASES = {'preparing': 'Preparing the guest workspace', 'uploading': 'Transferring worker and trial inputs',
           'starting': 'Starting the guest worker', 'executing': 'Guest worker executing',
@@ -30,6 +31,7 @@ def build(root, journal, report, state, coordinator):
     for row in rows:
         trial = {key: row.get(key) for key in ('trial_id', 'condition_id', 'task_id', 'repetition',
                  'attempt', 'status', 'started_at', 'ended_at', 'verified_success', 'score', 'execution_seconds')}
+        trial['errors'] = [clean(error) for error in row.get('errors', [])[:10]]
         trial['elapsed_seconds'] = row.get('elapsed_seconds', elapsed(row.get('started_at'), row.get('ended_at')))
         if row.get('started_at'):
             events.append(dict(at=row['started_at'], kind='trial', message=f"{row['trial_id']} · {row['condition_id']} · attempt {row['attempt']} started"))

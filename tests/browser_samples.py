@@ -25,10 +25,13 @@ def main():
         calls, _, backend = install_backend(patch, root)
         from cyber_agent_flow_orchestrator import samples
         from cyber_agent_flow_eval import integration as ev
-        release, finish = threading.Event(), threading.Event()
+        release, finish, fail_next = threading.Event(), threading.Event(), threading.Event()
         launch, cleanup = backend.launch, samples.stop_fixture
         trials = []
         def paused_trial(self, directory, seconds):
+            if self.spec['id'] == 'sample-smoke' and fail_next.is_set():
+                assert release.wait(90)
+                return {'status':'error', 'errors':['Example model connection failure'], 'execution_seconds':1}
             if self.spec['id'] == 'sample-tools-vs-helper':
                 trials.append(directory)
                 if len(trials) == 3:
@@ -107,12 +110,16 @@ def main():
                     page.locator('#sample-global-status a').click()
                     page.locator('#sample-activity').scroll_into_view_if_needed()
                     page.screenshot(path=str(destination / 'sample-active.png'))
+                    helper.get_by_role('button', name='View results', exact=True).click()
+                    expect(page.locator('#result-summary')).to_contain_text('evaluating')
                     release.set()
                     expect(page.locator('#sample-activity')).to_contain_text('Cleaning up the sample environment', timeout=30000)
                     expect(page.locator('#sample-activity')).to_contain_text('6 / 6 trials finished · 100%')
                     expect(page.locator('#sample-global-status')).to_be_visible()
                     finish.set()
                     expect(row).to_contain_text('completed', timeout=30000)
+                    expect(page.locator('#result-summary')).to_contain_text('completed', timeout=30000)
+                    expect(page.locator('#result-summary')).not_to_contain_text('evaluating')
                     expect(page.locator('#sample-global-status')).to_be_hidden()
                     expect(row).to_contain_text('6 / 6')
                     page.locator('#close-progress').click()
@@ -147,6 +154,17 @@ def main():
                     expect(cancelled).to_contain_text('3 / 6')
                     cancelled.get_by_role('button', name='View results', exact=True).click()
                     expect(page.locator('#result-summary')).to_contain_text('cancelled')
+                    release.clear();fail_next.set()
+                    smoke=page.locator('#runs tr').filter(has_text='Model smoke test').first
+                    smoke.get_by_role('button', name='Run again', exact=True).click()
+                    expect(page.locator('#sample-activity')).to_contain_text('0 / 1 trials finished', timeout=30000)
+                    running=page.locator('#runs tr').filter(has_text='Model smoke test').first
+                    running.get_by_role('button', name='View results', exact=True).click()
+                    expect(page.locator('#result-summary')).to_contain_text('evaluating', timeout=30000)
+                    release.set()
+                    expect(page.locator('#result-summary')).to_contain_text('completed_with_errors', timeout=30000)
+                    expect(page.locator('#result-summary')).to_contain_text('Example model connection failure')
+                    expect(page.locator('#sample-activity')).to_contain_text('Example model connection failure')
                     assert any(op == 'sample_stop' for _, op, _ in calls)
                     assert not errors, errors
                     browser.close()

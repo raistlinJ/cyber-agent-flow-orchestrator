@@ -328,6 +328,9 @@ def test_legacy_transport_and_interrupted_trial_progress(tmp_path):
     assert stopped['trials'][0]['status'] == 'unconfirmed'
     assert stopped['trials'][0]['elapsed_seconds'] is None
     assert stopped['percent'] == 0 and stopped['elapsed_seconds'] == 0
+    report['attempts'][0].update(status='error', errors=['Connection failed; api_key=private-test-key'])
+    failed = build(output, journal, report, 'completed_with_errors', False)
+    assert failed['trials'][0]['errors'] == ['Connection failed; api_key=[redacted]']
 
 
 def test_progress_journal_failure_still_cleans_up_fixture(pve, lab, tmp_path, monkeypatch):

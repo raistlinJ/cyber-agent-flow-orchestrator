@@ -196,6 +196,10 @@ automatically. **Close progress** hides the panel without stopping execution.
 - Guest stage, input files/bytes transferred, last observed service state/PID,
   and when that stage was last recorded, when supported by the host evaluator.
 - Per-trial outcomes and scores, recent timestamped events, and a link to results.
+- Recorded trial errors appear directly below the trial table and in results.
+  An open results panel refreshes from saved host files when the run status or
+  trial summary changes, including its final outcome. Viewing results does not
+  fetch outputs from the participant VM.
 
 A compact status notice follows the active sample across all pages. The full
 panel and console update with the existing five-second progress reads, including
