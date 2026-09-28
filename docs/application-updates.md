@@ -64,6 +64,9 @@ the VM, not just the operator's private experiment results.
    default is `main`. Click **Update**.
 4. Watch the maintenance job below the cards. **Details** includes the source URL,
    requested ref, resolved commit, bundle checksum, guest outcome and errors.
+   The bottom **Troubleshooting console** shows commands, responses and timing;
+   it can be hidden or downloaded while the page is busy. Uploads display bytes
+   acknowledged, percentage, average transfer rate and checksum verification.
 5. Use **Roll back** to restore the previous successful revision. Files generated
    since the update remain in place.
 
@@ -163,6 +166,11 @@ an incomplete update.
 Host job records and downloaded Git objects are private to the operator under
 `RUNS_ROOT/_users/<owner-hash>/updates/<request-id>/`. They are retained for audit;
 there is no automatic garbage collection yet.
+The same directory contains `console.json`, a bounded tail of the latest 100
+maintenance events and the current transfer counters. Trace reads are included
+for the latest three jobs; earlier jobs retain their files on the host. Existing
+running jobs must finish before restarting to use the new tracing code; traces
+cannot be reconstructed for transfers that started before the feature was installed.
 
 Rollback changes application source and service state. It does not roll back a VM,
 Python dependencies, databases, configuration changes or experiment output.

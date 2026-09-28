@@ -1,8 +1,10 @@
 """Application maintenance UI, real HTTPS/PVE auth; guest/OS operations simulated."""
 from pathlib import Path
+import base64
 import shutil
 import sys
 import tempfile
+import threading
 
 import pytest
 from playwright.sync_api import sync_playwright, expect
@@ -24,6 +26,7 @@ def main():
         shutil.copytree(Path(__file__).resolve().parents[1] / 'examples', root / 'examples')
         calls, agent, _ = install_backend(patch, root)
         revisions = {9402: 'a' * 40, 9403: 'a' * 40}
+        finish_upload = threading.Event()
         original = agent.call
         def call(self, vmid, op, **data):
             original(self, vmid, op, **data)
@@ -32,10 +35,18 @@ def main():
             if op == 'app_rollback': revisions[vmid] = 'a' * 40
             return {'revision': revisions[vmid], 'missing_controls': ['allowed_tools'] if vmid == 9403 and revisions[vmid][0] == 'a' else [], 'modified': False}
         patch.setattr(agent, 'call', call)
-        patch.setattr(agent, 'put', lambda self, vmid, path, content: self.authorize(['guest', 'exec', vmid]))
-        def package(source, ref, base, directory):
+        def put(self, vmid, path, content):
+            midpoint = len(content) // 2
+            self.call(vmid, 'write', path=path, offset=0, content=base64.b64encode(content[:midpoint]).decode())
+            if vmid == 9403:
+                assert finish_upload.wait(90)
+            self.call(vmid, 'write', path=path, offset=midpoint, content=base64.b64encode(content[midpoint:]).decode())
+        patch.setattr(agent, 'put', put)
+        def package(source, ref, base, directory, *, trace=None):
             file = directory / 'source.bundle'
             file.write_bytes(b'simulated guest transfer; real Git packaging has separate integration tests')
+            if trace:
+                trace.emit('response', '<img src=x onerror="window.consoleInjected=true">', force=True)
             return 'b' * 40, file
         patch.setattr(updates, 'package', package)
         with pve_server(root) as pve:
@@ -69,12 +80,19 @@ def main():
                     button('participant', 'inspect').click()
                     expect(status).to_contain_text('Please wait: Submitting application maintenance')
                     expect(button('participant', 'inspect')).to_be_disabled()
+                    expect(page.locator('#download-console')).to_be_enabled()
+                    page.locator('#debug-console summary').click()
+                    expect(page.locator('#console-output')).not_to_be_visible()
+                    page.locator('#debug-console summary').click()
+                    expect(page.locator('#console-output')).to_be_visible()
                     page.wait_for_timeout(100)
                     assert len(pending) == 1
                     pending.pop().continue_()
                     page.unroute('**/api/applications')
                     expect(page.locator('#update-cards')).to_contain_text('Missing evaluator controls', timeout=30000)
                     expect(button('participant', 'inspect')).to_be_enabled(timeout=30000)
+                    expect(page.locator('#console-output')).to_contain_text('app_inspect completed')
+                    expect(page.locator('#console-output')).to_contain_text('PVE authorization passed')
                     expect(button('participant', 'update')).to_be_disabled()
                     expect(status).to_contain_text('Update permission required:')
                     pve[0]['groups'] += ',caf-maintainers'
@@ -83,6 +101,12 @@ def main():
                         expect(button(role, 'update')).to_be_enabled(timeout=30000)
                         expect(page.locator(f'#update-status-{role}')).to_have_text('Ready to check, update or roll back this application.')
                         button(role, 'update').click()
+                        if role == 'participant':
+                            expect(page.locator('#update-jobs')).to_contain_text('37 / 75 bytes acknowledged', timeout=30000)
+                            expect(page.locator('#loading-label')).to_contain_text('49.3%')
+                            expect(page.locator('#download-console')).to_be_enabled()
+                            page.screenshot(path=str(destination / 'transfer-progress.png'), full_page=True)
+                            finish_upload.set()
                         expect(page.locator('#update-cards')).to_contain_text('bbbbbbbbbbbb', timeout=30000)
                         # Wait for this specific application to finish before rollback.
                         expect(page.locator('#update-cards article').filter(has=button(role, 'update'))).to_contain_text('bbbbbbbbbbbb', timeout=30000)
@@ -90,14 +114,25 @@ def main():
                         button(role, 'rollback').click()
                         expect(page.locator('#update-cards article').filter(has=button(role, 'update'))).to_contain_text('aaaaaaaaaaaa', timeout=30000)
                     page.screenshot(path=str(destination / 'updates-desktop.png'), full_page=True)
+                    with page.expect_download() as download:
+                        page.locator('#download-console').click()
+                    downloaded = Path(download.value.path()).read_text()
+                    assert 'Upload complete; guest size and SHA-256 verified' in downloaded
+                    assert PASSWORD not in downloaded
+                    assert '<img src=x' in downloaded
+                    assert page.locator('#console-output img').count() == 0
+                    assert not page.evaluate('Boolean(window.consoleInjected)')
+                    page.locator('#debug-console summary').click()
                     page.set_viewport_size({'width': 390, 'height': 844})
                     page.reload()
                     page.wait_for_selector('#updates-panel:not([hidden])')
+                    expect(page.locator('#console-output')).not_to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     page.screenshot(path=str(destination / 'updates-mobile.png'), full_page=True)
                     assert not errors, errors
                     browser.close()
             finally:
+                finish_upload.set()
                 dashboard.close()
     print('PASS: version check, explicit permission/loading reasons, permission refresh, both application updates/rollback, responsive UI')
     print(destination)

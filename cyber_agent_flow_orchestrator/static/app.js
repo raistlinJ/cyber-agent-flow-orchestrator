@@ -5,6 +5,25 @@ let snapshot = null, fetching = false, failed = false, rolesDirty = false, roles
 let initialized=false, operation=null, waitingForObservation=false, waitingForMaintenance=false, redirecting=false, maintenanceStarting=false;
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
+const clientLog=[];
+function logClient(kind,message){clientLog.push({at:new Date().toISOString(),kind,message});if(clientLog.length>100)clientLog.shift();renderConsole();}
+function renderConsole(){
+ const entries=[...clientLog];
+ for(const job of snapshot?.updates?.jobs||[])for(const event of job.console?.events||[])entries.push({...event,message:`[${job.role} VM ${job.vmid} ${job.action} ${job.id.slice(0,8)}] ${event.message}`});
+ entries.sort((a,b)=>a.at.localeCompare(b.at));
+ const output=$('console-output'),follow=output.scrollHeight-output.scrollTop-output.clientHeight<40;
+ output.textContent=entries.slice(-300).map(event=>`${event.at} [${event.kind}] ${event.message}`).join('\n')||'Waiting for activity…';
+ if(follow)output.scrollTop=output.scrollHeight;
+}
+async function apiFetch(path,options={}){
+ const start=performance.now(),label=`${options.method||'GET'} ${path}`;logClient('request',label);
+ try{const response=await fetch(path,options);logClient('response',`${label} → HTTP ${response.status} (${((performance.now()-start)/1000).toFixed(2)}s)`);return response;}
+ catch(error){logClient('error',`${label} → network request failed (${((performance.now()-start)/1000).toFixed(2)}s)`);throw error;}
+}
+try{$('debug-console').open=localStorage.getItem('caf-console-open')!=='false';}catch{}
+document.querySelector('#debug-console summary').addEventListener('click',event=>{event.preventDefault();$('debug-console').open=!$('debug-console').open;try{localStorage.setItem('caf-console-open',String($('debug-console').open));}catch{}});
+$('debug-console').addEventListener('toggle',()=>{try{localStorage.setItem('caf-console-open',String($('debug-console').open));}catch{}});
+$('download-console').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([$('console-output').textContent],{type:'text/plain'})),link=el('a');link.href=url;link.download='orchestrator-console.log';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 const refreshPeriods=['0','1','2','5','10'];
 try{const saved=localStorage.getItem('caf-refresh-minutes');if(refreshPeriods.includes(saved))$('refresh-period').value=saved;}catch{}
 function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||foregroundChecks||waitingForMaintenance||redirecting;}
@@ -15,7 +34,7 @@ function syncBusy(){
  let label, percent=null;
  if(redirecting)label='Opening sign-in…';
  else if(operation)label=operation;
- else if(waitingForMaintenance)label=(snapshot?.updates?.jobs||[]).find(job=>['queued','running'].includes(job.status))?.message||'Retrieving application state…';
+ else if(waitingForMaintenance){const job=(snapshot?.updates?.jobs||[]).find(job=>['queued','running'].includes(job.status));label=job?.message||'Retrieving application state…';const transfer=job?.console?.transfer;if(transfer&&!transfer.verified&&label.startsWith('Transferring verified'))label+=` · ${transfer.percent}% of file acknowledged (${transfer.sent_bytes}/${transfer.total_bytes} bytes)`;}
  else if(waitingForObservation){if(snapshot?.loading){const info=snapshot.loading;percent=info.percent;label=`${info.status} · ${info.completed}/${info.total} VM checks complete · ${percent}%`;}else label='Checking VM power, guest access and applications…';}
  else if(fetching||!initialized)label=csrfToken?'Retrieving dashboard and verifying VM access…':'Checking your login session…';
  else if(failed){label='Loading failed. Use Refresh view to try again.';bar.hidden=true;}
@@ -27,7 +46,7 @@ function syncBusy(){
 function sessionExpired(){redirecting=true;clearPrivateView();syncBusy();location.replace('/login');throw Error('Your session expired. Sign in again.');}
 async function loadSession(){
  if(sessionPromise)return sessionPromise;
- sessionPromise=(async()=>{const response=await fetch('/api/session',{cache:'no-store'});if(response.status===401)sessionExpired();if(!response.ok)throw Error('Unable to verify your session. Refresh to retry.');const session=await response.json();csrfToken=session.csrf;$('username-label').textContent=session.username;})();
+ sessionPromise=(async()=>{const response=await apiFetch('/api/session',{cache:'no-store'});if(response.status===401)sessionExpired();if(!response.ok)throw Error('Unable to verify your session. Refresh to retry.');const session=await response.json();csrfToken=session.csrf;$('username-label').textContent=session.username;})();
  try{await sessionPromise;}finally{sessionPromise=null;}
 }
 function duration(seconds) {if (seconds == null || !Number.isFinite(Number(seconds))) return 'Unknown'; seconds=Math.max(0, Math.floor(seconds)); const h=Math.floor(seconds/3600), m=Math.floor(seconds%3600/60), s=seconds%60; return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;}
@@ -35,7 +54,7 @@ function badge(text, tone='') {return el('span', text, 'badge '+tone);}
 function timer(seconds, observed, live) {const node=el('span',duration(seconds),'clock'); if(seconds!=null){node.dataset.seconds=seconds;node.dataset.observed=observed||'';node.dataset.live=live?'yes':'no';} return node;}
 function detail(list,label,value) {const row=el('div');row.append(el('dt',label),el('dd',value));list.append(row);}
 function render(data) {
- snapshot=data; renderRoles(data); renderSamples(data); renderUpdates(data); $('workflow').textContent=data.workflow_id||'';
+ snapshot=data; renderRoles(data); renderSamples(data); renderUpdates(data); renderConsole();$('workflow').textContent=data.workflow_id||'';
  const notice=$('notice'); const errors=(data.errors||[]).map(x=>x.error);notice.hidden=!errors.length;notice.textContent=errors.join(' · ');
  const cards=$('machines');cards.replaceChildren();
  if(!data.vms.length)cards.append(el('div','Checking configured machines…','empty'));
@@ -72,7 +91,7 @@ async function refresh(force=false, background=false){
  refreshPromise=(async()=>{
   try{
    if(!csrfToken){await loadSession();syncBusy();}
-   const response=await fetch(force?'/api/status?refresh=1':'/api/status?refresh=0',{cache:'no-store'});
+   const response=await apiFetch(force?'/api/status?refresh=1':'/api/status?refresh=0',{cache:'no-store'});
    if(response.status===401)sessionExpired();
    if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);
    const data=await response.json();failed=false;render(data);return true;
@@ -94,12 +113,12 @@ async function finishDashboardRead(allowFailure=false){
 $('dashboard-controls').addEventListener('click',event=>{if(isBusy()&&!event.target.closest('summary')){event.preventDefault();event.stopImmediatePropagation();}},true);
 $('sign-out').addEventListener('click',async()=>{
  if(isBusy())return;operation='Signing out…';syncBusy();
- try{await finishDashboardRead();const response=await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});if(response.ok||response.status===401){redirecting=true;clearPrivateView();location.replace('/login');return;}throw Error('Sign out failed');}
+ try{await finishDashboardRead();const response=await apiFetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});if(response.ok||response.status===401){redirecting=true;clearPrivateView();location.replace('/login');return;}throw Error('Sign out failed');}
  catch(error){$('notice').hidden=false;$('notice').textContent='Unable to sign out. Please try again.';}
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){snapshot=null;waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
  for(const role of ['scenarioforge','participant','core']){
@@ -117,7 +136,7 @@ $('role-form').addEventListener('submit',async event=>{
   await finishDashboardRead();
   if(!csrfToken)await loadSession();
   const roles=Object.fromEntries(['scenarioforge','participant','core'].map(role=>[role,$('role-'+role).value?Number($('role-'+role).value):null]));
-  const response=await fetch('/api/roles',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(roles)});
+  const response=await apiFetch('/api/roles',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(roles)});
   const body=await response.json().catch(()=>({}));if(!response.ok)throw Error(response.status===504?'Saving VM roles timed out. Refresh to check whether they were saved.':body.error||'Unable to save roles');
   rolesDirty=false;operation='Loading your updated VM selections…';syncBusy();$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh(true);
  }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;operation=null;syncBusy();schedulePoll();}
@@ -125,7 +144,7 @@ $('role-form').addEventListener('submit',async event=>{
 async function showResults(id){
  if(isBusy())return;operation='Loading experiment results…';syncBusy();
  $('result-panel').hidden=false;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren();$('download-dataset').hidden=true;
- try{await finishDashboardRead();const response=await fetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});if(!response.ok)throw Error('Results unavailable or access not granted');const data=await response.json();renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);if(data.evaluation){$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;$('download-dataset').hidden=false;}}
+ try{await finishDashboardRead();const response=await apiFetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});if(!response.ok)throw Error('Results unavailable or access not granted');const data=await response.json();renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);if(data.evaluation){$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;$('download-dataset').hidden=false;}}
  catch(error){$('result-content').textContent=error.message;}
  finally{operation=null;syncBusy();schedulePoll();}
 }
@@ -153,7 +172,7 @@ async function startSample(id){
   await finishDashboardRead();
   const requestId=crypto.randomUUID().replaceAll('-','');
   if(!csrfToken)await loadSession();
-  const response=await fetch('/api/samples/run',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:id,request_id:requestId})});
+  const response=await apiFetch('/api/samples/run',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:id,request_id:requestId})});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||`Request failed (HTTP ${response.status}); refresh to check your runs before retrying`);
   $('sample-message').textContent=`Started ${data.run_id}. Follow progress in Experiment runs below.`;await refresh();
  }catch(error){$('sample-message').textContent=error.message;}
@@ -205,7 +224,7 @@ function renderUpdates(data){
   }
  }
  const jobs=$('update-jobs');jobs.replaceChildren();
- for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));if(job.revision)row.append(el('code',job.revision));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
+ for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));if(job.console?.transfer){const transfer=job.console.transfer,progress=el('progress');progress.max=100;progress.value=transfer.percent;progress.setAttribute('aria-label',`${job.role} source bundle upload`);row.append(el('p',`${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes acknowledged · ${transfer.percent}% · ${(transfer.bytes_per_second/1024).toFixed(1)} KiB/s · ${transfer.verified?'Checksum verified':'Awaiting verified completion'}`,'small'),progress);if(!transfer.verified)row.append(el('p',`${transfer.sent_bytes?'Last acknowledgement':'Waiting for first acknowledgement since'}: ${transfer.updated_at}. Open the troubleshooting console below for the current command.`,'small'));}if(job.revision)row.append(el('code',job.revision));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
  if(!(updates.jobs||[]).length)jobs.append(el('p','No application maintenance recorded for your account.','empty'));
 }
 async function maintain(role,action,ref){
@@ -215,7 +234,7 @@ async function maintain(role,action,ref){
  try{
   await finishDashboardRead();
   if(!csrfToken)await loadSession();
-  const response=await fetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action,ref,request_id:crypto.randomUUID().replaceAll('-','')})});
+  const response=await apiFetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action,ref,request_id:crypto.randomUUID().replaceAll('-','')})});
   const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||`Maintenance request failed (HTTP ${response.status})`);
   $('update-message').textContent=`Maintenance ${result.id} submitted. Follow its status below.`;await refresh();
  }catch(error){$('update-message').textContent=error.message;}

@@ -12,6 +12,7 @@ from cyber_agent_flow_orchestrator import update_guest as guest, updates
 from cyber_agent_flow_orchestrator.access import AccessDenied
 from cyber_agent_flow_orchestrator.config import load
 from cyber_agent_flow_orchestrator.workspaces import Workspace
+from cyber_agent_flow_orchestrator.diagnostics import Trace
 from test_pve_auth import pve, make_auth
 from test_user_access import access, vm, Probe
 from test_workflow import lab
@@ -203,6 +204,11 @@ def test_https_maintenance_whitelist_csrf_group_and_scoped_inspection(pve, lab, 
             workspace = Workspace(tmp_path / 'runs', 'operator@pve')
             row = ev.read_json(workspace.path / 'updates' / ('a' * 32) / 'job.json')
             assert row['status'] == 'completed'
+            scoped = dash.updates.view(access(pve), workspace, workspace.roles())
+            assert any(event['kind'] == 'response' for event in scoped['jobs'][0]['console']['events'])
+            other = access(pve, 'another@pve')
+            other_workspace = Workspace(tmp_path / 'runs', other.username)
+            assert dash.updates.view(other, other_workspace, other_workspace.roles())['jobs'] == []
             dash.updates.config = None
             assert request(server, '/api/applications', dict(data, request_id='b' * 32), cookie=cookie, headers=headers)[0] == 400
     finally:
@@ -268,7 +274,10 @@ def test_annotated_tag_resolves_to_commit_and_release_refs_keep_rollback(install
     git(source, 'tag', '-a', 'release-test', '-m', 'Approved release')
     output = tmp_path / 'tag-package'
     output.mkdir()
-    revision, bundle = updates.package({'url': str(source)}, 'release-test', original, output)
+    trace = Trace(output)
+    revision, bundle = updates.package({'url': str(source)}, 'release-test', original, output, trace=trace)
+    console = trace.path.read_text()
+    assert 'fetch --no-tags' in console and 'Host Git exit 0' in console and revision in console
     assert revision == git(source, 'rev-parse', 'main')
     assert revision != git(source, 'rev-parse', 'release-test')
     args = stage(installation, tmp_path)

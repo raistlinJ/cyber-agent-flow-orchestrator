@@ -8,12 +8,14 @@ import re
 import subprocess
 import threading
 import os
+import time
 from urllib.parse import urlsplit
 
 from cyber_agent_flow_eval import integration as ev, reporting
 from .access import AccessDenied
 from .monitor import definitions, now
 from .workspaces import Workspace, private_directory
+from .diagnostics import Trace
 
 DEFAULTS = {
     'group': 'caf-maintainers',
@@ -66,13 +68,25 @@ def require_maintenance(access, group):
     access.current()
 
 
-def package(source, ref, base, destination):
+def package(source, ref, base, destination, *, trace=None):
     """Download on the host; send only missing Git objects when base is an ancestor."""
     repository = destination / 'source.git'
     def git(*args, timeout=300, check=True):
-        process = subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', *args],
-                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
-                                 env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
+        argv = ['git', '-c', 'core.hooksPath=/dev/null', *args]
+        if trace:
+            from .guest_monitor import redact
+            trace.emit('command', redact(argv), force=True)
+        start = time.monotonic()
+        try:
+            process = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
+                                     env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
+        except Exception as exc:
+            if trace:
+                trace.emit('error', f'Host Git command failed after {time.monotonic()-start:.2f}s ({type(exc).__name__})', force=True)
+            raise
+        if trace:
+            trace.emit('response', f'Host Git exit {process.returncode} after {time.monotonic()-start:.2f}s\n'
+                       + process.stdout.decode(errors='replace') + process.stderr.decode(errors='replace'), force=True)
         if check and process.returncode:
             raise UpdateError('Host Git download/package failed: ' + process.stderr.decode(errors='replace')[-1200:])
         return process
@@ -122,6 +136,12 @@ class UpdateManager:
                     row['status'] = 'interrupted'
                 if row['status'] == 'queued' and (datetime.now(timezone.utc) - datetime.fromisoformat(row['created_at'])).total_seconds() > 15:
                     row['status'] = 'interrupted'
+                console = item.parent / 'console.json'
+                if len(rows) < 3 and console.is_file() and not console.is_symlink() and console.stat().st_size <= 1024 * 1024:
+                    try:
+                        row['console'] = ev.read_json(console)
+                    except (OSError, ValueError):
+                        pass  # A damaged optional trace must not hide the job result.
                 rows.append(row)
         return dict(can_update=permitted, group=self.config['group'], jobs=rows,
                     applications=[dict(role=role, vmid=roles.get(role), **self.config[role]) for role in ('participant', 'scenarioforge')])
@@ -161,14 +181,23 @@ class UpdateManager:
         return {'id': request_id}
 
     def _run(self, access, directory, job, python, service):
+        trace = Trace(directory)
         def save(message):
             job['message'] = message
             ev.write_json(directory / 'job.json', job)
+            trace.emit('status', message, force=True)
         def authorize(args):
-            if job['action'] != 'inspect':
-                require_maintenance(access, self.config['group'])
-            access.qm(args)
-        agent = ev.GuestAgent(self.runtime['backend'], authorize=authorize)
+            start = time.monotonic()
+            trace.emit('authorization', 'Checking current PVE group and VM permissions', force=True)
+            try:
+                if job['action'] != 'inspect':
+                    require_maintenance(access, self.config['group'])
+                access.qm(args)
+            except Exception:
+                trace.emit('error', f'PVE authorization failed after {time.monotonic()-start:.2f}s', force=True)
+                raise
+            trace.emit('authorization', f'PVE authorization passed in {time.monotonic()-start:.2f}s')
+        agent = trace.instrument(ev.GuestAgent(self.runtime['backend'], authorize=authorize))
         agent.script = Path(__file__).with_name('update_guest.py').read_text()
         vmid = job['vmid']
         args = dict(role=job['role'], root=job['root'])
@@ -189,14 +218,14 @@ class UpdateManager:
                     update = dict(args, token=job['id'], expected_revision=installed['revision'], python=python, service=service)
                     if job['action'] == 'update':
                         save('Downloading the selected source revision on the host')
-                        revision, bundle = package(self.config[job['role']], job['ref'], installed['revision'], directory)
+                        revision, bundle = package(self.config[job['role']], job['ref'], installed['revision'], directory, trace=trace)
                         if bundle.stat().st_size > self.runtime['backend']['max_transfer_bytes']:
                             raise UpdateError('Source bundle exceeds the configured transfer limit')
                         job['revision'] = revision
                         save('Transferring source through the guest agent')
                         upload = agent.call(vmid, 'app_stage', **args, token=job['id'])
                         # Standard transfer RPC uses its own helper, with the same authorization callback.
-                        transfer = ev.GuestAgent(self.runtime['backend'], authorize=authorize)
+                        transfer = trace.instrument(ev.GuestAgent(self.runtime['backend'], authorize=authorize))
                         content = bundle.read_bytes()
                         job['bundle_sha256'] = hashlib.sha256(content).hexdigest()
                         save('Transferring verified source bundle through the guest agent')
@@ -214,3 +243,4 @@ class UpdateManager:
             finally:
                 job['ended_at'] = now()
                 ev.write_json(directory / 'job.json', job)
+                trace.flush(force=True)

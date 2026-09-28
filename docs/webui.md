@@ -92,6 +92,39 @@ checking versions uses ordinary VM access. Updates run in background workers and
 preserve local data. See [application maintenance](application-updates.md) for
 setup, dependency limits, service restarts, source repositories and recovery.
 
+## Troubleshooting console
+
+The collapsible console at the bottom shows dashboard API request/status timing
+and maintenance activity: host Git commands and their bounded output, guest-agent
+operations, `qm` execution/status responses, authorization timing and file-transfer
+acknowledgements. It is read-only. Hide/show is saved in this browser, and
+**Download log** exports the displayed text. Both remain usable during loading or
+maintenance. The view follows new entries when scrolled to the bottom; scroll up
+to keep reading older entries.
+
+During a source upload, the maintenance card shows acknowledged bytes, percentage,
+average KiB/s and the last acknowledgement time. This percentage describes the
+file transfer, not the whole update. Reaching 100% written is followed by a guest
+size/SHA-256 check, then application validation and activation. No new acknowledgement
+means the current command or authorization check may still be waiting; consult the
+timestamped console. The existing 16 KiB chunks and per-command permission checks
+can require many round trips. This adds visibility, not a faster transfer protocol.
+
+Maintenance traces are private to the signed-in account, persisted as
+`RUNS_ROOT/_users/<owner-hash>/updates/<job-id>/console.json`. Each file keeps the
+latest 100 events; the dashboard reads traces for the latest three jobs and shows
+at most 300 entries together with browser requests. Browser-only request entries
+reset on reload. Old jobs started before this update have no trace. Trace events
+arrive with active-operation status reads (normally every five seconds).
+
+The console omits login bodies, cookies/headers, guest-helper source, RPC file
+contents and base64 payloads. Responses use selected metadata and common credential
+patterns are masked in host command output. Redaction is best effort: review an
+export before sharing it. This is not a full shell transcript or an agent
+prompt/response log; inner guest commands are represented by their guest operation
+and its result, and captured host Git output appears when that command finishes.
+Session/access errors clear the private console view along with the dashboard.
+
 ## Bundled samples
 
 In PVE mode, save a participant VM, then choose **Model smoke test** or **Tools vs.
