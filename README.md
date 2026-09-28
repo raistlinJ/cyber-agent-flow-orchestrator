@@ -5,6 +5,13 @@ Run a ScenarioForge → artifact preparation → evaluation workflow from the
 `cyber-agent-flow-eval` owns the trials, scoring, and datasets; `cyber-agent-flow`
 owns the shared agent engine, tools, and artifact generation/testing.
 
+![ScenarioForge, CORE and CAF with separate host orchestrator and evaluator](scenarioforge_cyber-agent-flow.png)
+
+![Evaluation flow from study configuration to guest trials and private scoring](scenarioforge_cyber-agent-flow-eval.png)
+
+See [diagram notes and command examples](docs/evaluation-diagrams.md) for the
+software boundaries, comparison controls and limitations shown in these figures.
+
 ```mermaid
 flowchart TB
   subgraph Host[Proxmox host]
