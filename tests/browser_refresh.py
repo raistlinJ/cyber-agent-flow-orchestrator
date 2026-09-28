@@ -77,7 +77,7 @@ def main():
                     # Changing to Never during a request is allowed; it cancels subsequent idle polls.
                     period.select_option('0')
                     pending.pop().fulfill(json=dashboard.value)
-                    expect(page.locator('#loading-label')).to_have_text('Dashboard ready · 100%')
+                    expect(page.locator('#loading-label')).to_have_text('Dashboard loaded')
 
                 # A background VM probe keeps buttons usable, including while progress is read.
                 period.select_option('1')

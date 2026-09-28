@@ -30,7 +30,10 @@ function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||fore
 function syncBusy(){
  const busy=isBusy(), loading=busy||fetching||waitingForObservation;if(loading&&!wasBusy)busySince=performance.now();wasBusy=loading;
  $('dashboard-controls').disabled=busy;$('dashboard-controls').setAttribute('aria-busy',String(busy));$('sign-out').disabled=busy;
- const bar=$('loading-progress');bar.hidden=false;$('loading-status').classList.toggle('complete',!loading&&!failed);
+ const lastChange=(snapshot?.updates?.jobs||[]).find(job=>job.action!=='inspect'&&(snapshot.updates.applications||[]).some(app=>app.role===job.role&&app.vmid===job.vmid));
+ const maintenanceFailed=['failed','interrupted'].includes(lastChange?.status);
+ const bar=$('loading-progress');bar.hidden=false;$('loading-status').classList.toggle('complete',!loading&&!failed&&!maintenanceFailed);
+ $('loading-status').classList.toggle('maintenance-failed',!loading&&maintenanceFailed);
  let label, percent=null;
  if(redirecting)label='Opening sign-in…';
  else if(operation)label=operation;
@@ -38,7 +41,7 @@ function syncBusy(){
  else if(waitingForObservation){if(snapshot?.loading){const info=snapshot.loading;percent=info.percent;label=`${info.status} · ${info.completed}/${info.total} VM checks complete · ${percent}%`;}else label='Checking VM power, guest access and applications…';}
  else if(fetching||!initialized)label=csrfToken?'Retrieving dashboard and verifying VM access…':'Checking your login session…';
  else if(failed){label='Loading failed. Use Refresh view to try again.';bar.hidden=true;}
- else{label='Dashboard ready · 100%';percent=100;}
+ else{label=maintenanceFailed?`Dashboard loaded · ${lastChange.role} ${lastChange.action} ${lastChange.status}; see Application versions`:'Dashboard loaded';bar.hidden=true;}
  if(percent==null)bar.removeAttribute('value');else bar.value=percent;
  $('loading-label').textContent=!busy&&loading?`Background refresh · ${label} · controls available`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
  syncUpdateControls(busy?label:null);
@@ -118,7 +121,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){snapshot=null;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').hidden=true;$('result-summary').replaceChildren();$('download-dataset').hidden=true;$('samples-panel').hidden=true;$('sample-cards').replaceChildren();for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
  for(const role of ['scenarioforge','participant','core']){
@@ -216,7 +219,9 @@ function renderUpdates(data){
   for(const app of updates.applications){
    const card=el('article',null,'card update-card');card.append(el('h3',app.role==='participant'?'Cyber-agent-flow':'ScenarioForge'),el('p',app.vmid?`VM ${app.vmid}`:'Choose and save a VM above','small'));
    const known=(updates.jobs||[]).find(job=>job.role===app.role&&job.vmid===app.vmid&&job.installed);
-   if(known){const info=known.installed;card.append(el('p',`Last checked: ${info.revision.slice(0,12)}${info.modified?' · local edits':''}`,'small'));if(info.missing_controls?.length)card.append(el('p',`Missing evaluator controls: ${info.missing_controls.join(', ')}`,'error'));}
+   if(known){const info=known.installed;card.append(el('p',`Installed revision (last checked): ${info.revision.slice(0,12)}${info.modified?' · local edits':''}`,'small'));if(info.missing_controls?.length)card.append(el('p',`Missing evaluator controls: ${info.missing_controls.join(', ')}`,'error'));
+    if(info.modified){card.append(el('p','Tracked local edits block updates and rollback. Preserve/commit them in the VM, then check again.','error'));if(info.modified_files?.length){card.append(el('pre',info.modified_files.join('\n'),'small'));card.append(el('p',`Showing ${info.modified_files.length} of ${info.modified_file_count??info.modified_files.length} changed files (paths limited to 300 characters).`,'small'));}}
+   }
    const label=el('label','Branch, tag or commit','small'),input=el('input');input.type='text';input.value=maintenanceRefs[app.role]||app.ref;input.dataset.updateRef=app.role;input.addEventListener('input',()=>{maintenanceRefs[app.role]=input.value;});label.append(input);card.append(label);
    const status=el('p',null,'small');status.id=`update-status-${app.role}`;card.append(status);input.setAttribute('aria-describedby',status.id);
    const actions=el('div',null,'update-actions');
@@ -224,7 +229,9 @@ function renderUpdates(data){
   }
  }
  const jobs=$('update-jobs');jobs.replaceChildren();
- for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));if(job.console?.transfer){const transfer=job.console.transfer,progress=el('progress');progress.max=100;progress.value=transfer.percent;progress.setAttribute('aria-label',`${job.role} source bundle upload`);row.append(el('p',`${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes acknowledged · ${transfer.percent}% · ${(transfer.bytes_per_second/1024).toFixed(1)} KiB/s · ${transfer.verified?'Checksum verified':'Awaiting verified completion'}`,'small'),progress);if(!transfer.verified)row.append(el('p',`${transfer.sent_bytes?'Last acknowledgement':'Waiting for first acknowledgement since'}: ${transfer.updated_at}. Open the troubleshooting console below for the current command.`,'small'));}if(job.revision)row.append(el('code',job.revision));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
+ const latest=updates.jobs?.[0];
+ if(latest){$('update-message').textContent=`Latest maintenance · ${latest.role} · VM ${latest.vmid} · ${latest.action}: ${latest.status}. ${latest.error||latest.message}`;$('update-message').classList.toggle('error',['failed','interrupted'].includes(latest.status));}
+ for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));if(job.console?.transfer){const transfer=job.console.transfer,progress=el('progress');progress.max=100;progress.value=transfer.percent;progress.setAttribute('aria-label',`${job.role} source bundle upload`);row.append(el('p',`${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes acknowledged · ${transfer.percent}% · ${(transfer.bytes_per_second/1024).toFixed(1)} KiB/s · ${transfer.verified?'Upload checksum verified; see activation outcome below':['queued','running'].includes(job.status)?'Awaiting verified completion':'Transfer stopped; file not verified'}`,'small'),progress);if(!transfer.verified)row.append(el('p',`${transfer.sent_bytes?'Last acknowledgement':'Transfer started'}: ${transfer.updated_at}. Open the troubleshooting console below for command history.`,'small'));}if(job.revision)row.append(el('p',`Target revision: ${job.revision}`,'small'));if(job.action!=='inspect')row.append(el('p',job.status==='completed'?'Activation completed':['failed','interrupted'].includes(job.status)?'Activation not confirmed. Check version for the current installed revision.':'Activation pending','small'));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
  if(!(updates.jobs||[]).length)jobs.append(el('p','No application maintenance recorded for your account.','empty'));
 }
 async function maintain(role,action,ref){
@@ -238,7 +245,7 @@ async function maintain(role,action,ref){
   const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||`Maintenance request failed (HTTP ${response.status})`);
   $('update-message').textContent=`Maintenance ${result.id} submitted. Follow its status below.`;await refresh();
  }catch(error){$('update-message').textContent=error.message;}
- finally{maintenanceStarting=false;operation=null;if(snapshot)renderUpdates(snapshot);syncBusy();schedulePoll();}
+ finally{maintenanceStarting=false;operation=null;syncBusy();schedulePoll();}
 }
 
 // Progress reads collect an existing check/job without starting another VM probe.

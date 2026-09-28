@@ -85,7 +85,10 @@ the VM, not just the operator's private experiment results.
 
 1. Save the participant and ScenarioForge VM roles.
 2. Click **Check version** for an application. The page shows its last checked
-   commit, tracked-local-edit state, and (for CAF) missing evaluation controls.
+   commit, tracked-local-edit state and filenames, and (for CAF) missing evaluation
+   controls. Up to 50 changed paths are shown, each limited to 300 characters;
+   the filename list is also bounded to fit guest-agent output. Filenames are
+   quoted and file contents are never included.
 3. Enter a branch, tag or full commit SHA from its configured repository. The
    default is `main`. Click **Update**.
 4. Watch the maintenance job below the cards. **Details** includes the source URL,
@@ -95,6 +98,20 @@ the VM, not just the operator's private experiment results.
    acknowledged, percentage, average transfer rate and checksum verification.
 5. Use **Roll back** to restore the previous successful revision. Files generated
    since the update remain in place.
+
+**Dashboard loaded** describes the dashboard read, not an application update.
+Upload **100%** describes acknowledged file bytes; **checksum verified** confirms
+the bundle arrived intact. Only a completed maintenance job confirms activation.
+The history labels the requested **Target revision** separately from the card's
+last checked **Installed revision**. Failed or interrupted transfers retain their
+last byte count as history, not an active transfer waiting to finish.
+
+If the initial inspection finds tracked edits, update/rollback stops before source
+download or transfer. The card lists the affected paths. Review and preserve or
+commit those edits inside the VM, then select **Check version** and retry. Moving
+copies elsewhere alone does not make tracked files clean. The updater does not
+discard or stash edits for you. The guest checks again immediately before activation
+to catch changes made after preflight.
 
 Requests run in background workers. A revision check is explicit, rather than a
 Git operation on every dashboard poll. Select **Check version** again after any

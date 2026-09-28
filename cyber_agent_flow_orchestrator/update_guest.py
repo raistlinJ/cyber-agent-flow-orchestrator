@@ -74,6 +74,28 @@ def maintenance():
         yield
 
 
+def tracked_changes(root):
+    # NUL framing preserves spaces/newlines and the second path of a rename.
+    records = iter(git(root, 'status', '--porcelain=v1', '-z', '--untracked-files=no').stdout.split(b'\0'))
+    files, count, output_bytes = [], 0, 0
+    for record in records:
+        if not record:
+            continue
+        status = record[:2].decode('ascii', errors='replace')
+        path = record[3:].decode(errors='replace')
+        original = next(records, b'').decode(errors='replace') if 'R' in status or 'C' in status else None
+        count += 1
+        if len(files) < 50:
+            label = status + ' ' + json.dumps(path[:300])
+            if original is not None:
+                label += ' <- ' + json.dumps(original[:300])
+            size = len(json.dumps(label).encode()) + 2
+            if output_bytes + size <= 8000:
+                files.append(label)
+                output_bytes += size
+    return files, count
+
+
 def identity(root, role):
     head = value(root, 'rev-parse', 'HEAD')
     controls = None
@@ -86,8 +108,9 @@ def identity(root, role):
                               {a.arg for a in [*init.args.args, *init.args.kwonlyargs]})
         except (OSError, SyntaxError, StopIteration):
             controls = ['compatible MCPSession']
+    files, count = tracked_changes(root)
     return dict(revision=head, branch=value(root, 'branch', '--show-current'),
-                modified=bool(value(root, 'status', '--porcelain', '--untracked-files=no')),
+                modified=bool(count), modified_files=files, modified_file_count=count,
                 missing_controls=controls)
 
 

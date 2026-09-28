@@ -27,13 +27,16 @@ def main():
         calls, agent, _ = install_backend(patch, root)
         revisions = {9402: 'a' * 40, 9403: 'a' * 40}
         finish_upload = threading.Event()
+        dirty = set()
+        activation_failures = set()
         original = agent.call
         def call(self, vmid, op, **data):
             original(self, vmid, op, **data)
             if op == 'app_stage': return {'path': '/tmp/test-source.bundle'}
+            if op == 'app_update' and vmid in activation_failures: raise ValueError('Tracked local edits appeared before activation. No files changed.')
             if op == 'app_update': revisions[vmid] = 'b' * 40
             if op == 'app_rollback': revisions[vmid] = 'a' * 40
-            return {'revision': revisions[vmid], 'missing_controls': ['allowed_tools'] if vmid == 9403 and revisions[vmid][0] == 'a' else [], 'modified': False}
+            return {'revision': revisions[vmid], 'missing_controls': ['allowed_tools'] if vmid == 9403 and revisions[vmid][0] == 'a' else [], 'modified': vmid in dirty, 'modified_files': [' M \"mcp_client.py\"'] if vmid in dirty else [], 'modified_file_count': 1 if vmid in dirty else 0}
         patch.setattr(agent, 'call', call)
         def put(self, vmid, path, content):
             midpoint = len(content) // 2
@@ -113,6 +116,30 @@ def main():
                         expect(button(role, 'rollback')).to_be_enabled(timeout=30000)
                         button(role, 'rollback').click()
                         expect(page.locator('#update-cards article').filter(has=button(role, 'update'))).to_contain_text('aaaaaaaaaaaa', timeout=30000)
+                    dirty.add(9403)
+                    expect(button('participant', 'update')).to_be_enabled(timeout=30000)
+                    before = len(calls)
+                    button('participant', 'update').click()
+                    expect(page.locator('#update-message')).to_contain_text('update: failed', timeout=30000)
+                    expect(page.locator('#update-message')).to_contain_text('No source bundle downloaded or transferred')
+                    expect(page.locator('#update-cards')).to_contain_text('Tracked local edits block updates')
+                    expect(page.locator('#update-cards')).to_contain_text('mcp_client.py')
+                    expect(page.locator('#loading-label')).to_contain_text('participant update failed')
+                    expect(page.locator('#loading-progress')).to_be_hidden()
+                    assert 'complete' not in (page.locator('#loading-status').get_attribute('class') or '').split()
+                    assert [op for _, op, _ in calls[before:]] == ['app_inspect']
+                    expect(button('participant', 'inspect')).to_be_enabled()
+                    dirty.clear()
+                    activation_failures.add(9403)
+                    button('participant', 'update').click()
+                    expect(page.locator('#update-message')).to_contain_text('Tracked local edits appeared before activation', timeout=30000)
+                    latest = page.locator('#update-jobs article').first
+                    expect(latest).to_contain_text('100%')
+                    expect(latest).to_contain_text('Upload checksum verified')
+                    expect(latest).to_contain_text('Activation not confirmed')
+                    expect(latest).to_contain_text('Target revision: ' + 'b' * 40)
+                    expect(page.locator('#update-cards article').filter(has=button('participant', 'update'))).to_contain_text('Installed revision (last checked): aaaaaaaaaaaa')
+                    expect(page.locator('#loading-label')).to_contain_text('participant update failed')
                     page.screenshot(path=str(destination / 'updates-desktop.png'), full_page=True)
                     with page.expect_download() as download:
                         page.locator('#download-console').click()

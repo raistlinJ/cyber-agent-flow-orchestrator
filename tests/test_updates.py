@@ -284,3 +284,54 @@ def test_annotated_tag_resolves_to_commit_and_release_refs_keep_rollback(install
     guest.dispatch(dict(args, op='app_update'))
     assert git(root, 'rev-parse', 'refs/caf-orchestrator/releases/' + original) == original
     assert git(root, 'rev-parse', 'refs/caf-orchestrator/releases/' + revision) == revision
+
+
+def test_inspection_lists_tracked_paths_without_contents(installation):
+    role, _, root, _, _ = installation
+    assert guest.identity(root, role)['modified_files'] == []
+    tracked = 'mcp_client.py' if role == 'participant' else 'scenarioforge/cli.py'
+    renamed = 'renamed file\nwith newline.py'
+    git(root, 'mv', tracked, renamed)
+    (root / renamed).write_text((root / renamed).read_text() + '# private content\n')
+    info = guest.identity(root, role)
+    assert info['modified'] and info['modified_file_count'] == 1
+    assert info['modified_files'] == ['RM ' + json.dumps(renamed) + ' <- ' + json.dumps(tracked)]
+    assert 'private content' not in json.dumps(info)
+    assert 'config.local.yaml' not in json.dumps(info)
+
+
+@pytest.mark.parametrize('action', ['update', 'rollback'])
+def test_manager_dirty_preflight_stops_before_download_or_transfer(pve, lab, tmp_path, monkeypatch, action):
+    pve[0]['groups'] += ',caf-maintainers'
+    pve[0]['resources']['operator@pve'] = [vm(9403)]
+    user = access(pve)
+    workspace = Workspace(tmp_path / 'runs', user.username)
+    workspace.save_roles(dict(scenarioforge=None, participant=9403, core=None), user)
+    calls, agent, _ = install_backend(monkeypatch, tmp_path)
+    original = agent.call
+    def call(self, vmid, op, **data):
+        original(self, vmid, op, **data)
+        return {'revision': 'a' * 40, 'modified': True, 'modified_files': [' M "mcp_client.py"']}
+    monkeypatch.setattr(agent, 'call', call)
+    monkeypatch.setattr(updates, 'package', lambda *a, **kw: pytest.fail('Downloaded source for dirty checkout'))
+    cfg, runtime, _, _ = load(lab[0])
+    manager = updates.UpdateManager(cfg, runtime, tmp_path / 'runs')
+    try:
+        manager.submit(user, 'participant', action, 'main', 'a' * 32)
+        manager.jobs[user.username].result(timeout=10)
+        row = ev.read_json(workspace.path / 'updates' / ('a' * 32) / 'job.json')
+        assert row['status'] == 'failed'
+        assert 'No source bundle downloaded or transferred' in row['error']
+        assert row['installed']['modified_files'] == [' M "mcp_client.py"']
+        assert [op for _, op, _ in calls] == ['app_inspect']
+        assert not (workspace.path / 'updates' / ('a' * 32) / 'source.bundle').exists()
+    finally:
+        manager.close()
+
+
+def test_changed_path_output_is_bounded(monkeypatch):
+    records = [b' M ' + ('\u2603' * 300 + str(i)).encode() for i in range(70)]
+    monkeypatch.setattr(guest, 'git', lambda *a: subprocess.CompletedProcess([], 0, stdout=b'\0'.join(records) + b'\0'))
+    files, count = guest.tracked_changes(Path('/unused'))
+    assert count == 70 and 0 < len(files) <= 50
+    assert len(json.dumps(files).encode()) <= 8002
