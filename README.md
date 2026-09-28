@@ -78,6 +78,12 @@ python3 install.py --yes
 python3 install.py -- --group dev
 ```
 
+After `uv sync`, the installer imports the evaluator host API and orchestrator
+startup modules before reporting success. A package version alone is insufficient:
+`integration.py`, `reporting.py`, and Proxmox authorization support must be present.
+If the check fails, update the evaluator source checkout to a compatible revision;
+rerunning `uv sync` cannot restore files absent from that checkout.
+
 These repository/ref options affect new downloads only. Existing checkouts are
 never updated automatically. A failed download is removed so you can retry; a
 successful checkout is retained if dependency syncing later fails. Noninteractive
