@@ -1,5 +1,6 @@
 """Python TLS reverse proxy to a fixed, private, authenticated dashboard backend."""
 import asyncio
+import logging
 from http.server import ThreadingHTTPServer
 import secrets
 import threading
@@ -17,7 +18,9 @@ def application(upstream_port, proxy_key, config):
     upstream = f'http://127.0.0.1:{upstream_port}'
 
     async def client_lifetime(app):
-        async with ClientSession(timeout=ClientTimeout(total=15), cookie_jar=DummyCookieJar(),
+        # A three-VM role save performs several bounded PVE calls. The whole
+        # request must allow their combined duration, including initial roles.
+        async with ClientSession(timeout=ClientTimeout(total=60), cookie_jar=DummyCookieJar(),
                                  trust_env=False, auto_decompress=False) as session:
             app[CLIENT] = session
             yield
@@ -53,6 +56,7 @@ def application(upstream_port, proxy_key, config):
             except web.HTTPException:
                 raise
             except (TimeoutError, asyncio.TimeoutError):
+                logging.getLogger(__name__).warning('Dashboard backend timed out: %s %s', request.method, request.path)
                 raise web.HTTPGatewayTimeout(text='Dashboard request timed out') from None
             except Exception:
                 raise web.HTTPBadGateway(text='Dashboard unavailable') from None

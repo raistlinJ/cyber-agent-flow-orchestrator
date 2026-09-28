@@ -61,9 +61,7 @@ class Workspace:
 
     def save_roles(self, value, access):
         value = self.validate_roles(value)
-        for vmid in value.values():
-            if vmid is not None:
-                access.require_vm(vmid)
+        access.require_vms(vmid for vmid in value.values() if vmid is not None)
         access.current()
         path = self.path / 'roles.json'
         if path.is_symlink():
@@ -78,9 +76,7 @@ class Workspace:
         if path.exists() or path.is_symlink():
             return self.roles()
         value = self.validate_roles(value)
-        for vmid in value.values():
-            if vmid is not None:
-                access.require_vm(vmid)
+        access.require_vms(vmid for vmid in value.values() if vmid is not None)
         access.current()
         with ev.lease(self.path / '.workspace.lock'):
             if not path.exists() and not path.is_symlink():

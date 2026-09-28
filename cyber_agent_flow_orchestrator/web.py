@@ -132,7 +132,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     if auth.provider.name == 'pve':
                         if not getattr(dashboard, 'scoped', False):
                             raise AccessDenied('A per-user dashboard is required for PVE login')
-                        self.respond(200, dashboard.read(auth.access(token)))
+                        self.respond(200, dashboard.read(auth.access(token, revalidate=False)))
                     else:
                         self.respond(200, dashboard.read())
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):
@@ -141,7 +141,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(404, {'error': 'Not found'})
                         return
                     try:
-                        value = dashboard.run_detail(auth.access(token), parts[3], parts[4])
+                        value = dashboard.run_detail(auth.access(token, revalidate=False), parts[3], parts[4])
                     except (FileNotFoundError, KeyError, ValueError):
                         self.respond(404, {'error': 'Run not found or results unavailable'})
                         return
@@ -218,7 +218,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     except ValueError as exc:
                         self.respond(400, {'error': str(exc)})
                         return
-                    self.respond(200, dashboard.select(auth.access(token), data))
+                    self.respond(200, dashboard.select(auth.access(token, revalidate=False), data))
                 else:
                     self.respond(404, {'error': 'No execution endpoint is enabled'})
             except AccessDenied:

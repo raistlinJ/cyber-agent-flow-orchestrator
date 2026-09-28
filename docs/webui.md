@@ -173,3 +173,27 @@ results. A caller cannot choose another owner's directory or supply an absolute
 path to the API. Results are private to the owner; no project-sharing UI exists.
 On an authorization/service error the browser clears displayed private data.
 Legacy unowned runs and other users' runs are not shown.
+
+## Dashboard timeouts after selecting VMs
+
+HTTP 504 means the HTTPS proxy timed out waiting for the dashboard backend; it
+is not a PVE permission-denied response. Earlier versions used a 15-second total
+request deadline and repeated inventory/group checks for each selected VM. A
+three-VM save could exceed that deadline on a slower PVE API.
+
+Role saves now share one fresh inventory check while checking each VM's effective
+ACL, then recheck account/group access before saving. There is no authorization
+cache across requests or guest commands. The proxy allows 60 seconds for a full
+request; individual PVE requests retain their four-second socket timeout. Guest
+probes run in the background, so slow guest agents do not hold the status response.
+
+Update and restart the orchestrator to apply these changes. If a save times out,
+refresh to check whether it completed before saving again. The page clears private
+observations when it cannot verify access, and distinguishes a timeout from an
+explicit denial. Persistent 504s produce `Dashboard backend timed out` in the
+server output with the method/path, without credentials. Check that the PVE API
+at `auth.url` is responding promptly; do not broaden ACLs or disable TLS validation
+to work around a timeout.
+
+Regression tests cover all three roles over HTTPS with blocked guest probes,
+per-VM ACL denial, group revocation during a batch, and the reduced PVE call count.

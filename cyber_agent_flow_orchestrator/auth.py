@@ -180,18 +180,21 @@ class Auth:
             return {'username': record['username'], 'csrf': record['csrf'], 'role': 'orchestrator',
                     'provider': self.provider.name}
 
-    def pve_record(self, token):
+    def pve_record(self, token, *, revalidate=True):
         """Server-only ticket access; never include this record in an HTTP response."""
-        if self.provider.name != 'pve' or not self.session(token):
+        if self.provider.name != 'pve' or not self.session(token, revalidate=revalidate):
             return None
         with self.lock:
             self._prune(self.clock())
             record = self.sessions.get(self._key(token))
             return dict(record) if record else None
 
-    def access(self, token):
+    def access(self, token, *, revalidate=True):
+        # HTTP handlers have already validated the session. They can skip only
+        # this constructor's duplicate check; every access operation and guest
+        # command still uses the fully revalidating callback below.
         from .access import AccessDenied, PVEAccess
-        record = self.pve_record(token)
+        record = self.pve_record(token, revalidate=revalidate)
         if not record:
             raise AccessDenied('Login required')
         return PVEAccess(self.provider, record, session_check=lambda: self.pve_record(token))

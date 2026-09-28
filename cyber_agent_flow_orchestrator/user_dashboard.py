@@ -44,7 +44,9 @@ class UserDashboard:
     def read(self, access):
         available = access.inventory()
         permitted = {row['vmid'] for row in available}
-        workspace = self.workspace(access)
+        # inventory() has just checked this identity. Recheck inventory/identity
+        # at the end as well, without a redundant remote check to open local files.
+        workspace = Workspace(self.root, access.username)
         initial = self.cfg.get('monitoring', {}).get('initial_roles')
         if initial:
             workspace.seed_roles({k: v if v in permitted else None for k, v in initial.items()}, access)

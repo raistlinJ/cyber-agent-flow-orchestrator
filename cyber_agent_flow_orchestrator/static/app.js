@@ -38,7 +38,7 @@ function render(data) {
  tick();
 }
 function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,(snapshot.poll_seconds||10)*3));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&!stale&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale?'Last observation; refresh required':'Elapsed time since process start';}}
-async function refresh(){if(fetching)return;fetching=true;try{const response=await fetch('/api/status',{cache:'no-store'});if(response.status===401){clearPrivateView();location.replace('/login');return;}if(!response.ok)throw Error(`HTTP ${response.status}`);const data=await response.json();failed=false;render(data);}catch(error){failed=true;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Unable to verify dashboard access: ${error.message}. Refresh to try again.`;tick();}finally{fetching=false;}}
+async function refresh(){if(fetching)return;fetching=true;try{const response=await fetch('/api/status',{cache:'no-store'});if(response.status===401){clearPrivateView();location.replace('/login');return;}if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);const data=await response.json();failed=false;render(data);}catch(error){failed=true;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();}finally{fetching=false;}}
 $('refresh').addEventListener('click',refresh);setInterval(refresh,3000);setInterval(tick,1000);refresh();
 
 let csrfToken=null;
@@ -64,7 +64,7 @@ $('role-form').addEventListener('submit',async event=>{
   if(!csrfToken)await loadSession();
   const roles=Object.fromEntries(['scenarioforge','participant','core'].map(role=>[role,$('role-'+role).value?Number($('role-'+role).value):null]));
   const response=await fetch('/api/roles',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(roles)});
-  const body=await response.json();if(!response.ok)throw Error(body.error||'Unable to save roles');
+  const body=await response.json().catch(()=>({}));if(!response.ok)throw Error(response.status===504?'Saving VM roles timed out. Refresh to check whether they were saved.':body.error||'Unable to save roles');
   rolesDirty=false;$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh();
  }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;$('save-roles').disabled=false;}
 });

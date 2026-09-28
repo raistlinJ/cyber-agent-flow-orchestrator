@@ -25,6 +25,9 @@ class PVEAccess:
 
     def inventory(self):
         record = self.current()
+        return self._inventory(record)
+
+    def _inventory(self, record):
         rows = self.provider.request('GET', '/cluster/resources?type=vm', ticket=record['credential'])
         if not isinstance(rows, list):
             raise AccessDenied('VM access could not be verified')
@@ -45,16 +48,29 @@ class PVEAccess:
         return sorted(result, key=lambda r: r['vmid'])
 
     def require_vm(self, vmid):
-        if type(vmid) is not int or not 100 <= vmid <= 999999999:
+        self.require_vms([vmid])
+
+    def require_vms(self, vmids):
+        """Check one role selection against fresh identity/inventory and each ACL.
+
+        Nothing is cached across calls or guest commands. Sharing the inventory
+        inside this one operation avoids repeating it for every selected VM.
+        """
+        vmids = list(vmids)
+        if any(type(vmid) is not int or not 100 <= vmid <= 999999999 for vmid in vmids):
             raise AccessDenied('Invalid VM selection')
-        if vmid not in {row['vmid'] for row in self.inventory()}:
-            raise AccessDenied('VM access revoked, unavailable, or on another node')
         record = self.current()
-        path = f'/vms/{vmid}'
-        data = self.provider.request('GET', '/access/permissions?path=' + path, ticket=record['credential'])
-        # Values are propagation bits: 0 still means the privilege is granted.
-        if not isinstance(data, dict) or not isinstance(data.get(path), dict) or 'VM.Audit' not in data[path]:
-            raise AccessDenied('VM access not granted')
+        if not vmids:
+            return
+        permitted = {row['vmid'] for row in self._inventory(record)}
+        if not set(vmids) <= permitted:
+            raise AccessDenied('VM access revoked, unavailable, or on another node')
+        for vmid in dict.fromkeys(vmids):
+            path = f'/vms/{vmid}'
+            data = self.provider.request('GET', '/access/permissions?path=' + path, ticket=record['credential'])
+            # Values are propagation bits: 0 still means the privilege is granted.
+            if not isinstance(data, dict) or not isinstance(data.get(path), dict) or 'VM.Audit' not in data[path]:
+                raise AccessDenied('VM access not granted')
         self.current()
 
     def qm(self, args):

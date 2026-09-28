@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import socket
+import threading
 import time
 
 import pytest
@@ -189,3 +190,68 @@ def test_user_run_remaps_roles_private_inputs_and_installs_guard(pve, lab, tmp_p
     pve[0]['resources']['operator@pve'] = []
     with pytest.raises(AccessDenied): user_execution.run(None, tmp_path / 'runs', 'trial', user, resume=True)
     assert len(calls) == 2
+
+
+def test_three_vm_authorization_shares_inventory_but_checks_each_acl(pve, monkeypatch):
+    state = pve[0]
+    state['resources']['operator@pve'] = [vm(101), vm(102), vm(103)]
+    user = access(pve)
+    state['requests'].clear()
+    user.require_vms([101, 102, 103])
+    paths = [row[0] for row in state['requests']]
+    assert paths.count('/api2/json/cluster/resources?type=vm') == 1
+    assert paths.count('/api2/json/access/users?full=1') == 2
+    assert len([path for path in paths if '/access/permissions?' in path]) == 3
+    assert len(paths) == 6  # Previously fifteen serial PVE calls for three roles.
+    state['permissions'][('operator@pve', 103)] = {}
+    with pytest.raises(AccessDenied):
+        user.require_vms([101, 102, 103])
+    state['permissions'].clear()
+    original = user.provider.request
+    def revoke_after_last_acl(method, path, **kwargs):
+        response = original(method, path, **kwargs)
+        if path.endswith('/vms/103'):
+            state['groups'] = ''
+        return response
+    monkeypatch.setattr(user.provider, 'request', revoke_after_last_acl)
+    with pytest.raises(AccessDenied):
+        user.require_vms([101, 102, 103])
+
+
+def test_three_selected_guests_do_not_block_https_status(pve, lab, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    pve[0]['resources']['operator@pve'] = [vm(101), vm(102), vm(103)]
+    auth = make_auth(pve)
+    started, release = threading.Event(), threading.Event()
+    class SlowProbe(Probe):
+        def guest(self, vmid, definition, units):
+            started.set()
+            if not release.wait(10):
+                raise TimeoutError('Test probe was not released')
+            return super().guest(vmid, definition, units)
+    dash = UserDashboard(lab[0], tmp_path / 'runs', 2, lambda b, a: SlowProbe(b, a, []))
+    try:
+        with secure_server(dash, tmp_path / 'web', auth=auth) as server:
+            code, headers, _ = request(server, '/api/login', {'username': 'operator@pve', 'password': PASSWORD})
+            assert code == 200
+            cookie = headers['Set-Cookie'].split(';', 1)[0]
+            session = json.loads(request(server, '/api/session', cookie=cookie)[2])
+            roles = dict(scenarioforge=101, participant=102, core=103)
+            pve[0]['requests'].clear()
+            assert request(server, '/api/roles', roles, cookie=cookie,
+                           headers={'X-CSRF-Token': session['csrf']})[0] == 200
+            assert len(pve[0]['requests']) == 9
+            assert request(server, '/api/status', cookie=cookie)[0] == 200
+            assert started.wait(3)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                try:
+                    response = pool.submit(request, server, '/api/status', cookie=cookie).result(timeout=3)
+                    assert response[0] == 200
+                    body = json.loads(response[2])
+                    assert body['roles'] == roles and body['refreshing']
+                    assert not release.is_set()
+                finally:
+                    release.set()
+    finally:
+        release.set()
+        dash.close()
