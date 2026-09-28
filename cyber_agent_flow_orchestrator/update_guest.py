@@ -111,7 +111,13 @@ def identity(root, role):
     files, count = tracked_changes(root)
     return dict(revision=head, branch=value(root, 'branch', '--show-current'),
                 modified=bool(count), modified_files=files, modified_file_count=count,
-                missing_controls=controls)
+                missing_controls=controls, tools_config_replaceable=role == 'participant' and legacy_tools_edit(root))
+
+
+def legacy_tools_edit(root):
+    """Only the legacy, unstaged runtime catalog qualifies for replacement."""
+    return (git(root, 'status', '--porcelain=v1', '-z', '--untracked-files=no').stdout == b' M kali_tools.json\0'
+            and (root / 'kali_tools.json').is_file() and not (root / 'kali_tools.json').is_symlink())
 
 
 def active_jobs():
@@ -214,7 +220,8 @@ def dispatch(data):
         if PENDING.exists() and (op != 'app_rollback' or read(PENDING).get('root') != str(root)):
             raise ValueError('Interrupted maintenance needs rollback before another update')
         before = current['revision']
-        if current['modified']:
+        replace_tools = op == 'app_update' and current['tools_config_replaceable']
+        if current['modified'] and not replace_tools:
             raise ValueError('Tracked local edits exist; preserve/commit them before updating. No files changed.')
         if op == 'app_rollback':
             previous = pending if pending else read(directory / 'last-success.json')
@@ -273,6 +280,21 @@ def dispatch(data):
                     run(['systemctl', 'stop', service], timeout=60)
             active_jobs()
             active_processes(root)
+            if replace_tools:
+                if value(stage, 'ls-files', '--', 'kali_tools.json') or not (stage / 'kali_tools.default.json').is_file():
+                    raise ValueError('Target still tracks the runtime catalog; select a CAF revision with kali_tools.default.json')
+                if not legacy_tools_edit(root):
+                    raise ValueError('Tracked edits changed during validation; inspect again')
+                backup = directory / (token + '-kali_tools.json.backup')
+                with backup.open('xb') as stream:
+                    os.chmod(backup, 0o600)
+                    stream.write((root / 'kali_tools.json').read_bytes())
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                record['tools_config_backup'] = str(backup)
+                save(journal, record)
+                save(PENDING, dict(record, root=str(root)))
+                git(root, 'restore', '--worktree', '--', 'kali_tools.json')
             record['status'] = 'activating'
             save(journal, record)
             git(root, 'checkout', '--detach', target)
@@ -290,6 +312,8 @@ def dispatch(data):
                 if record['service_was_active']:
                     run(['systemctl', 'stop', service], timeout=60)
                 git(root, 'checkout', '--detach', before)
+            if record.get('tools_config_backup'):
+                (root / 'kali_tools.json').write_bytes(Path(record['tools_config_backup']).read_bytes())
             if record['service_was_active']:
                 run(['systemctl', 'start', service], timeout=60)
                 run(['systemctl', 'is-active', '--quiet', service])

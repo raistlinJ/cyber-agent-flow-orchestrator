@@ -209,7 +209,8 @@ class UpdateManager:
                     job['status'] = 'completed'
                     save('Installed revision and compatibility checked')
                     return
-                if installed.get('modified'):
+                replace_tools = job['action'] == 'update' and installed.get('tools_config_replaceable')
+                if installed.get('modified') and not replace_tools:
                     raise UpdateError('Tracked local edits exist; review the changed files under Check version and preserve/commit them before retrying. No source bundle downloaded or transferred; application files unchanged.')
                 with ev.TargetReservation(self.runtime['execution']['target_lock']), ev.lease(f'/var/lock/cyber-agent-flow-eval-vm-{vmid}.lock'):
                     if self.closed:

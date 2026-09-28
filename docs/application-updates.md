@@ -107,7 +107,7 @@ last checked **Installed revision**. Failed or interrupted transfers retain thei
 last byte count as history, not an active transfer waiting to finish.
 
 If the initial inspection finds tracked edits, update/rollback stops before source
-download or transfer. The card lists the affected paths. Review and preserve or
+download or transfer, except for the legacy runtime catalog described below. The card lists the affected paths. Review and preserve or
 commit those edits inside the VM, then select **Check version** and retry. Moving
 copies elsewhere alone does not make tracked files clean. The updater does not
 discard or stash edits for you. The guest checks again immediately before activation
@@ -248,3 +248,24 @@ transport are simulated; this is not a live Proxmox deployment test.
 uv run --group dev pytest -q
 uv run --group dev python tests/browser_updates.py /tmp/caf-updates-preview
 ```
+
+## Legacy runtime tool catalog
+
+Older CAF versions tracked and rewrote `kali_tools.json` during normal WebUI/CLI
+use. The new version ships tracked `kali_tools.default.json`; optional local
+`kali_tools.json` is ignored by Git. Sessions use private catalogs under `runs/`.
+
+If the old runtime catalog is the only unstaged tracked change, **Check version**
+shows that **Update** can replace it. After validating the target and stopping
+application activity, the updater retains its exact bytes in
+`/var/lib/caf-application-updates/<checkout-hash>/<request-id>-kali_tools.json.backup`,
+restores that one file, then activates the target that removes it from Git. CAF
+uses shipped defaults afterward; browser-saved tool selections remain in the browser.
+The backup path is recorded in the maintenance details. On activation failure,
+the previous catalog bytes are restored along with the old revision.
+
+Other edited files, staged changes, and targets that still track the catalog are
+rejected. No general force-update or dirty-source bypass is added. Subsequent
+updates preserve untracked local settings; rolling back across the rename may
+require moving a conflicting untracked catalog aside first. This requires an updated
+host orchestrator and CAF target; no evaluator runtime upgrade or reprovisioning.

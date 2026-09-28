@@ -38,6 +38,7 @@ def installation(tmp_path, monkeypatch, request):
         (source / 'mcp_client.py').write_text('class MCPSession:\n def __init__(self): pass\n')
         (source / 'mcp_kali.py').write_text('')
         (source / 'session_logger.py').write_text('')
+        (source / 'kali_tools.json').write_text('{"tools": [{"name": "base"}]}')
     else:
         for name in ('scenarioforge', 'webapp'):
             (source / name).mkdir()
@@ -54,6 +55,7 @@ def installation(tmp_path, monkeypatch, request):
     (installed / 'generated/tool.json').write_text('keep my tool')
     if role == 'participant':
         (source / 'mcp_client.py').write_text('class MCPSession:\n def __init__(self, *, allowed_tools=None, guidance_text=None, reveal_network_policy=True): pass\n')
+        git(source, 'mv', 'kali_tools.json', 'kali_tools.default.json')
     else:
         (source / 'scenarioforge/cli.py').write_text('VERSION = 2\n')
     git(source, 'add', '.')
@@ -335,3 +337,44 @@ def test_changed_path_output_is_bounded(monkeypatch):
     files, count = guest.tracked_changes(Path('/unused'))
     assert count == 70 and 0 < len(files) <= 50
     assert len(json.dumps(files).encode()) <= 8002
+
+
+def test_legacy_runtime_catalog_replaced_and_backed_up(installation, tmp_path):
+    role, _, root, original, _ = installation
+    if role != 'participant': pytest.skip('CAF catalog only')
+    content = b'{"tools": [{"name": "custom"}]}\n'
+    (root / 'kali_tools.json').write_bytes(content)
+    assert guest.identity(root, role)['tools_config_replaceable']
+    args = stage(installation, tmp_path)
+    result = guest.dispatch(dict(args, op='app_update'))
+    assert not result['modified']
+    assert not (root / 'kali_tools.json').exists()
+    assert (root / 'kali_tools.default.json').is_file()
+    assert Path(result['update']['tools_config_backup']).read_bytes() == content
+    restored = guest.dispatch(dict(args, op='app_rollback', expected_revision=result['revision'], token='e' * 32))
+    assert restored['revision'] == original and not restored['modified']
+
+
+@pytest.mark.parametrize('problem', ['other-edit', 'staged', 'old-target', 'restart'])
+def test_runtime_catalog_replacement_refusals_and_failure(installation, tmp_path, monkeypatch, problem):
+    role, source, root, original, _ = installation
+    if role != 'participant': pytest.skip('CAF catalog only')
+    content = b'{"tools": [{"name": "custom"}]}\n'
+    (root / 'kali_tools.json').write_bytes(content)
+    if problem == 'other-edit': (root / 'mcp_client.py').write_text('# other edit')
+    if problem == 'staged': git(root, 'add', 'kali_tools.json')
+    if problem == 'old-target':
+        git(source, 'mv', 'kali_tools.default.json', 'kali_tools.json')
+        git(source, 'commit', '-m', 'Legacy target')
+    if problem == 'restart':
+        old_run, starts = guest.run, []
+        def run(argv, **kwargs):
+            if argv[:2] == ['systemctl', 'start']:
+                starts.append(argv)
+                if len(starts) == 1: raise ValueError('Restart failed')
+            return old_run(argv, **kwargs)
+        monkeypatch.setattr(guest, 'run', run)
+    args = stage(installation, tmp_path)
+    with pytest.raises(ValueError): guest.dispatch(dict(args, op='app_update'))
+    assert git(root, 'rev-parse', 'HEAD') == original
+    assert (root / 'kali_tools.json').read_bytes() == content

@@ -28,15 +28,19 @@ def main():
         revisions = {9402: 'a' * 40, 9403: 'a' * 40}
         finish_upload = threading.Event()
         dirty = set()
+        replaceable = set()
         activation_failures = set()
         original = agent.call
         def call(self, vmid, op, **data):
             original(self, vmid, op, **data)
             if op == 'app_stage': return {'path': '/tmp/test-source.bundle'}
             if op == 'app_update' and vmid in activation_failures: raise ValueError('Tracked local edits appeared before activation. No files changed.')
-            if op == 'app_update': revisions[vmid] = 'b' * 40
+            if op == 'app_update':
+                revisions[vmid] = 'b' * 40
+                dirty.discard(vmid)
+                replaceable.discard(vmid)
             if op == 'app_rollback': revisions[vmid] = 'a' * 40
-            return {'revision': revisions[vmid], 'missing_controls': ['allowed_tools'] if vmid == 9403 and revisions[vmid][0] == 'a' else [], 'modified': vmid in dirty, 'modified_files': [' M \"mcp_client.py\"'] if vmid in dirty else [], 'modified_file_count': 1 if vmid in dirty else 0}
+            return {'revision': revisions[vmid], 'missing_controls': ['allowed_tools'] if vmid == 9403 and revisions[vmid][0] == 'a' else [], 'modified': vmid in dirty, 'tools_config_replaceable': vmid in replaceable, 'modified_files': [' M \"mcp_client.py\"'] if vmid in dirty else [], 'modified_file_count': 1 if vmid in dirty else 0}
         patch.setattr(agent, 'call', call)
         def put(self, vmid, path, content):
             midpoint = len(content) // 2
@@ -141,6 +145,16 @@ def main():
                     expect(page.locator('#update-cards article').filter(has=button('participant', 'update'))).to_contain_text('Installed revision (last checked): aaaaaaaaaaaa')
                     expect(page.locator('#loading-label')).to_contain_text('participant update failed')
                     page.screenshot(path=str(destination / 'updates-desktop.png'), full_page=True)
+                    activation_failures.clear()
+                    dirty.add(9403)
+                    replaceable.add(9403)
+                    button('participant', 'inspect').click()
+                    expect(page.locator('#update-cards')).to_contain_text('Update will back up and replace this runtime catalog', timeout=30000)
+                    expect(button('participant', 'update')).to_be_enabled(timeout=30000)
+                    button('participant', 'update').click()
+                    expect(page.locator('#update-message')).to_contain_text('update: completed', timeout=30000)
+                    expect(page.locator('#loading-label')).to_have_text('Dashboard loaded')
+
                     with page.expect_download() as download:
                         page.locator('#download-console').click()
                     downloaded = Path(download.value.path()).read_text()
