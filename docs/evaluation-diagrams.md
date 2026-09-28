@@ -3,6 +3,11 @@
 [Architecture PNG](../scenarioforge_cyber-agent-flow.png) ·
 [Evaluation flow PNG](../scenarioforge_cyber-agent-flow-eval.png)
 
+Bundled sample figures: [Model smoke test](../sample-model-smoke.png) ·
+[Tools vs. added helper](../sample-tools-vs-helper.png).
+The [sample guide](bundled-samples.md) explains their prompts, limits and scoring;
+these participant-only demonstrations do not use ScenarioForge or CoreVM.
+
 The architecture figure shows where each component runs. The evaluation figure
 expands the trial loop and the boundary between participant inputs and private
 host-side scoring. Both describe the current Proxmox backend.

@@ -430,6 +430,10 @@ Live model turns and tool calls are not streamed. See [sample progress details](
 | Model smoke test | 1 trial; up to 3 turns / 120 seconds | Supplied port observation, no tools; checks the worker, model and JSON scoring |
 | Tools vs. added helper | 6 trials; up to 12 turns / 120 seconds each | Three repetitions of baseline `nmap`, `curl`, `python3` versus those same tools plus `http_flag_walk`; recover two flags from a temporary loopback site |
 
+See [the illustrated sample guide](docs/bundled-samples.md) for each prompt, execution
+flow, scoring and interpretation. Figures: [Model smoke test](sample-model-smoke.png)
+and [Tools vs. added helper](sample-tools-vs-helper.png).
+
 The turn counts are upper bounds, not a fixed number of prompt/response pairs.
 The configured model makes real calls and can fail or time out. The HTTP helper
 is a **hand-authored example artifact**; this sample does not generate a new tool

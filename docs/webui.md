@@ -154,6 +154,9 @@ Session/access errors clear the private console view along with the dashboard.
 
 ## Bundled samples
 
+See the [illustrated sample guide](bundled-samples.md) for a figure and detailed
+explanation of what each included experiment does and measures.
+
 Choose **New**, select either bundled sample, and press **Create experiment**.
 The modal shows its description, trial budgets, current experiment model and
 CAF model settings. **Pull from VM** reads its current saved configuration;
