@@ -17,7 +17,7 @@ The screenshot uses simulated data for browser verification, not a live Proxmox 
   and application maintenance.
 - **Experiments** (`/#experiments`): an experiment table with Run, Stop, View results
   and Open progress icons. **New** opens a sample configuration modal. Condition
-  summaries and CSV downloads are available in the results modal; full JSON is under
+  summaries and CSV downloads are available in a separate results window; full JSON is under
   **Full result details**.
 - **Applications** (`/#applications`): version checks, Update with process-stop
   confirmation, rollback and the latest maintenance outcome. Expand **Maintenance
@@ -183,7 +183,7 @@ Each row has four labeled icon buttons:
 | ▶ | Run a ready experiment, or run a finished experiment again in a new row |
 | ■ | Stop after the current bounded trial, collect its output and clean up |
 | ▤ | View results already saved on the orchestrator host, including failed runs |
-| ◴ | Open the selected run's progress panel |
+| ◴ | Open the selected run's progress window |
 
 ![Experiment table and persistent console with simulated results](images/experiment-table.png)
 
@@ -195,10 +195,14 @@ A stopped run retains its collected results with status **Cancelled**; rerunning
 creates a separate run and preserves the original. Trials that never started
 have no output to collect.
 
-**Open progress** shows the selected run; starting or stopping a run opens it
-automatically. **Close progress** hides the panel without stopping execution.
+**Open progress** opens a separate browser window for the selected run. Starting
+or stopping a run provides an Open progress link. Closing the window does not stop
+execution. You can keep Results and Progress beside the dashboard, or close the
+dashboard and leave either window open. Each window has its own persistent
+troubleshooting console. Browser preferences may open a tab instead of a window;
+if popups are blocked, the dashboard offers a new-tab link.
 
-![Sample progress and persistent console with simulated execution](images/sample-progress.png)
+![Separate progress window with simulated execution](images/progress-window.png)
 
 - Preparation steps: participant checks, exclusive access, demo-site setup, and
   study/catalog preparation.
@@ -212,15 +216,18 @@ automatically. **Close progress** hides the panel without stopping execution.
   and when that stage was last recorded, when supported by the host evaluator.
 - Per-trial outcomes and scores, recent timestamped events, and a link to results.
 - Recorded trial errors appear directly below the trial table and in results.
-  An open results modal refreshes from saved host files when the run status or
-  trial summary changes, including its final outcome. Viewing results does not
-  fetch outputs from the participant VM.
+  Both windows refresh saved host data every 5 seconds during active execution
+  and every minute after completion; Refresh reloads immediately. These reads
+  do not start VM checks or fetch outputs from the participant. PVE session/access
+  checks still apply.
 
-**View results** opens a modal over the current page, with condition summaries,
-trial errors, CSV download and expandable full JSON. Close it with **Close results**
-or Escape to return to the experiment table. Closing the modal does not stop the run.
+**View results** opens a separate window with condition summaries, trial errors,
+CSV download and expandable full JSON. Use **Close window** or the browser window
+controls to close it. Reopening the same view for a run reuses its named window.
+URLs can also be reloaded or opened directly while signed in:
+`/run?view=results&run=<run-id>` and `/run?view=progress&run=<run-id>`.
 
-![Results modal with simulated trial results](images/results-modal.png)
+![Separate results window with simulated trial results](images/results-window.png)
 
 Failed attempts also show **Failure details** from files already collected on
 the host: model-call error messages and expandable **Collected worker log** tails.

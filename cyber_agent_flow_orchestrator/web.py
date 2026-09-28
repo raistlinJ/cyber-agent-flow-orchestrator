@@ -63,7 +63,9 @@ def handler(dashboard, *, auth, proxy_key, origin):
     authority = urlsplit(origin).netloc
     public_assets = {'/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
                      '/style.css': ('style.css', 'text/css')}
-    protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript')}
+    protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
+                        '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),
+                        '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()

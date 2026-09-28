@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Experiment · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/run_windows.js" defer></script><script src="/run_render.js" defer></script><script src="/run.js" defer></script></head>
+<body class="workspace run-window">
+<header><a class="brand" href="/#experiments" target="_blank" rel="noopener">CYBER AGENT FLOW · Orchestrator</a><button id="close-window" type="button">Close window</button></header>
+<main><div class="heading"><div><h1 id="window-title">Experiment</h1><p id="run-id" class="small"></p></div><button id="refresh-run" type="button">Refresh</button></div>
+<p id="window-notice" class="notice" role="status" hidden></p><p id="run-status" role="status">Loading saved run data…</p><p id="run-error" class="error" role="alert" hidden></p>
+<section id="sample-activity-panel" hidden><div id="sample-activity"></div></section>
+<section id="result-panel" class="result-panel" hidden aria-label="Run results"><div class="result-actions"><h2>Run results</h2><a id="download-dataset" hidden>Download CSV</a></div><div id="result-summary"></div><details class="result-details"><summary>Full result details</summary><pre id="result-content"></pre></details></section>
+</main>
+<details id="debug-console" class="debug-console" open><summary>Troubleshooting console <span class="small">Run events and requests</span></summary><div class="console-content"><div class="console-toolbar"><span class="small">Host-saved run data. Opening this window does not probe the VMs.</span><button id="download-console" type="button">Download log</button></div><pre id="console-output" tabindex="0" aria-label="Troubleshooting log">Waiting for activity…</pre></div></details>
+</body></html>

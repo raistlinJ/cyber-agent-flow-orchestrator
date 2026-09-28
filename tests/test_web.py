@@ -50,7 +50,8 @@ def login(server):
 
 def test_anonymous_api_blocked_and_login_assets_available(server):
     assert request(server, '/api/status')[0] == 401
-    assert request(server, '/app.js')[0] == 401
+    for path in ('/app.js', '/run', '/run.js', '/run_render.js', '/run_windows.js'):
+        assert request(server, path)[0] == 401
     code, headers, _ = request(server, '/')
     assert code == 302 and headers['Location'] == '/login'
     assert b'Welcome back.' in request(server, '/login')[2]
@@ -64,6 +65,9 @@ def test_login_cookie_dashboard_and_logout_revocation(server):
         assert value in attributes
     code, headers, body = request(server, '/', cookie=cookie)
     assert code == 200 and b'aria-label="Workspace pages"' in body
+    assert request(server, '/run?view=results&run=example', cookie=cookie)[0] == 200
+    for path in ('/run.js', '/run_render.js', '/run_windows.js'):
+        assert request(server, path, cookie=cookie)[0] == 200
     assert "frame-ancestors 'none'" in headers['Content-Security-Policy']
     assert headers['Strict-Transport-Security'] == 'max-age=31536000'
     assert json.loads(request(server, '/api/status', cookie=cookie)[2])['vms'][0]['guest_access'] == 'reachable'

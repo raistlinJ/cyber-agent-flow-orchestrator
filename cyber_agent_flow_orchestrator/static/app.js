@@ -4,7 +4,7 @@ const el = (tag, text, cls) => {const node = document.createElement(tag); if (te
 let snapshot = null, fetching = false, failed = false, rolesDirty = false, rolesSaving = false, sampleStarting = false;
 let initialized=false, operation=null, waitingForObservation=false, waitingForMaintenance=false, redirecting=false, maintenanceStarting=false;
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
-let selectedProgress=null, experimentCreating=false, selectedResults=null, resultsVersion=null;
+let experimentCreating=false;
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
 const clientLog=[];
 const pages={overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
@@ -112,7 +112,7 @@ async function refresh(force=false, background=false){
    const response=await apiFetch(force?'/api/status?refresh=1':'/api/status?refresh=0',{cache:'no-store'});
    if(response.status===401)sessionExpired();
    if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);
-   const data=await response.json();failed=false;render(data);const run=data.runs.find(r=>r.output?.split('/').pop()===selectedResults);if(selectedResults&&run&&resultVersion(run)!==resultsVersion)await loadResults(selectedResults);return true;
+   const data=await response.json();failed=false;render(data);return true;
   }catch(error){failed=true;foregroundChecks=false;waitingForObservation=false;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();return false;}
   finally{fetching=false;blockingRefresh=false;initialized=true;syncBusy();}
  })();
@@ -136,7 +136,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();$('sample-activity-panel').hidden=true;$('sample-activity').replaceChildren();snapshot=null;modelDrafts={};$('model-config-cards').replaceChildren();$('model-config-panel').hidden=true;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('result-content').textContent='';$('result-panel').close();$('result-summary').replaceChildren();$('download-dataset').hidden=true;selectedProgress=null;selectedResults=null;resultsVersion=null;$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){$('window-notice').hidden=true;$('window-notice').replaceChildren();$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();snapshot=null;modelDrafts={};$('model-config-cards').replaceChildren();$('model-config-panel').hidden=true;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
@@ -234,28 +234,7 @@ async function modelConfigAction(role,action,creating=false){
  finally{delete body.api_key;if(!creating)operation=null;syncModelControls(role);syncBusy();if(!creating)schedulePoll();}
 }
 
-function resultVersion(run){return JSON.stringify([run.recorded_status,run.coordinator_active,run.message,run.error,run.evaluation?.summary]);}
-async function loadResults(id){
- try{
-  const response=await apiFetch(`/api/runs/${encodeURIComponent(id)}/results`,{cache:'no-store'});
-  if(response.status===401)sessionExpired();
-  if(!response.ok)throw Error('Results unavailable or access not granted');
-  const data=await response.json();if(selectedResults!==id)return;
-  resultsVersion=resultVersion(data.workflow);renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);
-  $('download-dataset').hidden=!data.evaluation;if(data.evaluation)$('download-dataset').href=`/api/runs/${encodeURIComponent(id)}/dataset.csv`;
- }catch(error){if(selectedResults!==id)return;resultsVersion=null;$('result-summary').replaceChildren(el('p',`Results refresh failed: ${error.message}. Reopen View results to retry.`,'error'));$('result-content').textContent='';$('download-dataset').hidden=true;}
-}
-async function showResults(id){
- if(isBusy())return;operation='Loading experiment results…';syncBusy();
- selectedResults=id;resultsVersion=null;$('result-content').textContent='Loading results…';$('result-summary').replaceChildren(el('p','Loading saved results…','small'));$('download-dataset').hidden=true;$('result-panel').showModal();
- try{await finishDashboardRead();if(selectedResults===id)await loadResults(id);}
- catch(error){if(!redirecting&&selectedResults===id)$('result-summary').replaceChildren(el('p',error.message,'error'));}
- finally{operation=null;syncBusy();schedulePoll();}
-}
-function clearResults(){selectedResults=null;resultsVersion=null;$('result-content').textContent='';$('result-summary').replaceChildren();$('download-dataset').hidden=true;}
-$('close-results').addEventListener('click',()=>{clearResults();$('result-panel').close();});
-$('result-panel').addEventListener('cancel',clearResults);
-$('result-panel').addEventListener('close',()=>{if(!$('result-panel').open)clearResults();});
+function showResults(id){return openRunWindow('results',id);}
 
 function runActive(run){return run.coordinator_active||run.sample_progress?.active||['queued','stopping'].includes(run.recorded_status);}
 function renderSamples(data){
@@ -281,8 +260,7 @@ function renderExperiments(data){
   row.append(title,state,el('td',p?`${p.finished_trials} / ${p.planned_trials}`:run.evaluation?`${summary.trials_observed} / ${run.evaluation.planned_trials}`:'—'),el('td',p?.verified_successes??summary?.verified_successes??'—'),actions);runs.append(row);
  }
 }
-function openProgress(id){selectedProgress=id;if(location.hash!=='#experiments')location.hash='experiments';if(snapshot)renderSampleActivity(snapshot);$('sample-activity-panel').scrollIntoView({block:'start'});}
-$('close-progress').addEventListener('click',()=>{selectedProgress=null;$('sample-activity-panel').hidden=true;});
+function openProgress(id){return openRunWindow('progress',id);}
 function describeSample(){const sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);$('experiment-description').textContent=sample?.description||'';$('experiment-budget').textContent=sample?`${sample.trials} trial${sample.trials===1?'':'s'} · up to ${sample.max_turns} turns and ${sample.wall_seconds}s per trial`:'';}
 $('new-experiment').addEventListener('click',()=>{if(isBusy())return;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();$('experiment-dialog').showModal();});
 $('experiment-sample').addEventListener('change',describeSample);
@@ -304,59 +282,13 @@ async function experimentAction(action,id){
  if(isBusy()||sampleStarting)return;
  if(action==='run'&&rolesDirty){$('sample-message').textContent='Save VM role changes on Lab setup before running.';return;}
  sampleStarting=true;operation=action==='stop'?'Requesting experiment stop…':'Starting experiment…';syncBusy();
- try{await finishDashboardRead();const response=await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Experiment action failed');selectedProgress=result.run_id;$('sample-message').textContent=action==='stop'?'Stop requested. The current trial will finish, then results will be collected and cleanup completed.':'Experiment started.';await refresh();if(location.hash==='#experiments')$('sample-activity-panel').scrollIntoView({block:'start'});}
+ try{await finishDashboardRead();const response=await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Experiment action failed');$('sample-message').textContent=action==='stop'?'Stop requested. The current trial will finish, then results will be collected and cleanup completed.':'Experiment started.';const link=el('a',' Open progress ↗');link.href=runWindowURL('progress',result.run_id);link.addEventListener('click',event=>{event.preventDefault();openProgress(result.run_id);});$('sample-message').append(link);await refresh();}
  catch(error){$('sample-message').textContent=error.message;}
  finally{sampleStarting=false;operation=null;if(snapshot)renderExperiments(snapshot);syncBusy();schedulePoll();}
 }
 function renderSampleActivity(data){
- const recent=(data.runs||[]).filter(r=>r.sample_progress).sort((a,b)=>(b.sample_progress.started_at||'').localeCompare(a.sample_progress.started_at||''));
- const active=recent.filter(r=>r.sample_progress.active),shown=recent.filter(r=>r.output.split('/').pop()===selectedProgress);
- const global=$('sample-global-status');global.replaceChildren();global.hidden=!active.length;
- if(active.length){const run=active[0],p=run.sample_progress,link=el('a','View sample activity →');link.href='#experiments';link.addEventListener('click',()=>openProgress(run.output.split('/').pop()));global.append(document.createTextNode(`${p.name} · ${run.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
- const target=$('sample-activity');
- const expanded=new Set([...target.querySelectorAll('details[open]')].map(n=>n.dataset.run));
- target.replaceChildren();$('sample-activity-panel').hidden=!shown.length;
- for(const run of shown){
-  const p=run.sample_progress,trial=p.current_trial,transport=trial?.transport;
-  const card=el('article',null,'panel sample-activity'),head=el('div',null,'result-actions');head.append(el('h3',p.name),badge(run.recorded_status,run.recorded_status==='completed'?'good':['failed','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));
-  const button=el('button','Open results');button.type='button';button.addEventListener('click',()=>showResults(run.output.split('/').pop()));head.append(button);card.append(head);
-  card.append(el('p',run.recorded_status==='interrupted'?'Coordinator is no longer active. Inspect results before retrying.':run.recorded_status==='stopping'?run.message:transport?.activity||run.message||p.phase,'sample-stage'));
-  const progress=el('progress');progress.max=100;progress.value=p.percent??0;progress.setAttribute('aria-label',`${p.name} trials finished`);
-  card.append(el('p',`${p.finished_trials} / ${p.planned_trials} trials finished · ${p.percent??0}% · ${p.verified_successes} verified successes · ${p.errors} trial errors`,'small'),progress);
-  card.append(el('p','Percentage counts finished trials, including errors. Cleanup and finalization may still be pending at 100%.','small'));
-  const elapsed=el('p',null,'small');elapsed.append(document.createTextNode('Run elapsed: '),timer(p.elapsed_seconds,p.observed_at,p.active,true));card.append(elapsed);
-  if(trial){
-   card.append(el('p',`${trial.trial_id} · ${trial.condition_id} · repetition ${trial.repetition} · attempt ${trial.attempt}`));
-   const timing=el('p',null,'small');timing.append(document.createTextNode('Trial elapsed (includes setup and collection): '),timer(trial.elapsed_seconds,p.observed_at,p.active,true));card.append(timing);
-   if(transport?.files_total)card.append(el('p',`Inputs transferred: ${transport.files_uploaded} / ${transport.files_total} files · ${(transport.bytes_uploaded??0).toLocaleString()} / ${(transport.bytes_total??0).toLocaleString()} bytes acknowledged`,'small'));
-   if(transport?.service?.SubState)card.append(el('p',`Last observed guest service: ${transport.service.SubState}${transport.service.ExecMainPID?' · PID '+transport.service.ExecMainPID:''}`,'small'));
-   if(transport?.updated_at)card.append(el('p',`Guest stage last recorded: ${new Date(transport.updated_at).toLocaleTimeString()}`,'small'));
-  }
-  card.append(el('p',`Per-trial limits: ${p.max_turns} turns · ${p.wall_seconds}s worker budget. Live model tokens and tool calls are not streamed; scores appear after collection.`,'small'));
-  if(p.trials.length){const wrap=el('div',null,'scroll'),table=el('table'),header=el('tr'),thead=el('thead'),body=el('tbody');for(const title of ['Trial','Condition','Status','Verified','Score'])header.append(el('th',title));thead.append(header);for(const trial of p.trials){const row=el('tr');for(const value of [trial.trial_id,trial.condition_id,trial.status,trial.verified_success===true?'Yes':trial.verified_success===false?'No':trial.status==='running'?'Pending':'Unavailable',trial.score??'—'])row.append(el('td',value));body.append(row);}table.append(thead,body);wrap.append(table);card.append(wrap);}
-  for(const trial of p.trials)for(const error of trial.errors||[])card.append(el('p',`${trial.trial_id} · ${error}`,'error'));
-  if(run.error)card.append(el('p',run.error,'error'));
-  const details=el('details'),summary=el('summary','Recent sample events');details.dataset.run=run.output;details.open=expanded.has(run.output);details.append(summary,el('pre',p.events.slice(-12).map(e=>`${e.at} · ${e.message}`).join('\n')));card.append(details);target.append(card);
- }
-}
-function renderResultSummary(data){
- const target=$('result-summary');target.replaceChildren();
- const workflow=data.workflow||{};target.append(el('p',`${workflow.recorded_status||'Unknown'} · ${workflow.message||''}`));
- if(workflow.error)target.append(el('p',workflow.error,'error'));
- if(!data.evaluation){target.append(el('p','Trial results will appear here once evaluation starts.','small'));return;}
- for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
- for(const item of data.failure_diagnostics||[]){
-  const section=el('section',null,'failure-diagnostics');section.append(el('h3',`${item.trial_id} · attempt ${item.attempt} · Failure details`));
-  section.append(el('p','Saved on the orchestrator host. Log tails are limited to 80 lines; common credential fields are redacted.','small'));
-  for(const record of item.model_errors||[])section.append(el('p',record.error,'error'));
-  for(const log of item.logs||[]){const details=el('details');details.append(el('summary','Collected worker log'),el('div',log.path,'small'),el('pre',log.text||'(Log is empty)'));section.append(details);}
-  for(const note of item.notes||[])section.append(el('p',note,'small'));
-  target.append(section);
- }
-
- const groups=Object.entries(data.evaluation.conditions||{});
- const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
- for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);
+ const active=(data.runs||[]).find(run=>run.sample_progress?.active),target=$('sample-global-status');target.replaceChildren();target.hidden=!active;
+ if(active){const p=active.sample_progress,id=active.output.split('/').pop(),link=el('a','View sample activity ↗');link.href=runWindowURL('progress',id);link.addEventListener('click',event=>{event.preventDefault();openProgress(id);});target.append(document.createTextNode(`${p.name} · ${active.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
 }
 
 const maintenanceRefs={};
@@ -434,3 +366,5 @@ function schedulePoll(){
 $('refresh-period').addEventListener('change',()=>{try{localStorage.setItem('caf-refresh-minutes',$('refresh-period').value);}catch{}schedulePoll();tick();});
 setInterval(()=>{tick();syncBusy();},1000);
 syncBusy();refresh(true);
+
+window.addEventListener('focus',()=>{if(initialized&&!fetching&&!operation&&!redirecting)refresh(false,true);});

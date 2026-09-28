@@ -401,6 +401,10 @@ The endpoint must be reachable from the participant VM. `localhost` means that
 VM, not the Proxmox host. Samples otherwise use the host runtime YAML, whose
 shipped example specifies Ollama; they do not automatically inherit app settings.
 
+Results and Progress open in separate browser windows (or tabs, depending on
+your browser). Both refresh saved host data and include a troubleshooting console;
+you can keep them open alongside the dashboard.
+
 ### Create and run a sample
 
 Sign in with PVE, select your **Cyber-agent-flow** participant VM on **Lab setup**, and **Save VM

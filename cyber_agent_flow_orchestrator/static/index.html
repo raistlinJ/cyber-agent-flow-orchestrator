@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/run_windows.js" defer></script><script src="/app.js" defer></script></head>
 <body class="workspace">
 <header><a class="brand" href="#overview" aria-label="Orchestrator home"><span class="brand-mark">C</span>CYBER AGENT FLOW<span class="brand-divider">/</span><span class="brand-sub">Orchestrator</span></a><div class="user-menu"><span class="readonly">LAB MONITOR</span><span id="username-label"></span><button id="sign-out" type="button">Sign out</button></div></header>
 <nav class="workspace-nav" aria-label="Workspace pages">
@@ -12,6 +12,7 @@
 <main>
 <div id="loading-status" class="loading-status" role="status" aria-live="polite"><span id="loading-label">Preparing dashboard…</span><span id="loading-elapsed"></span><progress id="loading-progress" max="100" aria-label="Dashboard loading progress"></progress></div>
 <p id="sample-global-status" class="sample-global-status" role="status" hidden></p>
+<p id="window-notice" class="notice" role="status" hidden></p>
 <fieldset id="dashboard-controls" class="workspace-controls" aria-label="Dashboard controls" disabled>
 <div class="heading"><div><p class="eyebrow">LAB OPERATIONS</p><h1 id="page-title" tabindex="-1">Overview</h1><p id="page-intro" class="intro">Live machines, application processes, and workflow activity.</p></div><button id="refresh" type="button">↻ Refresh view</button></div>
 <div class="statusbar"><span><span id="pulse" class="dot muted"></span><strong id="connection">Connecting to monitor…</strong></span><span id="workflow"></span><span id="checked">Waiting for first check</span></div>
@@ -26,7 +27,7 @@
 <p id="samples-context" class="small"></p><p class="small">One experiment at a time per account. Stop finishes the current trial and collects its results before cleanup.</p>
 <p id="sample-message" class="small" role="status" aria-live="polite"></p>
 <div class="panel scroll"><table class="experiments-table"><thead><tr><th>Experiment</th><th>Status</th><th>Trials finished</th><th>Verified successes</th><th>Actions</th></tr></thead><tbody id="runs"></tbody></table><p id="no-runs" class="empty">No experiments yet. Choose New to configure one of the included samples.</p></div></section>
-<section id="sample-activity-panel" aria-labelledby="sample-activity-title" hidden><div class="section-title"><h2 id="sample-activity-title">Experiment progress</h2><button id="close-progress" type="button">Close progress</button></div><div id="sample-activity"></div></section>
+
 
 </div>
 <div data-page="applications" hidden><p id="applications-unavailable" class="empty" hidden>Application maintenance is unavailable for this server configuration.</p><section id="updates-panel" aria-labelledby="updates-title" hidden>
@@ -51,7 +52,7 @@
 </section></div>
 <footer><span>VM power, guest access, and application presence are checked separately.</span><span>Included samples run in your selected participant VM</span></footer>
 </main>
-<dialog id="result-panel" class="result-panel" aria-labelledby="results-title"><div class="result-actions"><h2 id="results-title">Run results</h2><a id="download-dataset" hidden>Download CSV</a><button id="close-results" type="button">Close results</button></div><div id="result-summary"></div><details class="result-details"><summary>Full result details</summary><pre id="result-content"></pre></details></dialog>
+
 <dialog id="experiment-dialog" aria-labelledby="experiment-dialog-title">
 <div class="experiment-dialog-heading"><div class="result-actions"><h2 id="experiment-dialog-title">New experiment</h2><button id="cancel-experiment" type="button" aria-label="Close new experiment">×</button></div>
 <section id="experiment-save-progress" class="experiment-save-progress" hidden aria-label="Experiment creation progress" aria-live="polite">
