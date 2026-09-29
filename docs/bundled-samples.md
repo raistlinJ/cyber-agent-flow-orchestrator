@@ -11,7 +11,7 @@ still needs access to its configured model endpoint.
 
 ## 1. Model smoke test
 
-![Model smoke test: host orchestration, participant worker, model and scoring](../sample-model-smoke.png)
+![Model smoke test: host orchestration, participant worker, model and scoring](../sample-workflows/sample-model-smoke.png)
 
 **Purpose:** confirm that the participant worker, CAF engine, model connection,
 output collection and host-side verification can complete a simple task.
@@ -47,7 +47,7 @@ applicable because there are no flags in this sample.
 
 ## 2. Tools vs. added helper
 
-![Tools versus added helper: six trials on the same participant loopback site](../sample-tools-vs-helper.png)
+![Tools versus added helper: six trials on the same participant loopback site](../sample-workflows/sample-tools-vs-helper.png)
 
 **Purpose:** demonstrate the controlled comparison used to ask whether an added
 artifact helps the agent succeed, make more progress, or finish sooner.

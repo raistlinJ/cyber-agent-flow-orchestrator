@@ -3,8 +3,8 @@
 [Architecture PNG](../scenarioforge_cyber-agent-flow.png) ·
 [Evaluation flow PNG](../scenarioforge_cyber-agent-flow-eval.png)
 
-Bundled sample figures: [Model smoke test](../sample-model-smoke.png) ·
-[Tools vs. added helper](../sample-tools-vs-helper.png).
+Bundled sample figures: [Model smoke test](../sample-workflows/sample-model-smoke.png) ·
+[Tools vs. added helper](../sample-workflows/sample-tools-vs-helper.png).
 The [sample guide](bundled-samples.md) explains their prompts, limits and scoring;
 these participant-only demonstrations do not use ScenarioForge or CoreVM.
 

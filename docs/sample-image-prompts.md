@@ -5,7 +5,7 @@ Generated with the built-in image generation tool on 2026-09-28. The existing
 target. Both outputs were visually checked against `samples.py`, `sample_guest.py`,
 the bundled catalogs, and the evaluator's schedule and verifiers.
 
-Outputs: `sample-model-smoke.png` and `sample-tools-vs-helper.png` at the repository root.
+Outputs: `sample-workflows/sample-model-smoke.png` and `sample-workflows/sample-tools-vs-helper.png`.
 
 ## Model smoke test
 
