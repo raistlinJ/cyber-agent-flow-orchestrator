@@ -67,7 +67,8 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
 
 
 @pytest.mark.parametrize('sample_id',['smoke','tools-vs-helper'])
-def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id):
+@pytest.mark.parametrize('hints_enabled', [False, True])
+def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hints_enabled):
     assets=tmp_path/'imported'
     (assets/'site/deeper').mkdir(parents=True)
     (assets/'docker-compose.yml').write_text('services: {}')
@@ -96,7 +97,7 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id):
             tree.write(kwargs['xml_path'])
             return {'persisted':True}
     output=tmp_path/'run/scenario.xml'
-    options=dict(source=str(source),destination=str(output),sample_id=sample_id,scenario='Fixed demo')
+    options=dict(source=str(source),destination=str(output),sample_id=sample_id,scenario='Fixed demo',provide_progressive_hints=hints_enabled)
     demo_prepare.prepare(options,Backend())
     flow=json.loads(ET.parse(output).find('.//FlowState').text)
     task=flow['evaluation_tasks'][0]
@@ -104,7 +105,8 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id):
     assert flow['flag_assignments'] == []
     assert flow['chain'][0]['ipv4']=='10.77.0.7'
     assert 'http://10.77.0.7/' in task['prompt']
-    assert len(task['progressive_hints']) == 3
+    assert ('progressive_hints' in task) is hints_enabled
+    assert len(task.get('progressive_hints', [])) == (3 if hints_enabled else 0)
     # Optional cross-repository contract check with ScenarioForge's own CLI.
     sf_python = os.environ.get('SCENARIOFORGE_TEST_PYTHON')
     if sf_python:
@@ -137,4 +139,4 @@ assert private[public[0]['id']] == state['evaluation_tasks'][0]['verifier']
     demo_prepare.prepare(options,Backend())
     updated=json.loads(ET.parse(output).find('.//FlowState').text)['evaluation_tasks'][0]['verifier']['expected']
     assert expected!=updated
-    assert all(value not in json.dumps(task['progressive_hints']) for value in ([expected['service_token']] if sample_id=='smoke' else expected['flags']))
+    assert all(value not in json.dumps(task.get('progressive_hints', [])) for value in ([expected['service_token']] if sample_id=='smoke' else expected['flags']))

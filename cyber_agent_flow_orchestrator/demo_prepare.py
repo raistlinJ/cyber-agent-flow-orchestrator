@@ -88,8 +88,10 @@ def prepare(options, backend):
     flow = json.loads(node.text)
     flow.update(flow_enabled=False, chain=[dict(id=str(host['node_id']), name=host['name'], ipv4=address, is_vuln=True)],
                 flag_assignments=[], evaluation_tasks=[dict(id=options['sample_id'], family='http-discovery',
-                    prompt=prompt, progressive_hints=hints, verifier=dict(type='json_equals', expected=expected),
+                    prompt=prompt, verifier=dict(type='json_equals', expected=expected),
                     required_checks=['containers', 'services', 'ports', 'injects'])])
+    if options.get('provide_progressive_hints', False):
+        flow['evaluation_tasks'][0]['progressive_hints'] = hints
     node.text = json.dumps(flow)
     tree.write(destination, encoding='utf-8', xml_declaration=True)
     print('Prepared fixed scenario XML, website and reviewed evaluation task')

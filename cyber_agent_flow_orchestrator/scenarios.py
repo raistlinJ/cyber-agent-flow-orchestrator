@@ -305,6 +305,7 @@ class ScenarioExperiments:
         sf = cfg['scenarioforge']
         destination = sf['repo'] + '/outputs/caf-demo-runs/' + token + '/scenario.xml'
         options = dict(sample_id=sample_id, source=captured['snapshot_path'],
+                       provide_progressive_hints=runtime['execution'].get('provide_progressive_hints', False),
                        destination=destination, scenario=captured['scenario'],
                        artifacts=sf['repo'] + '/outputs/flag_generators_runs/caf-demo-' + token)
         sf['xml'] = destination
