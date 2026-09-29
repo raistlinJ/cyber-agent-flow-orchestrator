@@ -10,7 +10,7 @@ function renderProgress(run){
  for(const run of shown){
   const p=run.sample_progress,trial=p.current_trial,transport=trial?.transport;
   const card=el('article',null,'panel sample-activity'),head=el('div',null,'result-actions');head.append(el('h3',p.name),badge(run.recorded_status,run.recorded_status==='completed'?'good':['failed','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));
-  const button=el('button','Open results');button.type='button';button.addEventListener('click',()=>showResults(run.output.split('/').pop()));head.append(button);card.append(head);
+  card.append(head);
   card.append(el('p',run.recorded_status==='interrupted'?'Coordinator is no longer active. Inspect results before retrying.':run.recorded_status==='stopping'?run.message:transport?.activity||run.message||p.phase,'sample-stage'));
   const progress=el('progress');progress.max=100;progress.value=p.percent??0;progress.setAttribute('aria-label',`${p.name} trials finished`);
   card.append(el('p',`${p.finished_trials} / ${p.planned_trials} trials finished · ${p.percent??0}% · ${p.verified_successes} verified successes · ${p.errors} trial errors`,'small'),progress);
@@ -31,6 +31,7 @@ function renderProgress(run){
  }
 }
 function renderResultSummary(data){
+ renderRunConfiguration(data.run_configuration);
  const target=$('result-summary');target.replaceChildren();
  const workflow=data.workflow||{};target.append(el('p',`${workflow.recorded_status||'Unknown'} · ${workflow.message||''}`));
  if(workflow.error)target.append(el('p',workflow.error,'error'));

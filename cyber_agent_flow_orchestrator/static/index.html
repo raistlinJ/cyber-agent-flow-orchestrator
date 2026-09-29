@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/run_windows.js" defer></script><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/loading.js" defer></script><script src="/run_windows.js" defer></script><script src="/app.js" defer></script></head>
 <body class="workspace">
 <header><a class="brand" href="#overview" aria-label="Orchestrator home"><span class="brand-mark">C</span>CYBER AGENT FLOW<span class="brand-divider">/</span><span class="brand-sub">Orchestrator</span></a><div class="user-menu"><span class="readonly">LAB MONITOR</span><span id="username-label"></span><button id="sign-out" type="button">Sign out</button></div></header>
 <nav class="workspace-nav" aria-label="Workspace pages">
@@ -61,9 +61,18 @@
 <p class="small" id="experiment-save-note"></p></section></div>
 <fieldset id="experiment-controls">
 <form id="experiment-form">
-<p class="small">Choose a sample and review its model settings before creating an experiment.</p>
-<label for="experiment-sample">Sample</label><select id="experiment-sample" required></select>
+<p class="small">Choose a bundled sample or a saved ScenarioForge scenario and review its settings.</p>
+<label for="experiment-sample">Experiment type</label><select id="experiment-sample" required></select>
 <p id="experiment-description"></p><p id="experiment-budget" class="small"></p>
+<section id="scenario-options" hidden>
+<p class="small">Load saved XML from your ScenarioForge VM. Run deploys the selected scenario using the CORE connection saved in its XML, then evaluates it with nmap, curl and python3. Resolve and save the Flow chain in ScenarioForge first.</p>
+<div class="scenario-search"><label for="scenario-query">Find scenario or XML file</label><input id="scenario-query" type="search" maxlength="160" placeholder="Scenario name or filename"><button id="load-scenarios" type="button">Load from ScenarioForge VM</button></div>
+<label for="scenario-selection">Saved scenario</label><select id="scenario-selection"><option value="">Load scenarios to choose an XML</option></select>
+<p id="scenario-selection-info" class="small" role="status"></p>
+<label for="scenario-allowed">Allowed target IPs or CIDRs</label><input id="scenario-allowed" type="text" maxlength="4096" placeholder="10.77.0.0/24">
+<label for="scenario-disallowed">Excluded target IPs or CIDRs</label><input id="scenario-disallowed" type="text" maxlength="4096" placeholder="Optional; separate entries with commas">
+<p class="small">Review the target scope for this scenario. One repetition uses the saved runtime budgets and baseline tools. Scenario reset hooks are not applied.</p>
+</section>
 <p id="experiment-model-context" class="small"></p>
 </form>
 <section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">Application model settings</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the current Cyber-agent-flow configuration and edit the model settings. Create experiment saves them to the VM and the experiment for future reruns. Without pulling, the current experiment defaults are used.</p><div id="model-config-cards" class="sample-cards"></div></section>

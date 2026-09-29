@@ -21,7 +21,9 @@ def elapsed(start, end=None):
 
 
 def build(root, journal, report, state, coordinator):
-    item = CATALOG.get(journal['sample_id'], {})
+    item = CATALOG.get(journal.get('sample_id'), {})
+    if journal.get('scenario_experiment'):
+        item = dict(journal.get('runtime', {}).get('execution', {}), name=journal['scenario_experiment']['scenario'])
     active = coordinator or state in ('queued', 'stopping')
     rows = report.get('attempts', []) if report else []
     planned = report['planned_trials'] if report else item.get('trials', 0)
@@ -55,7 +57,7 @@ def build(root, journal, report, state, coordinator):
             else: trial.update(status='unconfirmed', elapsed_seconds=None)
         trials.append(trial)
     events.sort(key=lambda event: event['at'])
-    return dict(name=item.get('name', journal['sample_id']), active=active, phase=journal.get('phase', state),
+    return dict(name=item.get('name', journal.get('sample_id', 'Scenario experiment')), active=active, phase=journal.get('phase', state),
                 started_at=journal.get('started_at', journal.get('created_at')), ended_at=journal.get('ended_at'),
                 updated_at=journal.get('updated_at', journal.get('created_at')), observed_at=datetime.now(timezone.utc).isoformat(),
                 elapsed_seconds=elapsed(journal.get('started_at', journal.get('created_at')),

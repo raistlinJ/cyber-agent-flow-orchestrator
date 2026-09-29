@@ -44,7 +44,20 @@ def application(upstream_port, proxy_key, config):
                 body = await asyncio.wait_for(request.read(), timeout=10)
                 async with request.app[CLIENT].request(request.method, upstream + request.rel_url.raw_path_qs,
                                                        headers=headers, data=body if request.method == 'POST' else None,
-                                                       allow_redirects=False) as response:
+                                                       allow_redirects=False,
+                                                       timeout=ClientTimeout(total=None, sock_connect=10, sock_read=300) if request.path.endswith('/artifact') else ClientTimeout(total=60)) as response:
+                    if request.path.endswith('/artifact') and response.status == 200:
+                        result = web.StreamResponse(status=response.status)
+                        for key in ('Content-Type', 'Content-Length', 'Content-Disposition', 'Cache-Control',
+                                    'Content-Security-Policy', 'X-Content-Type-Options'):
+                            if key in response.headers:
+                                result.headers[key] = response.headers[key]
+                        result.headers['Strict-Transport-Security'] = 'max-age=31536000'
+                        await result.prepare(request)
+                        async for chunk in response.content.iter_chunked(1024 * 1024):
+                            await result.write(chunk)
+                        await result.write_eof()
+                        return result
                     content = await response.read()
                     result = web.Response(status=response.status, body=content)
                     for key in ('Content-Type', 'Content-Disposition', 'Set-Cookie', 'Location', 'Cache-Control', 'Content-Security-Policy',

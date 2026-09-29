@@ -33,7 +33,13 @@ def load(path):
     if 'app_vmid' not in backend:
         raise ValueError('Runtime backend.app_vmid is required')
     monitoring = cfg.get('monitoring', {})
-    ev.fields(monitoring, ['core_vmid', 'scenarioforge_path', 'scenarioforge_service', 'caf_service', 'core_service', 'initial_roles'], [], 'monitoring')
+    ev.fields(monitoring, ['core_vmid', 'scenarioforge_path', 'scenarioforge_service', 'caf_service', 'core_service', 'initial_roles', 'scenarioforge_xml_roots'], [], 'monitoring')
+    if 'scenarioforge_xml_roots' in monitoring:
+        roots = monitoring['scenarioforge_xml_roots']
+        if not isinstance(roots, list) or not 1 <= len(roots) <= 10:
+            raise ValueError('scenarioforge_xml_roots must contain 1 to 10 guest directories or XML paths')
+        for root in roots:
+            guest_path(root, 'scenarioforge_xml_roots')
     if 'initial_roles' in monitoring:
         from .workspaces import Workspace
         Workspace.validate_roles(monitoring['initial_roles'])
@@ -51,10 +57,10 @@ def load(path):
     if not isinstance(sf, dict):
         raise ValueError('scenarioforge must be a mapping')
     if sf.get('mode') == 'reuse_export':
-        ev.fields(sf, ['mode', 'archive'], ['mode', 'archive'], 'scenarioforge')
+        ev.fields(sf, ['mode', 'archive', 'reproduction_archive'], ['mode', 'archive'], 'scenarioforge')
         guest_path(sf['archive'], 'archive')
     elif sf.get('mode') == 'execute':
-        ev.fields(sf, ['mode', 'xml', 'scenario', 'suite_id', 'output_root', 'repo', 'python', 'user', 'environment_file', 'timeout_seconds', 'tasks', 'split'],
+        ev.fields(sf, ['mode', 'xml', 'scenario', 'suite_id', 'output_root', 'repo', 'python', 'user', 'environment_file', 'timeout_seconds', 'tasks', 'split', 'reproduction_archive'],
                   ['mode', 'xml', 'scenario', 'suite_id', 'output_root'], 'scenarioforge')
         sf.setdefault('repo', '/opt/scenarioforge')
         sf.setdefault('python', '/opt/scenarioforge/.venv/bin/python')
@@ -75,6 +81,8 @@ def load(path):
                  **({'environment_file': sf['environment_file']} if 'environment_file' in sf else {})), backend)
     else:
         raise ValueError('scenarioforge.mode must be reuse_export or execute')
+    if 'reproduction_archive' in sf:
+        guest_path(sf['reproduction_archive'], 'scenarioforge.reproduction_archive')
     seen = set()
     for phase in ('prepare', 'artifacts'):
         cfg.setdefault(phase, [])

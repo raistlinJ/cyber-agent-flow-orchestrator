@@ -12,6 +12,7 @@ function resetChallenge(){
  restart.hidden=true; button.textContent='Sign in';
 }
 restart.addEventListener('click',()=>{if(submitting)return;resetChallenge();error.hidden=true;form.elements.password.focus();});
+loadingModal.set('auth',true,'Loading sign-in settings…');
 fetch('/api/auth',{credentials:'same-origin'}).then(r=>r.json()).then(info=>{
  if(info.provider==='pve'){
   document.getElementById('login-intro').textContent='Sign in with your Proxmox account.';
@@ -19,9 +20,10 @@ fetch('/api/auth',{credentials:'same-origin'}).then(r=>r.json()).then(info=>{
   document.getElementById('login-note').textContent='Your account must belong to the designated Proxmox orchestrator group.';
   otpSection.hidden=false;
  }
-}).catch(()=>{});
+}).catch(()=>{}).finally(()=>loadingModal.set('auth',false));
 form.addEventListener('submit',async(event)=>{
  event.preventDefault(); if(submitting)return;submitting=true;controls.disabled=true;form.setAttribute('aria-busy','true');button.disabled=true; button.textContent=challenge?'Verifying code…':'Signing in…'; error.hidden=true;status.hidden=false;document.getElementById('login-status-label').textContent=challenge?'Verifying your authenticator code…':'Checking your account and access with the server…';
+ loadingModal.set('login',true,document.getElementById('login-status-label').textContent);
  try {
   const data=challenge ? {challenge_id:challenge,otp:form.elements.otp.value.trim()} :
    {username:form.elements.username.value,password:form.elements.password.value,otp:form.elements.otp.value.trim()};
@@ -40,5 +42,5 @@ form.addEventListener('submit',async(event)=>{
   resetChallenge();
   error.textContent=body.error||'Unable to sign in. Please try again.'; error.hidden=false;
  } catch {resetChallenge();error.textContent='Unable to reach the server. Please try again.'; error.hidden=false;}
- finally {if(!navigating){submitting=false;controls.disabled=false;form.setAttribute('aria-busy','false');status.hidden=true;button.disabled=false;button.textContent=challenge?'Verify code':'Sign in';if(challenge)form.elements.otp.focus();}}
+ finally {loadingModal.set('login',navigating,'Opening your dashboard…');if(!navigating){submitting=false;controls.disabled=false;form.setAttribute('aria-busy','false');status.hidden=true;button.disabled=false;button.textContent=challenge?'Verify code':'Sign in';if(challenge)form.elements.otp.focus();}}
 });

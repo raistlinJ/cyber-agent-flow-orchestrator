@@ -36,31 +36,32 @@ def journal(output):
 def status(output):
     root, data = journal(output)
     evaluation = root / 'evaluation'
+    browser_experiment = bool(data.get('sample_id') or data.get('scenario_experiment'))
     state = data['status']
     coordinator_active = reporting.active(root / '.workflow.lock')
-    if data.get('sample_id') and not coordinator_active and state in ('preparing', 'evaluating'):
+    if browser_experiment and not coordinator_active and state in ('preparing', 'evaluating'):
         state = 'interrupted'
-    if data.get('sample_id') and not coordinator_active and state == 'queued':
-        if (datetime.now(timezone.utc) - datetime.fromisoformat(data['created_at'])).total_seconds() > 15:
+    if browser_experiment and not coordinator_active and state == 'queued':
+        if (datetime.now(timezone.utc) - datetime.fromisoformat(data.get('queued_at', data['created_at']))).total_seconds() > 15:
             state = 'interrupted'
     stopping = state in ('queued', 'preparing', 'evaluating') and (root / 'stop-request.json').is_file()
     if stopping: state = 'stopping'
     evaluation_status, sample_progress = None, None
     if (evaluation / 'manifest.json').is_file():
-        evaluation_status = reporting.results(evaluation) if data.get('sample_id') else reporting.status(evaluation)
-    if data.get('sample_id'):
+        evaluation_status = reporting.results(evaluation) if browser_experiment else reporting.status(evaluation)
+    if browser_experiment:
         from .sample_progress import build
         sample_progress = build(root, data, evaluation_status, state, coordinator_active)
         if evaluation_status: evaluation_status.pop('attempts', None)
     runtime = data.get('runtime') or {}
     saved_settings = None
-    if data.get('sample_id') and runtime:
+    if browser_experiment and runtime:
         saved_settings = {'participant_vmid': runtime['backend']['participant_vmid'],
                           'provider': runtime['model']['provider'], 'model': runtime['model']['name']}
     return {'output': str(root), 'workflow_id': data['workflow']['id'],
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,
             'coordinator_active': coordinator_active,
-            'sample_id': data.get('sample_id'), 'message': 'Stop requested; finishing the current trial, collecting results and cleaning up' if stopping else data.get('message'),
+            'sample_id': data.get('sample_id'), 'scenario_experiment': data.get('scenario_experiment'), 'message': 'Stop requested; finishing the current stage or trial and collecting results' if stopping else data.get('message'),
             'sample_progress': sample_progress,
             'saved_settings': saved_settings,
             'error': data.get('error') if data['status'] in ('failed', 'interrupted') else None,
@@ -89,7 +90,13 @@ def results(output, *, all_attempts=False):
     root, _ = journal(output)
     report = reporting.results(root / 'evaluation', all_attempts=all_attempts)
     from .failure_details import collected_failures
-    return {'workflow': status(root), 'evaluation': report,
+    from .run_artifacts import configuration, saved_json
+    for attempt in report['attempts']:
+        try:
+            attempt['flag_progress'] = saved_json(root / 'evaluation', attempt['attempt_path'] + '/progress.json')
+        except (OSError, ValueError):
+            pass
+    return {'workflow': status(root), 'evaluation': report, 'run_configuration': configuration(root),
             'failure_diagnostics': collected_failures(root / 'evaluation', report['attempts'])}
 
 

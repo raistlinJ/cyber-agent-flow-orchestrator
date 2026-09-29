@@ -49,6 +49,15 @@ class Workflow:
     def save(self):
         ev.write_json(self.output / 'workflow.json', self.journal)
 
+    def notify(self, message):
+        if self.journal.get('scenario_experiment'):
+            self.journal.update(message=message, updated_at=datetime.now(timezone.utc).isoformat())
+            self.journal.setdefault('events', []).append(dict(at=self.journal['updated_at'], kind='scenario', message=message))
+            self.journal['events'] = self.journal['events'][-100:]
+            self.save()
+        if self.progress is not None:
+            self.progress(message)
+
     def inventory(self, paths):
         return {str(Path(p).relative_to(self.output)): sha(p) for p in paths}
 
@@ -92,8 +101,7 @@ class Workflow:
         stage['log'] = str(log.relative_to(self.output))
         attempt.update(log_path='/tmp/' + attempt['unit'] + '.log', host_log=stage['log'])
         self.save()
-        if self.progress is not None:
-            self.progress(f'Running {key} on VM {command["vmid"]}')
+        self.notify(f'Running {key} on VM {command["vmid"]}')
         try:
             with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{command['vmid']}.lock"):
                 try:
@@ -170,6 +178,9 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
         wf.check_files()
         wf.recover_jobs()
         try:
+            if journal.get('scenario_experiment'):
+                journal.update(status='preparing', phase='preparing')
+                wf.save()
             for command in cfg['prepare']:
                 wf.command('prepare-' + command['id'], command, retry_steps)
             sf = cfg['scenarioforge']
@@ -181,6 +192,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
             else:
                 marker = None
                 archive = sf['archive']
+            wf.notify('Collecting the ScenarioForge evaluation package')
             package = output / 'suite'
             if 'fetch' not in journal['stages']:
                 if not package.exists():
@@ -192,11 +204,28 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                 wf.save()
             _, snapshot = ev.load_suite(package)
             ev.require_ready(snapshot, cfg['max_readiness_age_seconds'])
+            wf.notify('Capturing scenario reproduction files')
+            if 'reproduction' not in journal['stages']:
+                from .run_artifacts import validate_reproduction
+                from .auth import private_file
+                if sf.get('reproduction_archive'):
+                    content = wf.agent.get(runtime['backend']['app_vmid'], sf['reproduction_archive'])
+                else:
+                    from .reproduction_capture import capture
+                    content = capture((package / 'evaluator/scenario.xml').read_bytes(), cfg, runtime, wf.agent)
+                validate_reproduction(content, (package / 'evaluator/scenario.xml').read_bytes(),
+                                      runtime['backend']['max_transfer_bytes'])
+                destination = output / 'reproduction/scenarioforge-reproduction.zip'
+                destination.parent.mkdir(mode=0o700, exist_ok=True)
+                private_file(destination, content, replace=destination.exists())
+                journal['stages']['reproduction'] = {'status': 'completed', 'files': wf.inventory([destination])}
+                wf.save()
             for command in cfg['artifacts']:
                 wf.command('artifact-' + command['id'], command, retry_steps)
             if 'freeze' not in journal['stages']:
                 with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{runtime['backend']['participant_vmid']}.lock"):
                     wf.freeze_runtime(runtime, files, cfg, identity)
+            wf.notify('Preparing the agent evaluation settings')
             study = output / 'study.yaml'
             if 'import' not in journal['stages']:
                 # Recreate only a derived config if interrupted before journaling.
@@ -206,9 +235,12 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                 wf.save()
             dataset = output / 'evaluation'
             journal['status'] = 'evaluating'
+            if journal.get('scenario_experiment'):
+                journal['phase'] = 'evaluating'
             wf.save()
+            wf.notify('Running agent evaluation')
             rows = evaluator(study, dataset, resume=(dataset / 'manifest.json').exists(),
-                             retry_failed=retry_failed, reservation=reservation, progress=progress)
+                             retry_failed=retry_failed, reservation=reservation, progress=wf.notify)
             latest = {}
             for row in rows:
                 latest[row['trial_id']] = row

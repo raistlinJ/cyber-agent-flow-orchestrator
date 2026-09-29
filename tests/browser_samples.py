@@ -80,7 +80,7 @@ def main():
                     expect(page.locator('#runs tr')).to_have_count(0)
                     def create(sample_id, name):
                         page.locator('#new-experiment').click()
-                        page.get_by_label('Sample', exact=True).select_option(sample_id)
+                        page.get_by_label('Experiment type', exact=True).select_option(sample_id)
                         page.get_by_role('button', name='Create experiment', exact=True).click()
                         expect(page.locator('#experiment-dialog')).to_be_hidden(timeout=30000)
                         row=page.locator('#runs tr').filter(has_text=name).first
@@ -102,9 +102,11 @@ def main():
                         window=opened.value
                         window.on('pageerror',lambda error:errors.append(str(error)))
                         expect(window).to_have_url(re.compile(r'/run\?view='))
-                        expect(window.locator('dialog')).to_have_count(0)
+                        expect(window.locator('#loading-modal')).not_to_be_visible()
                         return window
                     result=popup(smoke,'View results')
+                    expect(result.locator('#run-configuration')).to_contain_text('Supplied observation: one host has TCP port 80 open.')
+                    expect(result.locator('#run-configuration')).to_contain_text('ScenarioForge was not used')
                     expect(result.locator('#result-summary')).to_contain_text('no-tools')
                     expect(result.locator('#result-summary')).to_contain_text('1 / 1')
                     expect(page.locator('#result-panel')).to_have_count(0)

@@ -61,11 +61,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
     from .auth import LoginLimited, token_from_cookie, session_cookie
     assets = Path(__file__).with_name('static')
     authority = urlsplit(origin).netloc
-    public_assets = {'/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
+    public_assets = {'/loading.js': ('loading.js', 'text/javascript'), '/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
                      '/style.css': ('style.css', 'text/css')}
     protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
                         '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),
-                        '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
+                        '/run_config.js': ('run_config.js', 'text/javascript'), '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
@@ -87,6 +87,20 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
+
+        def send_artifact(self, stream, mime, filename):
+            import os
+            import shutil
+            safe_name = ''.join(c if c.isalnum() or c in '._-' else '_' for c in filename)
+            self.send_response(200)
+            self.send_header('Content-Type', mime)
+            self.send_header('Content-Length', str(os.fstat(stream.fileno()).st_size))
+            self.send_header('Content-Disposition', 'attachment; filename="' + safe_name + '"')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('Content-Security-Policy', "default-src 'none'; sandbox")
+            self.end_headers()
+            shutil.copyfileobj(stream, self.wfile, 1024 * 1024)
 
         def trusted(self, *, post=False):
             key = self.headers.get('X-Orchestrator-Proxy-Key', '')
@@ -144,11 +158,17 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(200, dashboard.read())
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):
                     parts = path.split('/')
-                    if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv'):
+                    if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv', 'artifact'):
                         self.respond(404, {'error': 'Not found'})
                         return
                     try:
                         access = auth.access(token, revalidate=False)
+                        if parts[4] == 'artifact':
+                            artifact_id = parse_qs(urlsplit(self.path).query).get('id', [''])[0]
+                            with dashboard.artifact(access, parts[3], artifact_id) as (stream, mime, filename):
+                                access.current()
+                                self.send_artifact(stream, mime, filename)
+                            return
                         if parts[4] == 'dataset.csv':
                             value = dashboard.dataset(access, parts[3])
                         else:
@@ -239,9 +259,15 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(400, {'error': 'Supply a sample ID and request ID only'})
                         return
                     self.respond(202, dashboard.run_sample(auth.access(token, revalidate=False), data['sample_id'], data['request_id']))
+                elif path == '/api/scenarios/list' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                    if set(data) != {'query'} or not isinstance(data['query'], str):
+                        raise SampleRequestError('Supply scenario search text only')
+                    self.respond(200, dashboard.scenarios.catalogue(auth.access(token, revalidate=False), data['query']))
                 elif path in ('/api/experiments/create', '/api/experiments/run', '/api/experiments/stop') and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
                     action = path.rsplit('/', 1)[1]
                     expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
+                    if action == 'create' and 'selection_id' in data:
+                        expected = {'selection_id', 'request_id', 'allowed_targets', 'disallowed_targets'}
                     if set(data) != expected or any(not isinstance(v, str) for v in data.values()):
                         raise SampleRequestError('Invalid experiment request fields')
                     self.respond(202, dashboard.experiment(auth.access(token, revalidate=False), action, data))

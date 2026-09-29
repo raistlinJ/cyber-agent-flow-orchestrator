@@ -25,6 +25,8 @@ class UserDashboard:
         self.entries = {}
         from .samples import SampleManager
         self.samples = SampleManager(self.runtime, runs_root, samples)
+        from .scenarios import ScenarioExperiments
+        self.scenarios = ScenarioExperiments(self.cfg, self.runtime, runs_root, self.samples)
         from .updates import UpdateManager
         self.updates = UpdateManager(self.cfg, self.runtime, runs_root, updates)
         from .model_config import ModelConfigs
@@ -114,6 +116,10 @@ class UserDashboard:
         # Trial progress is independent of a potentially slow guest observation.
         value['runs'] = service.list_runs(workspace.runs)
         value['samples'] = self.samples.catalog(value['roles'], workspace)
+        value['scenarios'] = dict(enabled=True, vmid=value['roles'].get('scenarioforge'),
+            allowed_targets=', '.join(self.runtime['execution']['network_policy']['allow']),
+            disallowed_targets=', '.join(self.runtime['execution']['network_policy']['disallow']),
+            max_turns=self.runtime['execution']['max_turns'], wall_seconds=self.runtime['execution']['wall_seconds'])
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         access.current()
         return value
@@ -123,7 +129,8 @@ class UserDashboard:
         path = workspace.run_path(run_id)
         # Caller supplies only an ID; owner, base directory and full path are server-derived.
         if kind == 'results' and not (path / 'evaluation/manifest.json').is_file():
-            value = {'workflow': service.status(path), 'evaluation': None}
+            from .run_artifacts import configuration
+            value = {'workflow': service.status(path), 'evaluation': None, 'run_configuration': configuration(path)}
         else:
             value = service.results(path) if kind == 'results' else service.status(path)
         access.current()
@@ -133,10 +140,27 @@ class UserDashboard:
         return self.samples.submit(access, sample_id, request_id)
 
     def experiment(self, access, action, data):
+        if action == 'create' and 'selection_id' in data:
+            return self.scenarios.create(access, **data)
+        if action != 'create':
+            path = self.workspace(access).run_path(data['run_id'])
+            from cyber_agent_flow_eval import integration as ev
+            try:
+                record = ev.read_json(path / 'workflow.json')
+            except FileNotFoundError:
+                from .samples import SampleRequestError
+                raise SampleRequestError('Experiment not found') from None
+            if record.get('scenario_experiment'):
+                return {'run': self.scenarios.run_saved, 'stop': self.scenarios.stop}[action](access, **data)
         return {'create':self.samples.create, 'run':self.samples.run_saved, 'stop':self.samples.stop}[action](access, **data)
 
     def maintain(self, access, data):
         return self.updates.submit(access, **data)
+
+    def artifact(self, access, run_id, artifact_id):
+        from .run_artifacts import download
+        workspace = self.workspace(access)
+        return download(workspace.run_path(run_id), artifact_id)
 
     def dataset(self, access, run_id):
         workspace = self.workspace(access)

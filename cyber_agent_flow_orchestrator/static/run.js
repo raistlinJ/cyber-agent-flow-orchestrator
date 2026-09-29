@@ -3,12 +3,11 @@ const $=id=>document.getElementById(id);
 const el=(tag,text,cls)=>{const node=document.createElement(tag);if(text!=null)node.textContent=text;if(cls)node.className=cls;return node;};
 const params=new URLSearchParams(location.search),view=params.get('view'),runId=params.get('run');
 let loading=false,poll=null,workflow=null,logs=[];
-function showResults(id){openRunWindow('results',id);}
 function log(kind,message){logs.push({at:new Date().toISOString(),kind,message});logs=logs.slice(-100);renderConsole();}
 function renderConsole(){const entries=[...logs,...(workflow?.sample_progress?.events||[])].sort((a,b)=>a.at.localeCompare(b.at));$('console-output').textContent=entries.slice(-300).map(e=>`${e.at} [${e.kind||'sample'}] ${e.message}`).join('\n')||'Waiting for activity…';}
-function clearRun(){$('window-notice').hidden=true;$('window-notice').replaceChildren();workflow=null;$('sample-activity').replaceChildren();$('result-summary').replaceChildren();$('result-content').textContent='';$('download-dataset').hidden=true;logs=[];renderConsole();}
+function clearRun(){$('window-notice').hidden=true;$('window-notice').replaceChildren();workflow=null;renderedConfiguration=null;scenarioPreviews.clear();$('run-configuration').replaceChildren();$('sample-activity').replaceChildren();$('result-summary').replaceChildren();$('result-content').textContent='';$('download-dataset').hidden=true;logs=[];renderConsole();}
 async function refreshRun(){
- if(loading)return;clearTimeout(poll);loading=true;$('refresh-run').disabled=true;$('run-status').textContent='Loading saved run data…';
+ if(loading)return;loadingModal.set('run',true,view==='results'?'Loading experiment results…':'Loading experiment progress…');clearTimeout(poll);loading=true;$('refresh-run').disabled=true;$('run-status').textContent='Loading saved run data…';
  const endpoint=`/api/runs/${encodeURIComponent(runId)}/${view==='results'?'results':'status'}`;
  let retry=true;
  try{
@@ -20,7 +19,7 @@ async function refreshRun(){
   $('run-error').hidden=true;const active=workflow.coordinator_active||workflow.sample_progress?.active||['queued','stopping'].includes(workflow.recorded_status);
   $('run-status').textContent=`${workflow.recorded_status} · Updated ${new Date().toLocaleTimeString()} · Refreshes ${active?'every 5 seconds':'every minute'}`;renderConsole();
  }catch(error){$('run-error').hidden=false;$('run-error').textContent=error.message;$('run-status').textContent='Run view unavailable. Refresh to retry.';}
- finally{loading=false;$('refresh-run').disabled=false;if(retry){const active=workflow?.coordinator_active||workflow?.sample_progress?.active||['queued','stopping'].includes(workflow?.recorded_status);poll=setTimeout(refreshRun,active?5000:60000);}}
+ finally{loadingModal.set('run',false);loading=false;$('refresh-run').disabled=false;if(retry){const active=workflow?.coordinator_active||workflow?.sample_progress?.active||['queued','stopping'].includes(workflow?.recorded_status);poll=setTimeout(refreshRun,active?5000:60000);}}
 }
 $('close-window').addEventListener('click',()=>{window.close();$('run-status').textContent='You can close this browser tab.';});
 $('refresh-run').addEventListener('click',refreshRun);

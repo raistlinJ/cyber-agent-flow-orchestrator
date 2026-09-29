@@ -52,3 +52,14 @@
 .experiment-save-progress{margin:8px 0 0;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px}.experiment-save-progress progress{display:block;width:100%;margin:8px 0}.experiment-save-progress ol{margin:4px 0;padding-left:22px;font-size:13px}.experiment-save-progress p{margin:6px 0 0}.experiment-save-progress li[data-state=complete]{color:var(--teal)}.experiment-save-progress li[data-state=failed]{color:#a32222}
 
 .run-window #result-panel{position:static;width:100%;max-height:none;margin:0;padding:20px;box-shadow:none}.run-window main{max-width:1200px}.run-window #result-panel .result-actions{position:static}.run-window header{gap:16px;flex-wrap:wrap}.run-window #run-id{overflow-wrap:anywhere}.run-window .sample-activity{padding:20px}
+
+/* Shared loading state, including independent run windows. */
+.loading-modal{width:min(26rem,calc(100vw - 3rem));box-sizing:border-box;padding:1.75rem;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#172334;box-shadow:0 24px 80px #10203440}
+.loading-modal::backdrop{background:rgb(15 23 42 / 42%)}
+.loading-modal h2{margin:0 0 .75rem}.loading-modal p{line-height:1.5;overflow-wrap:anywhere}.loading-modal progress{width:100%;margin-top:.5rem}
+
+.run-configuration{margin:1.5rem 0 2rem}.run-task{margin:1.25rem 0}.task-prompt{white-space:pre-wrap;overflow-wrap:anywhere;padding:1rem;background:#f1f5f9;border-radius:8px;color:#172334}.run-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem}.run-settings div{min-width:0}.run-settings dt{font-weight:600}.run-settings dd{margin:.25rem 0;overflow-wrap:anywhere}.configuration-details{margin:.75rem 0}.configuration-details pre{max-height:28rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.run-condition{margin:1rem 0}.run-downloads li{margin:.75rem 0}.artifact-list{max-height:24rem;overflow:auto}.artifact-list li{margin:.5rem 0;overflow-wrap:anywhere}
+
+.run-settings>div{display:block}.run-configuration a{color:#007f82}
+
+#scenario-options{margin:1rem 0;padding:1rem;border:1px solid #d6e0e2;border-radius:8px}#scenario-options input,#scenario-options select{width:100%;box-sizing:border-box;margin:.4rem 0 .8rem;padding:10px;font:inherit;color:var(--ink);background:white;border:1px solid var(--line);border-radius:6px}.scenario-search button{margin-bottom:.8rem}

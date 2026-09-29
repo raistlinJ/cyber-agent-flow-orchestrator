@@ -99,6 +99,8 @@ def make_spec(sample_id, runtime, directory, url=None):
                            'for example {"flags":["FLAG{...}"]}.',
                     verifier={'type': 'flags_found', 'expected': {'entry': 'FLAG{demo_entry}', 'archive': 'FLAG{demo_archive}'}})
     spec['tasks'] = [task]
+    if sample_id == 'tools-vs-helper':
+        private_file(directory / 'sample-fixture.py', Path(__file__).with_name('sample_guest.py').read_bytes())
     path = directory / 'study.yaml'
     private_file(path, yaml.safe_dump(spec, sort_keys=False).encode())
     ev.resolve(path)

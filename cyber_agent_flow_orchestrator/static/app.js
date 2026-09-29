@@ -23,7 +23,7 @@ new ResizeObserver(()=>document.body.style.setProperty('--console-height',$('deb
 function logClient(kind,message){clientLog.push({at:new Date().toISOString(),kind,message});if(clientLog.length>100)clientLog.shift();renderConsole();}
 function renderConsole(){
  const entries=[...clientLog];
- for(const run of (snapshot?.runs||[]).filter(r=>r.sample_progress).sort((a,b)=>(b.sample_progress.started_at||'').localeCompare(a.sample_progress.started_at||'')).slice(0,3))for(const event of run.sample_progress?.events||[])entries.push({...event,message:`[${run.sample_id} ${run.output.split('/').pop()}] ${event.message}`});
+ for(const run of (snapshot?.runs||[]).filter(r=>r.sample_progress).sort((a,b)=>(b.sample_progress.started_at||'').localeCompare(a.sample_progress.started_at||'')).slice(0,3))for(const event of run.sample_progress?.events||[])entries.push({...event,message:`[${run.sample_id||run.scenario_experiment?.scenario} ${run.output.split('/').pop()}] ${event.message}`});
  for(const job of snapshot?.updates?.jobs||[])for(const event of job.console?.events||[])entries.push({...event,message:`[${job.role} VM ${job.vmid} ${job.action} ${job.id.slice(0,8)}] ${event.message}`});
  entries.sort((a,b)=>a.at.localeCompare(b.at));
  const output=$('console-output'),follow=output.scrollHeight-output.scrollTop-output.clientHeight<40;
@@ -59,7 +59,8 @@ function syncBusy(){
  else if(failed){label='Loading failed. Use Refresh view to try again.';bar.hidden=true;}
  else{label=maintenanceFailed?`Dashboard loaded · ${lastChange.role} ${lastChange.action} ${lastChange.status}; see Applications`:'Dashboard loaded';bar.hidden=true;}
  if(percent==null)bar.removeAttribute('value');else bar.value=percent;
- $('loading-label').textContent=!busy&&loading?`Background refresh · ${label} · controls available`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
+ $('loading-label').textContent=!busy&&loading?`Background refresh · ${label}`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
+ loadingModal.set('dashboard',loading,label,percent);
  syncUpdateControls(busy?label:null);
 }
 function sessionExpired(){redirecting=true;clearPrivateView();syncBusy();location.replace('/login');throw Error('Your session expired. Sign in again.');}
@@ -239,7 +240,8 @@ function showResults(id){return openRunWindow('results',id);}
 function runActive(run){return run.coordinator_active||run.sample_progress?.active||['queued','stopping'].includes(run.recorded_status);}
 function renderSamples(data){
  const samples=data.samples,vm=samples?.participant_vmid;
- $('new-experiment').disabled=!samples?.items?.length;
+ $('new-experiment').disabled=!samples?.items?.length&&!data.scenarios?.enabled;
+ if(scenarioChoiceVM!==null&&scenarioChoiceVM!==data.roles?.scenarioforge){scenarioChoices=[];scenarioChoiceVM=null;$('scenario-selection').replaceChildren(new Option('Reload scenarios for the selected VM',''));}
  $('experiment-model-context').textContent=vm?`Current experiment model: ${samples.provider} / ${samples.model} · Participant VM ${vm}. Pull from VM below to read its saved application settings.`:'Select and save a participant VM on Lab setup to enable Pull from VM and run experiments.';
  $('samples-context').textContent=vm?`New experiment defaults: Participant VM ${vm} · ${samples.provider} / ${samples.model}. Saved experiments retain their own settings.`:'Save a participant VM on Lab setup before running an experiment.';
 }
@@ -249,32 +251,61 @@ function renderExperiments(data){
  const active=data.runs.some(runActive),items=data.samples?.items||[];
  for(const run of [...data.runs].sort((a,b)=>(b.sample_progress?.started_at||'').localeCompare(a.sample_progress?.started_at||''))){
   const id=run.output?.split('/').pop()||run.workflow_id||'',sample=items.find(s=>s.id===run.sample_id),live=runActive(run),ready=run.recorded_status==='ready',p=run.sample_progress,summary=run.evaluation?.summary;
-  const row=el('tr');row.dataset.runId=id;const title=el('td');title.append(el('strong',sample?.name||run.workflow_id||id),el('div',id,'small'));
+  const row=el('tr');row.dataset.runId=id;const title=el('td');title.append(el('strong',sample?.name||run.scenario_experiment?.scenario||run.workflow_id||id),el('div',id,'small'));
   if(run.saved_settings){const settings=run.saved_settings;title.append(el('div',`VM ${settings.participant_vmid} · ${settings.provider} / ${settings.model}`,'small'));}
   const state=el('td');state.append(badge(run.recorded_status||'unavailable',run.recorded_status==='completed'?'good':['failed','cancelled','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));if(run.message)state.append(el('div',run.message,'small'));
   const actions=el('td',null,'experiment-actions');
-  actions.append(iconAction(ready?'Run experiment':'Run again','▶',!data.owner||!sample||!(run.saved_settings?.participant_vmid||data.samples.participant_vmid)||active||sampleStarting,()=>experimentAction('run',id)));
-  actions.append(iconAction('Stop after current trial','■',!data.owner||!run.sample_id||!live||run.recorded_status==='stopping',()=>experimentAction('stop',id)));
+  actions.append(iconAction(run.scenario_experiment?(ready?'Deploy and run':'Deploy and run again'):(ready?'Run experiment':'Run again'),'▶',!data.owner||!(sample||run.scenario_experiment)||!(run.saved_settings?.participant_vmid||data.samples.participant_vmid)||active||sampleStarting,()=>experimentAction('run',id)));
+  actions.append(iconAction(run.scenario_experiment?'Stop after current stage or trial':'Stop after current trial','■',!data.owner||!(run.sample_id||run.scenario_experiment)||!live||run.recorded_status==='stopping',()=>experimentAction('stop',id)));
   actions.append(iconAction('View results','▤',!data.owner||ready,()=>showResults(id)));
   actions.append(iconAction('Open progress','◴',!p||ready,()=>openProgress(id)));
   row.append(title,state,el('td',p?`${p.finished_trials} / ${p.planned_trials}`:run.evaluation?`${summary.trials_observed} / ${run.evaluation.planned_trials}`:'—'),el('td',p?.verified_successes??summary?.verified_successes??'—'),actions);runs.append(row);
  }
 }
 function openProgress(id){return openRunWindow('progress',id);}
-function describeSample(){const sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);$('experiment-description').textContent=sample?.description||'';$('experiment-budget').textContent=sample?`${sample.trials} trial${sample.trials===1?'':'s'} · up to ${sample.max_turns} turns and ${sample.wall_seconds}s per trial`:'';}
-$('new-experiment').addEventListener('click',()=>{if(isBusy())return;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();$('experiment-dialog').showModal();});
+function describeSample(){
+ const scenario=$('experiment-sample').value==='scenarioforge-xml',sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);
+ $('scenario-options').hidden=!scenario;
+ $('experiment-description').textContent=scenario?'Deploy and evaluate an existing ScenarioForge scenario.':sample?.description||'';
+ $('experiment-budget').textContent=scenario?'Baseline tools · 1 repetition per exported task · up to '+snapshot.scenarios.max_turns+' turns and '+snapshot.scenarios.wall_seconds+'s per trial':sample?sample.trials+' trials · up to '+sample.max_turns+' turns and '+sample.wall_seconds+'s per trial':'';
+}
+
+$('new-experiment').addEventListener('click',()=>{if(isBusy())return;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('Saved ScenarioForge XML','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();$('experiment-dialog').showModal();});
+let scenarioChoices=[],scenarioChoiceVM=null;
+function describeScenarioSelection(){
+ const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
+ $('scenario-selection-info').textContent=choice?choice.path+' · '+choice.scenario+' · '+choice.chain_length+' Flow steps':'Select a saved scenario with a resolved Flow chain.';
+}
+$('scenario-selection').addEventListener('change',describeScenarioSelection);
+$('scenario-query').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();$('load-scenarios').click();}});
+$('load-scenarios').addEventListener('click',async()=>{
+ if(isBusy())return;
+ operation='Loading saved scenarios from the ScenarioForge VM…';syncBusy();
+ try{
+  const response=await apiFetch('/api/scenarios/list',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({query:$('scenario-query').value})});
+  const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to load scenarios');
+  scenarioChoices=result.items;scenarioChoiceVM=result.vmid;
+  const select=$('scenario-selection');select.replaceChildren(new Option('Choose a saved scenario',''));
+  for(const item of scenarioChoices){const option=new Option(item.scenario+' — '+item.path.split('/').pop()+(item.resolved_chain?'':' (resolve Flow chain first)'),item.id);option.disabled=!item.resolved_chain;select.add(option);}
+  $('scenario-selection-info').textContent=result.items.length?(result.truncated?'Showing a limited list. Narrow the search to find another XML.':'Choose a scenario from VM '+result.vmid+'.'):'No matching saved XML found in '+result.roots.join(', ')+'.';
+ }catch(error){$('scenario-selection-info').textContent=error.message;}
+ finally{operation=null;syncBusy();schedulePoll();}
+});
+
 $('experiment-sample').addEventListener('change',describeSample);
 $('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating&&!operation)$('experiment-dialog').close();});
 $('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating||operation)event.preventDefault();});
 $('experiment-form').addEventListener('submit',async event=>{
  event.preventDefault();if(isBusy()||experimentCreating)return;
+ const scenario=$('experiment-sample').value==='scenarioforge-xml';
+ if(scenario&&(!scenarioChoices.some(item=>item.id===$('scenario-selection').value)||rolesDirty)){$('experiment-error').textContent=rolesDirty?'Save VM roles before creating an experiment.':'Load and choose a saved scenario first.';return;}
  const modelForm=$('model-config-participant'),saveModel=Boolean(modelDrafts.participant);
  if(saveModel&&(!snapshot?.updates?.can_update||rolesDirty)){$('experiment-error').textContent=rolesDirty?'Save VM role selections before creating an experiment.':'Model settings cannot be saved without application maintenance access.';return;}
  if(saveModel&&!modelForm.reportValidity())return;
  $('experiment-error').textContent='';
  startCreationProgress(saveModel);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({sample_id:$('experiment-sample').value,request_id:crypto.randomUUID().replaceAll('-','')})});const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({request_id:crypto.randomUUID().replaceAll('-',''),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value}:{sample_id:$('experiment-sample').value})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed');$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });
@@ -282,13 +313,13 @@ async function experimentAction(action,id){
  if(isBusy()||sampleStarting)return;
  if(action==='run'&&rolesDirty){$('sample-message').textContent='Save VM role changes on Lab setup before running.';return;}
  sampleStarting=true;operation=action==='stop'?'Requesting experiment stop…':'Starting experiment…';syncBusy();
- try{await finishDashboardRead();const response=await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Experiment action failed');$('sample-message').textContent=action==='stop'?'Stop requested. The current trial will finish, then results will be collected and cleanup completed.':'Experiment started.';const link=el('a',' Open progress ↗');link.href=runWindowURL('progress',result.run_id);link.addEventListener('click',event=>{event.preventDefault();openProgress(result.run_id);});$('sample-message').append(link);await refresh();}
+ try{await finishDashboardRead();const response=await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Experiment action failed');$('sample-message').textContent=action==='stop'?'Stop requested. The current stage or trial will finish and results will be collected.':'Experiment started.';const link=el('a',' Open progress ↗');link.href=runWindowURL('progress',result.run_id);link.addEventListener('click',event=>{event.preventDefault();openProgress(result.run_id);});$('sample-message').append(link);await refresh();}
  catch(error){$('sample-message').textContent=error.message;}
  finally{sampleStarting=false;operation=null;if(snapshot)renderExperiments(snapshot);syncBusy();schedulePoll();}
 }
 function renderSampleActivity(data){
  const active=(data.runs||[]).find(run=>run.sample_progress?.active),target=$('sample-global-status');target.replaceChildren();target.hidden=!active;
- if(active){const p=active.sample_progress,id=active.output.split('/').pop(),link=el('a','View sample activity ↗');link.href=runWindowURL('progress',id);link.addEventListener('click',event=>{event.preventDefault();openProgress(id);});target.append(document.createTextNode(`${p.name} · ${active.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
+ if(active){const p=active.sample_progress,id=active.output.split('/').pop(),link=el('a','View experiment activity ↗');link.href=runWindowURL('progress',id);link.addEventListener('click',event=>{event.preventDefault();openProgress(id);});target.append(document.createTextNode(`${p.name} · ${active.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
 }
 
 const maintenanceRefs={};

@@ -375,6 +375,9 @@ See [setup, source configuration, CLI and recovery](docs/application-updates.md)
 
 ## Run bundled samples in the WebUI
 
+For a concise overview of tasks, prompts, tools, and collected metrics, see the
+[demo summary](docs/demo-profile.md).
+
 ### Choose your model before running
 
 Open **Experiments → New → Application model settings**, then choose **Pull from VM** for
@@ -451,6 +454,12 @@ inside the participant, uses a fixed loopback-only sample policy and removes the
 service afterward. It does not run scenario reset hooks. The baseline catalog is
 identical in both conditions; only the helper is added. Each run saves its own
 YAML, catalogs, manifest, attempts and scored datasets in your private host workspace.
+
+Open **Results → Task and run configuration** to see exact task prompts, tools,
+model settings, limits, recorded system prompts, and saved inputs. Download the
+run files, full scenario XML, evaluation package, or ScenarioForge re-import ZIP.
+See [saved run inputs and scenario exports](docs/run-inputs.md) for capture,
+re-import, and missing-artifact details.
 
 Watch **Experiment runs**, then click a run to see condition scores and timings,
 raw results and **Download CSV**. Preparation errors are also visible there.
@@ -652,3 +661,7 @@ VM access, retry IDs, shutdown cleanup and a real local HTTP fixture/helper.
 checks both sample buttons and results in Chrome. Guest operations and model execution are simulated. A live Proxmox
 end-to-end run is still required in your deployed lab; no guest deployment or model
 request was performed during implementation.
+
+### Saved ScenarioForge XML experiments
+
+The WebUI supports **New experiment → Saved ScenarioForge XML** to select an existing scenario on the ScenarioForge VM, freeze its XML and settings, then deploy and evaluate it. See [scenario experiments](docs/scenario-experiments.md) for search roots, scope settings, and generating XML beforehand with ScenarioForge-Eval.
