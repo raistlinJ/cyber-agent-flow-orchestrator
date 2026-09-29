@@ -16,6 +16,21 @@ from .samples import SampleBusy, SampleCancelled, SampleRequestError, now, submi
 from .workspaces import Workspace, private_directory, workflow_vmids
 
 
+
+def progressive_hint_settings(execution, enabled):
+    if type(enabled) is not bool:
+        raise SampleRequestError('provide_progressive_hints must be a boolean')
+    if enabled:
+        try:
+            from cyber_agent_flow_eval.hints import POLICY
+        except ImportError:
+            raise SampleRequestError('Progressive hints require an updated cyber-agent-flow-eval installation on the orchestrator host. Update the evaluator and restart the orchestrator, or turn off Provide progressive hints.') from None
+        execution['provide_progressive_hints'] = True
+    else:
+        # Omission is the default-off contract, including with older evaluators.
+        execution.pop('provide_progressive_hints', None)
+
+
 def guest(backend):
     agent = ev.GuestAgent(backend)
     agent.script = Path(__file__).with_name('scenario_guest.py').read_text()
@@ -177,6 +192,7 @@ class ScenarioExperiments:
         definitions = validate_tasks(tasks) if tasks is not None else None
         if _sample_id is not None and definitions is not None:
             raise SampleRequestError('Sample tasks are fixed')
+        progressive_hint_settings({}, provide_progressive_hints)
         access.current()
         workspace = Workspace(self.root, access.username)
         run_id = 'scenario-' + request_id
@@ -213,7 +229,7 @@ class ScenarioExperiments:
                 captured['upload'] = item['upload']
             runtime = deepcopy(self.runtime)
             runtime['execution']['network_policy'] = policy
-            runtime['execution']['provide_progressive_hints'] = provide_progressive_hints
+            progressive_hint_settings(runtime['execution'], provide_progressive_hints)
             runtime['backend']['before_trial'] = []
             runtime['repetitions'] = 1
             if overrides:
@@ -254,6 +270,7 @@ class ScenarioExperiments:
         from .samples import CATALOG
         if type(provide_progressive_hints) is not bool:
             raise SampleRequestError('provide_progressive_hints must be a boolean')
+        progressive_hint_settings({}, provide_progressive_hints)
         if sample_id not in self.samples.enabled or not re.fullmatch('[0-9a-f]{32}', request_id):
             raise SampleRequestError('Choose an enabled sample and valid request ID')
         workspace = Workspace(self.root, access.username)

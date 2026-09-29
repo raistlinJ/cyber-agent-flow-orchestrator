@@ -138,3 +138,14 @@ def test_tasks_create_preview_and_rerun_preserve_definitions(pve,lab,tmp_path,mo
             controller.create(user,selection['id'],'e'*32,'10.77.0.0/24','',tasks=[])
     finally:
         manager.close()
+
+
+def test_hints_off_compatible_with_older_evaluator(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, 'cyber_agent_flow_eval.hints', None)
+    execution = {'max_turns': 6, 'provide_progressive_hints': True}
+    scenarios.progressive_hint_settings(execution, False)
+    assert execution == {'max_turns': 6}
+    with pytest.raises(samples.SampleRequestError, match='updated cyber-agent-flow-eval'):
+        scenarios.progressive_hint_settings(execution, True)
+    assert execution == {'max_turns': 6}

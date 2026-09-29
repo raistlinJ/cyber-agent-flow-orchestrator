@@ -2,6 +2,8 @@
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
+import traceback
 from pathlib import Path
 import threading
 from urllib.parse import parse_qs, urlsplit
@@ -251,6 +253,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
             except (ValueError, OSError):
                 self.respond(400, {'error': 'Invalid JSON request'})
                 return
+            stage = 'authentication'
             try:
                 path = urlsplit(self.path).path
                 if path in ('/api/login', '/api/login/totp'):
@@ -285,6 +288,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 if not secrets.compare_digest(supplied.encode(), session['csrf'].encode()):
                     self.respond(403, {'error': 'Invalid CSRF token'})
                     return
+                stage = {'/api/experiments/create': 'create experiment',
+                         '/api/experiments/run': 'run experiment', '/api/experiments/stop': 'stop experiment',
+                         '/api/model-config': 'model settings', '/api/scenarios/list': 'list scenarios',
+                         '/api/scenarios/tasks': 'load scenario tasks', '/api/samples/run': 'run sample',
+                         '/api/roles': 'save VM roles', '/api/applications': 'application maintenance'}.get(path, 'request')
                 if path == '/api/logout':
                     auth.logout(token)
                     self.respond(200, {'ok': True}, **{'Set-Cookie': session_cookie('', 0)})
@@ -324,7 +332,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
                             raise SampleRequestError('provide_progressive_hints must be a boolean')
                     if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k not in ('evaluation', 'tasks', 'provide_progressive_hints')):
                         raise SampleRequestError('Invalid experiment request fields')
-                    self.respond(202, dashboard.experiment(auth.access(token, revalidate=False), action, data))
+                    access = auth.access(token, revalidate=False)
+                    self.respond(202, dashboard.experiment(access, action, data))
                 elif path == '/api/model-config' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
                     self.respond(200, dashboard.model_configs.exchange(auth.access(token, revalidate=False), data))
                 elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
@@ -344,8 +353,24 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 self.respond(400, {'error': str(exc)})
             except LoginLimited:
                 self.respond(429, {'error': 'Too many login attempts; try again shortly'}, **{'Retry-After': '60'})
-            except (ValueError, OSError, KeyError):
-                self.respond(503, {'error': 'Authentication service unavailable'})
+            except Exception as exc:
+                from .diagnostics import clean
+                reference = secrets.token_hex(6)
+                # No request bodies, session tickets, local variables or raw
+                # authentication exception text in diagnostics.
+                frames = ' -> '.join(f'{Path(frame.filename).name}:{frame.lineno} {frame.name}'
+                                     for frame in traceback.extract_tb(exc.__traceback__))
+                detail = type(exc).__name__ if stage == 'authentication' else clean(exc)
+                logging.getLogger(__name__).error('Request %s failed during %s: %s: %s; %s',
+                    reference, stage, type(exc).__name__, detail, frames)
+                if stage == 'authentication':
+                    message = 'Proxmox authentication/session validation unavailable' if auth.provider.name == 'pve' else 'Authentication service unavailable'
+                    code = 503
+                else:
+                    message = f'Cannot {stage}: {type(exc).__name__}: {detail}'
+                    code = 400 if isinstance(exc, ValueError) else 503 if isinstance(exc, OSError) else 500
+                self.respond(code, {'error': f'{message} (reference {reference})',
+                                    'error_id': reference, 'stage': stage})
     return Handler
 
 

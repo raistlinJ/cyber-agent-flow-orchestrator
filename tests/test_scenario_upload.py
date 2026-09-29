@@ -133,6 +133,43 @@ def test_binary_upload_http_auth_scope_validation_and_selection(pve, lab, tmp_pa
             status,headers,body=request(server,'/demo-smoke.zip',cookie=cookie)
             assert status == 200 and 'attachment' in headers['Content-Disposition']
             assert validate(body) == 'reproduction-bundle'
+            def failed_save(*args, **kwargs):
+                raise ValueError("execution: unknown fields ['provide_progressive_hints'], missing fields []")
+            with monkeypatch.context() as errors:
+                errors.setattr(dash, 'experiment', failed_save)
+                status,_,body=request(server,'/api/experiments/create',
+                    dict(sample_id='smoke',request_id='c'*32),
+                    cookie=cookie,headers={'X-CSRF-Token':csrf})
+                assert status == 400, body
+                message=json.loads(body)['error']
+                assert 'Cannot create experiment' in message and 'provide_progressive_hints' in message
+                assert 'Authentication service unavailable' not in message
+            for endpoint, target, attribute, failure, stage in [
+                ('/api/experiments/create', dash, 'experiment', KeyError('snapshot_path'), 'create experiment'),
+                ('/api/model-config', dash.model_configs, 'exchange', OSError('settings file is not writable'), 'model settings'),
+            ]:
+                def fail(*args, **kwargs):
+                    raise failure
+                with monkeypatch.context() as errors:
+                    errors.setattr(target, attribute, fail)
+                    status,_,body=request(server,endpoint,dict(sample_id='smoke',request_id='c'*32),
+                        cookie=cookie,headers={'X-CSRF-Token':csrf})
+                    response=json.loads(body)
+                    assert status in (500,503), body
+                    assert response['stage'] == stage and len(response['error_id']) == 12
+                    assert str(failure) in response['error']
+                    assert 'Authentication service unavailable' not in response['error']
+            def auth_unavailable(*args, **kwargs):
+                raise ValueError('password=must-not-leak')
+            with monkeypatch.context() as errors:
+                errors.setattr(server['auth'].provider, 'validate', auth_unavailable)
+                status,_,body=request(server,'/api/experiments/create',
+                    dict(sample_id='smoke',request_id='c'*32),
+                    cookie=cookie,headers={'X-CSRF-Token':csrf})
+                response=json.loads(body)
+                assert status == 503 and response['stage'] == 'authentication'
+                assert 'Proxmox authentication/session validation unavailable' in response['error']
+                assert 'must-not-leak' not in response['error']
             pve[0]['resources']['operator@pve'] = []
             assert upload(cookie=cookie,csrf=csrf)[0] == 403
             assert len(calls) == 4
