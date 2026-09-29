@@ -204,6 +204,17 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                 wf.save()
             _, snapshot = ev.load_suite(package)
             ev.require_ready(snapshot, cfg['max_readiness_age_seconds'])
+            if journal.get('sample_id') and journal.get('scenario_experiment'):
+                import ipaddress
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(package / 'evaluator/scenario.xml')
+                state = json.loads(tree.find('.//FlowState').text)
+                addresses = [ipaddress.ip_interface(node['ipv4']).ip for node in state['chain']]
+                if not addresses or any(not ip.is_private or ip.is_loopback for ip in addresses):
+                    raise ValueError('Demo export must identify private deployed lab hosts')
+                runtime['execution']['network_policy']['allow'] = sorted({str(ip) + '/32' for ip in addresses})
+                journal['runtime'] = deepcopy(runtime)
+                wf.save()
             wf.notify('Capturing scenario reproduction files')
             if 'reproduction' not in journal['stages']:
                 from .run_artifacts import validate_reproduction

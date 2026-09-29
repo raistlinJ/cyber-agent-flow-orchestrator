@@ -13,7 +13,7 @@ from .web import Dashboard, handler
 
 
 def application(upstream_port, proxy_key, config):
-    app = web.Application(client_max_size=8192)
+    app = web.Application(client_max_size=32 * 1024 * 1024)
     slots = asyncio.Semaphore(64)
     upstream = f'http://127.0.0.1:{upstream_port}'
 
@@ -41,11 +41,16 @@ def application(upstream_port, proxy_key, config):
                         'X-Forwarded-Proto': 'https', 'X-Forwarded-For': request.remote or 'unknown'})
         async with slots:
             try:
-                body = await asyncio.wait_for(request.read(), timeout=10)
+                limit = 32 * 1024 * 1024 if request.path == '/api/scenarios/upload' else 8192
+                if request.content_length is not None and request.content_length > limit:
+                    raise web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=request.content_length)
+                body = await asyncio.wait_for(request.read(), timeout=60 if request.path == '/api/scenarios/upload' else 10)
+                if len(body) > limit:
+                    raise web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=len(body))
                 async with request.app[CLIENT].request(request.method, upstream + request.rel_url.raw_path_qs,
                                                        headers=headers, data=body if request.method == 'POST' else None,
                                                        allow_redirects=False,
-                                                       timeout=ClientTimeout(total=None, sock_connect=10, sock_read=300) if request.path.endswith('/artifact') else ClientTimeout(total=60)) as response:
+                                                       timeout=ClientTimeout(total=None, sock_connect=10, sock_read=300) if request.path.endswith('/artifact') or request.path == '/api/scenarios/upload' else ClientTimeout(total=60)) as response:
                     if request.path.endswith('/artifact') and response.status == 200:
                         result = web.StreamResponse(status=response.status)
                         for key in ('Content-Type', 'Content-Length', 'Content-Disposition', 'Cache-Control',

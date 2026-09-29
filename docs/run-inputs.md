@@ -81,9 +81,7 @@ Resume checks the frozen archive for changes.
 
 ## Bundled demo samples
 
-Neither bundled sample uses ScenarioForge or CoreVM. Results says this explicitly,
-and no ScenarioForge download is offered. The HTTP sample's catalogs and, for new
-runs, fixture source are included in its run download.
+New bundled samples deploy their fixed ScenarioForge XML on CORE and evaluate the exported tasks. Results includes the original imported ZIP, exact deployed XML, preparation command, tool catalogs and captured reproduction package. Historical participant-only runs retain their original inputs and explicitly report that ScenarioForge was not used.
 
 The run download contains captured inputs and evidence. Paths inside historical
 configuration files refer to the original host/guest and may need rebasing;

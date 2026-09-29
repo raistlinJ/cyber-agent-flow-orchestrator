@@ -264,57 +264,15 @@ with maintenance traces and browser requests, bounded to the latest 300 entries.
 Progress includes identifiers and outcomes, not prompts, answers, credentials,
 or worker command arguments.
 
-In PVE mode, save a participant VM on **Lab setup**, then create **Model smoke test** or **Tools vs.
-added helper** under **Experiments → New**. The page displays the participant and
-model; the modal displays trial counts and budgets before launch. No file import or scenario deployment
-is required. Engine/model prerequisites and the exact conditions are listed in the
-[README](../README.md#run-bundled-samples-in-the-webui).
+Select and save ScenarioForge, participant and CoreVM roles before creating a sample. The fixed XML/bundle and evaluation controls are visible and greyed out. CAF's effective runtime/model configuration is shown separately; model settings can be edited with the existing maintenance permissions.
 
-Runs appear immediately with preparation/evaluation progress. Click **View results** for
-condition summaries and recorded JSON; **Download CSV** exports its current trial
-dataset. A failed preparation is visible even if no trial manifest was created.
-Completed execution is distinct from verified success: inspect both trial status
-and score. Missing first-flag timing is shown as Unknown.
-
-Set `samples: [smoke]` in the WebUI YAML to retain only the smoke test, or
-`samples: []` to remove all sample controls and reject launch requests. Restart the
-WebUI after changing this setting. Existing results remain available.
+Creating a sample imports its fixed package. Run prepares deterministic topology and fresh task secrets, deploys on CORE, checks readiness, exports tasks/verifiers, then evaluates CAF. Results and progress retain owner-scoped access. See [demo profile](demo-profile.md) for tasks and [scenario experiments](scenario-experiments.md) for configuration.
 
 ### Sample lifecycle and recovery
 
-Launch returns promptly; at most one sample per account and two per server run
-in background threads. Requests contain a whitelisted sample ID or an owner-scoped
-run ID, plus an idempotency ID for create/run, never commands, VM IDs, paths,
-owners or uploaded YAML. Stop checks access to the participant frozen in that
-run's configuration, even if the saved VM selection has since changed. The saved
-participant selection and configured engine/model are frozen for that run.
-All guest calls pass the same current PVE checks as authenticated CLI execution.
+Runs use the existing workflow coordinator, target reservations and participant locks. All guest calls require current PVE access. One experiment per account and two per server may run. Stop requests take effect at stage/trial boundaries; deployed scenarios remain in place. Interrupted runs retain their journals and artifacts; use authorized workflow recovery before rerunning when necessary. New runs preserve prior results and generate fresh challenge secrets.
 
-The HTTP fixture is a separate bounded systemd service using a dynamic user,
-loopback binding and a unique name. It is stopped after success or failure; a
-30-minute runtime limit bounds orphaned fixtures if the host crashes or access is
-revoked before cleanup. Revocation blocks cleanup commands too. Service control
-records remain in `/var/lib/caf-eval-samples` in the guest to prevent delayed starts
-after cancellation. Trial workers have their own bounded runtime and cleanup.
-
-Graceful shutdown stops between trials and attempts fixture cleanup. A forced
-shutdown leaves journals marked interrupted once their coordinator lock is gone.
-Samples do not automatically resume. The browser Stop action applies to a live
-coordinator; it cannot recover an orphaned worker after a forced shutdown. To clean
-up an interrupted run with current PVE authorization, use the same runs root as
-`serve` and its displayed sample run ID:
-
-```bash
-uv run cyber-agent-flow-orchestrator user-recover \
-  --username researcher@pve --web-config web.yaml \
-  --runs-root /absolute/path/to/runs --run-id sample-<id>
-```
-
-Replace `sample-<id>` with the displayed ID (without angle brackets). An authorized
-host administrator can instead use `recover --output /absolute/private/run/path`.
-After cleanup, start a fresh sample from the WebUI. These fixed samples use their
-own loopback fixture and participant lock; they do not invoke ScenarioForge or
-alter any real scenario's preparation/reset steps.
+Set `samples: [smoke]` or `samples: []` to restrict new samples; existing results remain available. Historical participant-local samples keep their saved configuration and recovery behavior.
 
 ## Select machines and application checks
 

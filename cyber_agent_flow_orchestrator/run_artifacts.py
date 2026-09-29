@@ -113,7 +113,7 @@ def reproduction_manifest(xml):
 
 
 def scenario_info(root, journal, spec):
-    if journal.get('sample_id'):
+    if journal.get('sample_id') and not journal.get('scenario_experiment'):
         return {'used': False, 'message': 'ScenarioForge was not used. This sample uses supplied evidence or a temporary participant-local website.'}
     snapshot = spec.get('suite_snapshot', {})
     result = {'used': True, 'metadata': snapshot.get('scenario', {}),

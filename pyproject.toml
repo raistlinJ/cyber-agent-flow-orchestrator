@@ -23,7 +23,7 @@ include = ["cyber_agent_flow_orchestrator*"]
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-cyber_agent_flow_orchestrator = ["static/*.html", "static/*.css", "static/*.js", "defaults/*.yaml", "defaults/catalogs/*.json", "sample_data/*.json"]
+cyber_agent_flow_orchestrator = ["static/*.html", "static/*.css", "static/*.js", "static/demo-*.xml", "static/demo-*.zip", "defaults/*.yaml", "defaults/catalogs/*.json", "sample_data/*.json"]
 
 [tool.uv]
 default-groups = []

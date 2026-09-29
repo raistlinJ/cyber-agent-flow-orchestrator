@@ -410,62 +410,22 @@ you can keep them open alongside the dashboard.
 
 ### Create and run a sample
 
-Sign in with PVE, select your **Cyber-agent-flow** participant VM on **Lab setup**, and **Save VM
-roles**. On **Experiments**, choose **New**, select a sample and **Create experiment**.
-The new table row stays **Ready** until you press its **Run** icon. Nothing needs to be
-imported: the bundled catalogs, prompts and demo fixture are included in the
-orchestrator package. ScenarioForge and CoreVM may remain unselected for these samples.
+Select and save **ScenarioForge**, **Cyber-agent-flow participant**, and **CoreVM** roles on Lab setup. Configure ScenarioForge's CORE connection and ensure the participant can reach its lab network. Under **Experiments → New**, choose a sample and create it. Creation imports and freezes the fixed package; **Deploy and run** prepares topology and fresh task secrets, deploys the XML, checks readiness, exports the evaluation suite, and starts CAF.
 
-Each row has **Run**, **Stop**, **View results**, and **Open progress** icons with
-tooltips. One experiment can run per account at a time. Stop finishes the current
-bounded trial, collects its results and cleans up before ending the run. Running
-a finished row again creates a new run, preserving previous results.
-
-**Open progress** shows preparation, the current trial/condition, finished-trial
-percentages, elapsed time, outcomes and cleanup. An active-sample notice appears
-across pages, and timestamped sample events join the persistent console. Progress
-refreshes every five seconds while active, even with automatic refresh set to Never.
-Update both host checkouts for detailed worker upload/execution/collection stages.
-Live model turns and tool calls are not streamed. See [sample progress details](docs/webui.md#bundled-samples).
+The modal shows effective CAF settings and locked sample XML, prompt template, tool conditions and limits. **Edit CAF model settings** opens the model editor. Custom scenarios can edit repetitions, turns, trial time, tool timeout and context window; sample budgets are fixed.
 
 | Sample | Runs | What it checks |
 | --- | --- | --- |
-| Model smoke test | 1 trial; up to 3 turns / 120 seconds | Supplied port observation, no tools; checks the worker, model and JSON scoring |
-| Tools vs. added helper | 6 trials; up to 12 turns / 120 seconds each | Three repetitions of baseline `nmap`, `curl`, `python3` versus those same tools plus `http_flag_walk`; recover two flags from a temporary loopback site |
+| Model smoke test | 1 trial; up to 6 turns / 120 seconds | Baseline tools retrieve a fresh service token from the deployed HTTP website |
+| Tools vs. added helper | 6 trials; up to 12 turns / 120 seconds each | Three paired repetitions of baseline tools versus baseline plus HTTP helper, recovering fresh flags from linked pages |
 
-See [the illustrated sample guide](docs/bundled-samples.md) for each prompt, execution
-flow, scoring and interpretation. Figures: [Model smoke test](sample-workflows/sample-model-smoke.png)
-and [Tools vs. added helper](sample-workflows/sample-tools-vs-helper.png).
+Both presets run ScenarioForge → CORE deployment/readiness → CAF evaluation. Their exact-JSON verifiers score the complete answer. The helper is a hand-authored example tool. See [demo profile](docs/demo-profile.md) for prompts, conditions and metrics.
 
-The turn counts are upper bounds, not a fixed number of prompt/response pairs.
-The configured model makes real calls and can fail or time out. The HTTP helper
-is a **hand-authored example artifact**; this sample does not generate a new tool
-or establish that generated artifacts help on real ScenarioForge scenarios.
+The participant needs QEMU guest agent, systemd, Python, CAF, model credentials, and baseline tools. ScenarioForge/CORE need the configured deployment dependencies and the python:3.12-alpine image. Selecting roles does not install these components. Sample tool scope is restricted to the private host addresses exported by ScenarioForge; template reset hooks are not applied.
 
-Requirements: a running Linux participant with QEMU guest agent, systemd, Python 3,
-the configured CAF engine and guest account. The HTTP sample also checks that
-`nmap`, `curl` and `python3` are available to that account. The samples inherit the
-workflow runtime's `engine`, `model`, guest user and paths; verify your model
-endpoint/name and credentials first. Selecting a VM does not install these pieces
-or change the configured model. Provision import can supply these settings.
+Each run preserves its source ZIP, preparation command, exact deployed XML, prompts, model configuration, catalogs, attempts, dataset and reproduction package. Open **Results → Task and run configuration** for these inputs and downloads. Progress and Results open independent windows. Stop acts at stage/trial boundaries; the deployed scenario remains in place. Run again creates a separate result and fresh challenge secrets.
 
-The orchestrator starts the demo site automatically on `127.0.0.1` at a free port
-inside the participant, uses a fixed loopback-only sample policy and removes the
-service afterward. It does not run scenario reset hooks. The baseline catalog is
-identical in both conditions; only the helper is added. Each run saves its own
-YAML, catalogs, manifest, attempts and scored datasets in your private host workspace.
-
-Open **Results → Task and run configuration** to see exact task prompts, tools,
-model settings, limits, recorded system prompts, and saved inputs. Download the
-run files, full scenario XML, evaluation package, or ScenarioForge re-import ZIP.
-See [saved run inputs and scenario exports](docs/run-inputs.md) for capture,
-re-import, and missing-artifact details.
-
-Watch **Experiment runs**, then click a run to see condition scores and timings,
-raw results and **Download CSV**. Preparation errors are also visible there.
-One sample may run per account, with two workers per server; evaluator locks
-prevent simultaneous evaluation in the same participant. See [sample lifecycle
-and recovery](docs/webui.md#sample-lifecycle-and-recovery).
+At most one experiment per account and two workers per server run concurrently. Existing target and participant locks also apply. Historical participant-only results remain readable.
 
 To remove a sample, list only the IDs you want in `web.yaml` and restart:
 
@@ -665,3 +625,5 @@ request was performed during implementation.
 ### Saved ScenarioForge XML experiments
 
 The WebUI supports **New experiment → Saved ScenarioForge XML** to select an existing scenario on the ScenarioForge VM, freeze its XML and settings, then deploy and evaluate it. See [scenario experiments](docs/scenario-experiments.md) for search roots, scope settings, and generating XML beforehand with ScenarioForge-Eval.
+
+New experiment also accepts local XML or ScenarioForge reproduction ZIP uploads, with downloadable fixed scenario packages and Send buttons for both demos. See [scenario imports and demo packages](docs/scenario-experiments.md#upload-from-new-experiment).

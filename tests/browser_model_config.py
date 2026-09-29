@@ -56,7 +56,8 @@ def main():
                 create_entered.set()
                 assert release_create.wait(20)
                 return original_create(*args, **kwargs)
-            patch.setattr(dashboard.samples, 'create', create)
+            # Isolate model persistence here; full ScenarioForge sample creation is checked in browser_scenario_samples.py.
+            patch.setattr(dashboard.scenarios, 'create_sample', create)
             try:
                 with secure_server(dashboard,root/'web',auth=make_auth(pve)) as server,sync_playwright() as playwright:
                     browser=playwright.chromium.launch(channel='chrome',headless=True)

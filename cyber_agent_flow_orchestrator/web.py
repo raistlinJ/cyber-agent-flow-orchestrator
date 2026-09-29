@@ -180,6 +180,10 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(200, value, 'text/csv', **{'Content-Disposition': f'attachment; filename="{parts[3]}.csv"'})
                     else:
                         self.respond(200, value)
+                elif path in {f'/demo-{name}.{ext}' for name in ('smoke', 'tools-vs-helper') for ext in ('xml', 'zip')}:
+                    filename = path[1:]
+                    with (assets / filename).open('rb') as stream:
+                        self.send_artifact(stream, 'application/zip' if filename.endswith('.zip') else 'application/xml', filename)
                 elif path in protected_assets:
                     self.asset(protected_assets[path])
                 else:
@@ -189,8 +193,46 @@ def handler(dashboard, *, auth, proxy_key, origin):
             except (ValueError, OSError, KeyError):
                 self.respond(503, {'error': 'Authentication or dashboard service unavailable'})
 
+        def upload_scenario(self):
+            from .scenario_upload import MAX_UPLOAD
+            try:
+                token, session = self.current()
+                if not session:
+                    self.respond(401, {'error': 'Login required'})
+                    return
+                if not secrets.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), session['csrf'].encode()):
+                    self.respond(403, {'error': 'Invalid CSRF token'})
+                    return
+                if not getattr(dashboard, 'scoped', False) or auth.provider.name != 'pve':
+                    self.respond(404, {'error': 'Scenario upload is not enabled'})
+                    return
+                if self.headers.get('Content-Type', '').split(';')[0] != 'application/octet-stream':
+                    self.respond(415, {'error': 'Binary XML or ZIP upload required'})
+                    return
+                if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length', [])) != 1:
+                    self.respond(400, {'error': 'Invalid request framing'})
+                    return
+                size = int(self.headers['Content-Length'])
+                if not 0 < size <= MAX_UPLOAD:
+                    self.respond(413, {'error': 'Upload must be between 1 byte and 32 MiB'})
+                    return
+                content = self.rfile.read(size)
+                if len(content) != size:
+                    raise SampleRequestError('Incomplete upload')
+                result = dashboard.scenarios.upload(auth.access(token, revalidate=False), content)
+                self.respond(200, result)
+            except AccessDenied:
+                self.respond(403, {'error': 'Access not granted'})
+            except (SampleRequestError, ValueError) as exc:
+                self.respond(400, {'error': str(exc)})
+            except (OSError, KeyError):
+                self.respond(503, {'error': 'Scenario import is unavailable'})
+
         def do_POST(self):
             if not self.trusted(post=True):
+                return
+            if urlsplit(self.path).path == '/api/scenarios/upload':
+                self.upload_scenario()
                 return
             try:
                 if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
@@ -268,7 +310,9 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
                     if action == 'create' and 'selection_id' in data:
                         expected = {'selection_id', 'request_id', 'allowed_targets', 'disallowed_targets'}
-                    if set(data) != expected or any(not isinstance(v, str) for v in data.values()):
+                        if 'evaluation' in data:
+                            expected.add('evaluation')
+                    if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k != 'evaluation'):
                         raise SampleRequestError('Invalid experiment request fields')
                     self.respond(202, dashboard.experiment(auth.access(token, revalidate=False), action, data))
                 elif path == '/api/model-config' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':

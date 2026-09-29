@@ -90,12 +90,15 @@ def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, m
     monkeypatch.setattr(service, 'run', run)
     try:
         controller.catalogue(user)
-        reply = controller.create(user, 'a'*64, 'b'*32, '10.77.0.0/24', '')
+        settings = dict(repetitions=2, max_turns=7, wall_seconds=45, tool_timeout=15, context_window=4096)
+        reply = controller.create(user, 'a'*64, 'b'*32, '10.77.0.0/24', '', evaluation=settings)
         output = workspace.run_path(reply['run_id'])
         assert reply['status'] == 'ready' and not launched
         record = ev.read_json(output / 'workflow.json')
         assert record['runtime']['conditions'][0]['tools'] == ['nmap', 'curl', 'python3']
         assert record['runtime']['backend']['before_trial'] == []
+        assert record['runtime']['repetitions'] == 2
+        assert all(record['runtime']['execution'][key] == value for key, value in settings.items() if key != 'repetitions')
         assert controller.create(user, 'a'*64, 'b'*32, '10.77.0.0/24', '') == reply
         controller.run_saved(user, reply['run_id'], 'c'*32)
         manager.jobs[user.username].result(timeout=10)
@@ -113,3 +116,9 @@ def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, m
         assert all(vmid == 9402 for vmid, _, _ in calls)
     finally:
         manager.close()
+
+
+@pytest.mark.parametrize("value", [{}, {"repetitions":1}, dict(repetitions=True,max_turns=3,wall_seconds=30,tool_timeout=10,context_window=1000), dict(repetitions=1,max_turns=0,wall_seconds=30,tool_timeout=10,context_window=1000)])
+def test_invalid_evaluation_settings(value):
+    with pytest.raises(samples.SampleRequestError):
+        scenarios.evaluation_settings(value)

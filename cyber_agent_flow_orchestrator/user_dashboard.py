@@ -120,6 +120,14 @@ class UserDashboard:
             allowed_targets=', '.join(self.runtime['execution']['network_policy']['allow']),
             disallowed_targets=', '.join(self.runtime['execution']['network_policy']['disallow']),
             max_turns=self.runtime['execution']['max_turns'], wall_seconds=self.runtime['execution']['wall_seconds'])
+        from .model_config import apply_model
+        runtime = apply_model(workspace, self.runtime, value['roles'].get('participant'))
+        value['experiment_defaults'] = dict(
+            source='Server runtime YAML plus saved model settings for the selected participant VM',
+            engine=dict(path=runtime['engine']['path'], python=runtime['engine']['python']),
+            model={key: runtime['model'].get(key) for key in ('provider', 'name', 'url', 'ssl_verify')},
+            evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192}.get(key)) for key in
+                ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window')}))
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         access.current()
         return value
@@ -137,9 +145,12 @@ class UserDashboard:
         return value
 
     def run_sample(self, access, sample_id, request_id):
-        return self.samples.submit(access, sample_id, request_id)
+        created = self.scenarios.create_sample(access, sample_id, request_id)
+        return self.scenarios.run_saved(access, created['run_id'], request_id)
 
     def experiment(self, access, action, data):
+        if action == 'create' and 'sample_id' in data:
+            return self.scenarios.create_sample(access, **data)
         if action == 'create' and 'selection_id' in data:
             return self.scenarios.create(access, **data)
         if action != 'create':

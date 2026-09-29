@@ -24,7 +24,7 @@
 </div>
 <div data-page="experiments" hidden>
 <section aria-labelledby="runs-title"><div class="section-title"><h2 id="runs-title">Experiments</h2><button id="new-experiment" type="button">＋ New</button></div>
-<p id="samples-context" class="small"></p><p class="small">One experiment at a time per account. Stop finishes the current trial and collects its results before cleanup.</p>
+<p id="samples-context" class="small"></p><p class="small">One experiment at a time per account. Stop finishes the current stage or trial and collects its results. Deployed scenarios remain in place.</p>
 <p id="sample-message" class="small" role="status" aria-live="polite"></p>
 <div class="panel scroll"><table class="experiments-table"><thead><tr><th>Experiment</th><th>Status</th><th>Trials finished</th><th>Verified successes</th><th>Actions</th></tr></thead><tbody id="runs"></tbody></table><p id="no-runs" class="empty">No experiments yet. Choose New to configure one of the included samples.</p></div></section>
 
@@ -50,7 +50,7 @@
 </fieldset>
 <div data-page="setup" hidden><section aria-labelledby="refresh-title"><div class="section-title"><h2 id="refresh-title">Refresh preferences</h2></div><div class="refresh-settings"><label for="refresh-period">Automatic refresh</label><select id="refresh-period"><option value="0">Never</option><option value="1" selected>Every 1 minute</option><option value="2">Every 2 minutes</option><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option></select><span class="small">Saved in this browser. Active operations still report progress.</span></div>
 </section></div>
-<footer><span>VM power, guest access, and application presence are checked separately.</span><span>Included samples run in your selected participant VM</span></footer>
+<footer><span>VM power, guest access, and application presence are checked separately.</span><span>Samples use ScenarioForge, CORE and your selected CAF participant</span></footer>
 </main>
 
 <dialog id="experiment-dialog" aria-labelledby="experiment-dialog-title">
@@ -64,18 +64,49 @@
 <p class="small">Choose a bundled sample or a saved ScenarioForge scenario and review its settings.</p>
 <label for="experiment-sample">Experiment type</label><select id="experiment-sample" required></select>
 <p id="experiment-description"></p><p id="experiment-budget" class="small"></p>
+<section class="experiment-settings" aria-labelledby="caf-settings-title">
+<h3 id="caf-settings-title">Cyber-agent-flow configuration</h3>
+<p id="caf-settings-source" class="small"></p><dl id="caf-settings-summary"></dl>
+<button id="edit-caf-model" type="button">Edit CAF model settings</button>
+<p class="small">Model settings apply to the agent on the participant VM. The scenario XML supplies the lab definition, not the agent configuration.</p>
+</section>
+<section id="sample-scenario-info" class="experiment-settings" hidden>
+<h3>ScenarioForge · fixed by sample</h3>
+<p class="small">These settings are locked to keep the sample task, prompt, and scoring consistent.</p>
+<fieldset disabled aria-label="Fixed sample scenario settings">
+<label for="sample-sf-use">ScenarioForge use in this run</label><input id="sample-sf-use" value="Required · deploy, readiness check and evaluation export">
+<label for="sample-sf-companion">ScenarioForge scenario XML</label><input id="sample-sf-companion">
+<label for="sample-environment">Sample environment</label><input id="sample-environment">
+<label for="sample-prompt">Sample task prompt</label><textarea id="sample-prompt" rows="5"></textarea>
+</fieldset>
+<p class="small">The sample imports this fixed XML/bundle, prepares the topology and task, deploys on CORE, then runs CAF evaluation. Select all three VM roles in Lab setup.</p>
+</section>
+<section class="experiment-settings" aria-labelledby="eval-settings-title">
+<h3 id="eval-settings-title">Evaluation configuration</h3>
+<p id="eval-settings-note" class="small"></p>
+<fieldset id="evaluation-settings" class="evaluation-grid">
+<label>Repetitions per task and condition<input id="eval-repetitions" type="number" min="1" max="100" required></label>
+<label>Maximum agent turns<input id="eval-max_turns" type="number" min="1" max="1000" required></label>
+<label>Trial time limit (seconds)<input id="eval-wall_seconds" type="number" min="1" max="86400" required></label>
+<label>Tool timeout (seconds)<input id="eval-tool_timeout" type="number" min="1" max="3600" required></label>
+<label>Context window (tokens)<input id="eval-context_window" type="number" min="1" max="1000000" required></label>
+</fieldset>
+<p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
+</section>
+<details class="demo-scenarios"><summary>Scenario packages for the two demos</summary><p class="small">Fixed sample packages include XML, website files, and demo profiles. The sample presets prepare and deploy them automatically using the configured ScenarioForge CORE connection.</p><p>Model smoke test: <a href="/demo-smoke.xml" download>XML</a> · <a href="/demo-smoke.zip" download>Scenario bundle</a> <button type="button" data-demo-scenario="smoke">Send smoke scenario</button></p><p>Tools vs. added helper: <a href="/demo-tools-vs-helper.xml" download>XML</a> · <a href="/demo-tools-vs-helper.zip" download>Scenario bundle</a> <button type="button" data-demo-scenario="tools-vs-helper">Send helper scenario</button></p></details>
 <section id="scenario-options" hidden>
 <p class="small">Load saved XML from your ScenarioForge VM. Run deploys the selected scenario using the CORE connection saved in its XML, then evaluates it with nmap, curl and python3. Resolve and save the Flow chain in ScenarioForge first.</p>
+<label for="scenario-file">Upload scenario XML or reproduction ZIP</label><input id="scenario-file" type="file" accept=".xml,.zip,application/xml,text/xml,application/zip"><button id="upload-scenario" type="button">Send to ScenarioForge</button><p id="scenario-upload-info" class="small" role="status">Import saves the scenario on the selected VM; it does not deploy it. Maximum 32 MiB (128 MiB expanded).</p>
 <div class="scenario-search"><label for="scenario-query">Find scenario or XML file</label><input id="scenario-query" type="search" maxlength="160" placeholder="Scenario name or filename"><button id="load-scenarios" type="button">Load from ScenarioForge VM</button></div>
 <label for="scenario-selection">Saved scenario</label><select id="scenario-selection"><option value="">Load scenarios to choose an XML</option></select>
 <p id="scenario-selection-info" class="small" role="status"></p>
 <label for="scenario-allowed">Allowed target IPs or CIDRs</label><input id="scenario-allowed" type="text" maxlength="4096" placeholder="10.77.0.0/24">
 <label for="scenario-disallowed">Excluded target IPs or CIDRs</label><input id="scenario-disallowed" type="text" maxlength="4096" placeholder="Optional; separate entries with commas">
-<p class="small">Review the target scope for this scenario. One repetition uses the saved runtime budgets and baseline tools. Scenario reset hooks are not applied.</p>
+<p class="small">Review the target scope for this scenario. The evaluation settings above control repetitions and trial budgets. Baseline tools are fixed. Scenario reset hooks are not applied.</p>
 </section>
 <p id="experiment-model-context" class="small"></p>
 </form>
-<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">Application model settings</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the current Cyber-agent-flow configuration and edit the model settings. Create experiment saves them to the VM and the experiment for future reruns. Without pulling, the current experiment defaults are used.</p><div id="model-config-cards" class="sample-cards"></div></section>
+<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">CAF model settings on participant VM</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the current Cyber-agent-flow configuration and edit the model settings. Create experiment saves them to the VM and the experiment for future reruns. Without pulling, the current experiment defaults are used.</p><div id="model-config-cards" class="sample-cards"></div></section>
 <div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>
 <p id="experiment-error" class="error" role="status"></p><button id="create-experiment" type="submit" form="experiment-form">Create experiment</button></div>
 </fieldset></dialog>

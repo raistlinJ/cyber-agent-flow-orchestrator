@@ -80,7 +80,53 @@ def catalogue(data):
     return {'items': rows, 'truncated': truncated, 'roots': data['roots']}
 
 
+def upload(data):
+    import pwd
+    import runpy
+    token = data.get('token', '')
+    if not re.fullmatch('[0-9a-f]{32}', token):
+        raise ValueError('Invalid upload ID')
+    repo = Path(data['repo'])
+    parent = repo / 'uploads'
+    destination = parent / ('caf-upload-' + token)
+    if parent.is_symlink() or destination.is_symlink():
+        raise ValueError('Upload directories cannot be links')
+    if data['op'] == 'upload-start':
+        parent.mkdir(parents=True, exist_ok=True)
+        destination.mkdir(mode=0o700, exist_ok=False)
+        return {'path': str(destination / 'source')}
+    if data['op'] != 'upload-import' or not destination.is_dir():
+        raise ValueError('Invalid upload operation')
+    source = destination / 'source'
+    if source.is_symlink() or source.stat().st_size > MAX_XML:
+        raise ValueError('Invalid uploaded file')
+    if hashlib.sha256(source.read_bytes()).hexdigest() != data['sha256']:
+        raise ValueError('Uploaded file checksum mismatch')
+    account = pwd.getpwnam(data['user'])
+    os.chown(destination, account.pw_uid, account.pw_gid)
+    os.chown(source, account.pw_uid, account.pw_gid)
+    if os.geteuid() == 0:
+        os.initgroups(account.pw_name, account.pw_gid)
+        os.setgid(account.pw_gid)
+        os.setuid(account.pw_uid)
+    importer = runpy.run_path(str(repo / 'webapp' / 'reproduction_bundle.py'))
+    imported = importer['import_scenario_file'](str(source), str(destination))
+    path = Path(imported.xml_path)
+    if imported.kind == 'xml':
+        path = destination / 'scenario.xml'
+        source.rename(path)
+    rows = inspect(path)
+    if not rows:
+        raise ValueError('Uploaded file contains no named ScenarioForge scenarios')
+    return {'items': rows, 'kind': imported.kind, 'fidelity': imported.fidelity,
+            'bundled_artifact_sources': imported.bundled_artifact_sources,
+            'total_artifact_sources': imported.total_artifact_sources,
+            'path': str(path)}
+
+
 def dispatch(data):
+    if data['op'].startswith('upload-'):
+        return upload(data)
     if data['op'] == 'list':
         return catalogue(data)
     token = data.get('token', '')
@@ -107,7 +153,7 @@ def dispatch(data):
     selected = next((item for item in inspect(source) if item['id'] == data['selection_id']), None)
     if selected is None:
         raise ValueError('Scenario XML changed; refresh the scenario list')
-    if not selected['resolved_chain']:
+    if not selected['resolved_chain'] and not data.get('allow_unresolved', False):
         raise ValueError('Resolve and save the Flow chain in ScenarioForge before evaluation')
     content = source.read_bytes()
     if hashlib.sha256(content).hexdigest() != selected['sha256']:

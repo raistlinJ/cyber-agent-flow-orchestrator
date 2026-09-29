@@ -34,6 +34,19 @@ def networks(text, required=False):
         raise SampleRequestError('Targets must be IP addresses or CIDR networks') from None
 
 
+EVALUATION_LIMITS = dict(repetitions=(1, 100), max_turns=(1, 1000), wall_seconds=(1, 86400),
+                         tool_timeout=(1, 3600), context_window=(1, 1000000))
+
+
+def evaluation_settings(value):
+    if not isinstance(value, dict) or set(value) != set(EVALUATION_LIMITS):
+        raise SampleRequestError('Supply repetitions, max_turns, wall_seconds, tool_timeout and context_window')
+    for name, (minimum, maximum) in EVALUATION_LIMITS.items():
+        if type(value[name]) is not int or not minimum <= value[name] <= maximum:
+            raise SampleRequestError(f'{name} must be an integer from {minimum} to {maximum}')
+    return dict(value)
+
+
 class ScenarioExperiments:
     def __init__(self, cfg, runtime, root, samples):
         self.cfg, self.runtime, self.root, self.samples = cfg, runtime, root, samples
@@ -59,14 +72,62 @@ class ScenarioExperiments:
         with authorized_operations(access.qm):
             result = guest(self.runtime['backend']).call(vmid, 'list', roots=roots, query=query, timeout=30)
         access.current()
+        for item in result['items']:
+            token = Path(item['path']).parent.name.removeprefix('caf-upload-')
+            if re.fullmatch('[0-9a-f]{32}', token):
+                metadata = workspace.path / 'uploads' / token / 'metadata.json'
+                if metadata.is_file() and not metadata.is_symlink():
+                    saved = ev.read_json(metadata)
+                    if saved['path'] == item['path']:
+                        item['upload'] = saved
         path = workspace.path / 'scenario-catalogue.json'
         private_file(path, json.dumps(dict(result, vmid=vmid, repo=repo, roots=roots)).encode(), replace=path.exists())
         return dict(result, vmid=vmid)
 
-    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets):
+    def upload(self, access, content):
+        import hashlib
+        import uuid
+        from .scenario_upload import validate
+        try:
+            validate(content)
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            raise SampleRequestError(str(exc)) from None
+        workspace = Workspace(self.root, access.username)
+        vmid = workspace.roles()['scenarioforge']
+        if vmid is None:
+            raise SampleRequestError('Select and save a ScenarioForge VM first')
+        access.require_vm(vmid)
+        repo, roots = self.settings()
+        token = uuid.uuid4().hex
+        with self.samples.lock, submission_lock(workspace), authorized_operations(access.qm):
+            remote = guest(self.runtime['backend'])
+            prepared = remote.call(vmid, 'upload-start', repo=repo, token=token)
+            ev.GuestAgent(self.runtime['backend']).put(vmid, prepared['path'], content)
+            try:
+                result = remote.call(vmid, 'upload-import', repo=repo, token=token,
+                    sha256=hashlib.sha256(content).hexdigest(), user=self.cfg['scenarioforge'].get('user', 'scenarioforge'),
+                    timeout=120)
+            except ValueError as exc:
+                raise SampleRequestError(clean(str(exc))) from None
+            access.current()
+            directory = private_directory(workspace.path / 'uploads' / token)
+            metadata = dict(token=token, sha256=hashlib.sha256(content).hexdigest(),
+                            kind=result['kind'], fidelity=result['fidelity'], path=result['path'])
+            private_file(directory / 'source', content)
+            private_file(directory / 'metadata.json', json.dumps(metadata).encode())
+            for item in result['items']:
+                item['upload'] = metadata
+            # Store exactly the imported choices so creation never trusts browser paths.
+            roots = list(dict.fromkeys([*roots, result['path']]))
+            path = workspace.path / 'scenario-catalogue.json'
+            private_file(path, json.dumps(dict(result, vmid=vmid, repo=repo, roots=roots)).encode(), replace=path.exists())
+        return dict(result, vmid=vmid, roots=roots, truncated=False)
+
+    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, _sample_id=None):
         if not re.fullmatch('[0-9a-f]{32}', request_id) or not re.fullmatch('[0-9a-f]{64}', selection_id):
             raise SampleRequestError('Choose a listed scenario and supply a valid request ID')
         policy = dict(allow=networks(allowed_targets, True), disallow=networks(disallowed_targets))
+        overrides = evaluation_settings(evaluation) if evaluation is not None else None
         access.current()
         workspace = Workspace(self.root, access.username)
         run_id = 'scenario-' + request_id
@@ -88,18 +149,24 @@ class ScenarioExperiments:
             if catalogue['vmid'] != roles['scenarioforge']:
                 raise SampleRequestError('ScenarioForge VM changed; reload its scenarios')
             item = next((row for row in catalogue['items'] if row['id'] == selection_id), None)
-            if not item or not item['resolved_chain']:
+            if not item or (not item['resolved_chain'] and _sample_id is None):
                 raise SampleRequestError('Choose a scenario with a saved resolved Flow chain')
             sf = self.cfg['scenarioforge']
             with authorized_operations(access.qm):
                 captured = guest(self.runtime['backend']).call(roles['scenarioforge'], 'snapshot',
                     roots=catalogue['roots'], repo=catalogue['repo'], path=item['path'],
-                    selection_id=selection_id, token=request_id, user=sf.get('user', 'scenarioforge'), timeout=40)
+                    selection_id=selection_id, token=request_id, user=sf.get('user', 'scenarioforge'),
+                    allow_unresolved=_sample_id is not None, timeout=40)
             captured.update(snapshot_token=request_id, repo=catalogue['repo'])
+            if item.get('upload'):
+                captured['upload'] = item['upload']
             runtime = deepcopy(self.runtime)
             runtime['execution']['network_policy'] = policy
             runtime['backend']['before_trial'] = []
             runtime['repetitions'] = 1
+            if overrides:
+                runtime['repetitions'] = overrides['repetitions']
+                runtime['execution'].update({key: value for key, value in overrides.items() if key != 'repetitions'})
             baseline = Path(__file__).with_name('sample_data') / 'baseline.json'
             runtime['conditions'] = [dict(id='baseline', catalog=str(baseline), tools=['nmap', 'curl', 'python3'], guidance_files=[])]
             cfg = dict(version=1, id='scenario-' + request_id, runtime='runtime.yaml',
@@ -110,21 +177,87 @@ class ScenarioExperiments:
                     **({'environment_file': sf['environment_file']} if sf.get('environment_file') else {})),
                 prepare=[], artifacts=[], collect={}, monitoring=deepcopy(self.cfg.get('monitoring', {})),
                 max_readiness_age_seconds=self.cfg['max_readiness_age_seconds'])
+            if _sample_id is not None:
+                self.configure_sample(_sample_id, cfg, runtime, captured, roles, request_id)
             source = workspace.materialize(cfg, runtime, access, run_id)
             saved_runtime = yaml.safe_load((source.parent / 'runtime.yaml').read_text())
             private_file(source.parent / 'baseline.json', baseline.read_bytes())
             saved_runtime['conditions'][0]['catalog'] = str(source.parent / 'baseline.json')
+            if len(saved_runtime['conditions']) > 1:
+                helper = baseline.with_name('with-http-helper.json')
+                private_file(source.parent / 'with-http-helper.json', helper.read_bytes())
+                saved_runtime['conditions'][1]['catalog'] = str(source.parent / 'with-http-helper.json')
             private_file(source.parent / 'runtime.yaml', yaml.safe_dump(saved_runtime).encode(), replace=True)
             cfg, runtime, _, identity = load(source)
             private_directory(output)
             private_directory(output / 'inputs')
             private_file(output / 'inputs/source-selection.json', json.dumps(captured).encode())
+            self.capture_upload(workspace, captured, output)
             ev.write_json(output / 'workflow.json', self.record(cfg, runtime, identity, captured, request_id))
         return dict(run_id=run_id, status='ready')
 
+    def create_sample(self, access, sample_id, request_id):
+        from .samples import CATALOG
+        if sample_id not in self.samples.enabled or not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise SampleRequestError('Choose an enabled sample and valid request ID')
+        workspace = Workspace(self.root, access.username)
+        access.current()
+        roles = workspace.roles()
+        if any(roles[role] is None for role in ('scenarioforge', 'participant', 'core')):
+            raise SampleRequestError('Select and save ScenarioForge, participant and CoreVM roles before creating a sample')
+        access.require_vms(roles.values())
+        existing = workspace.run_path('scenario-' + request_id)
+        if existing.exists():
+            record = ev.read_json(existing / 'workflow.json')
+            if record.get('sample_id') != sample_id:
+                raise SampleRequestError('Request ID belongs to another experiment')
+            return dict(run_id=existing.name, status=record['status'])
+        bundle = Path(__file__).with_name('static') / ('demo-' + sample_id + '.zip')
+        imported = self.upload(access, bundle.read_bytes())
+        item = imported['items'][0]
+        return self.create(access, item['id'], request_id,
+            ','.join(self.runtime['execution']['network_policy']['allow']),
+            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id)
+
+    def configure_sample(self, sample_id, cfg, runtime, captured, roles, token):
+        from .samples import CATALOG
+        item = CATALOG[sample_id]
+        captured['sample_id'] = sample_id
+        runtime['repetitions'] = 1 if sample_id == 'smoke' else 3
+        runtime['execution'].update(max_turns=item['max_turns'], wall_seconds=item['wall_seconds'], tool_timeout=30)
+        if sample_id == 'tools-vs-helper':
+            runtime['conditions'].append(dict(id='added-helper',
+                catalog=str(Path(__file__).with_name('sample_data') / 'with-http-helper.json'),
+                tools=['nmap', 'curl', 'python3', 'http_flag_walk'], guidance_files=[]))
+        sf = cfg['scenarioforge']
+        destination = sf['repo'] + '/outputs/caf-demo-runs/' + token + '/scenario.xml'
+        options = dict(sample_id=sample_id, source=captured['snapshot_path'],
+                       destination=destination, scenario=captured['scenario'],
+                       artifacts=sf['repo'] + '/outputs/flag_generators_runs/caf-demo-' + token)
+        sf['xml'] = destination
+        cfg['prepare'] = [dict(id='fixed-demo-xml', vmid=roles['scenarioforge'],
+            argv=[sf['python'], '-c', Path(__file__).with_name('demo_prepare.py').read_text(), json.dumps(options)],
+            timeout_seconds=sf['timeout_seconds'], user=sf['user'], cwd=sf['repo'],
+            **({'environment_file': sf['environment_file']} if sf.get('environment_file') else {}))]
+
+    def capture_upload(self, workspace, selection, output):
+        import hashlib
+        upload = selection.get('upload')
+        if not upload:
+            return
+        if not re.fullmatch('[0-9a-f]{32}', upload['token']):
+            raise SampleRequestError('Invalid saved upload')
+        from .run_artifacts import open_saved
+        with open_saved(workspace.path, 'uploads/' + upload['token'] + '/source') as stream:
+            content = stream.read()
+        if hashlib.sha256(content).hexdigest() != upload['sha256']:
+            raise SampleRequestError('Saved uploaded source changed')
+        extension = '.zip' if upload['kind'] == 'reproduction-bundle' else '.xml'
+        private_file(output / ('inputs/uploaded-source' + extension), content)
+
     def record(self, cfg, runtime, identity, captured, token):
         return dict(version=1, workflow=cfg, runtime=runtime, workflow_hash=identity,
-                    token='scenario-' + token, scenario_experiment=captured, status='ready', phase='ready',
+                    token='scenario-' + token, scenario_experiment=captured, sample_id=captured.get('sample_id'), status='ready', phase='ready',
                     created_at=now(), updated_at=now(), stages={}, events=[],
                     message='Ready. Run deploys the saved scenario and evaluates it with baseline tools.')
 
@@ -159,6 +292,8 @@ class ScenarioExperiments:
                 shutil.copytree(source.parent, destination)
                 saved_runtime = yaml.safe_load((destination / 'runtime.yaml').read_text())
                 saved_runtime['conditions'][0]['catalog'] = str(destination / 'baseline.json')
+                if len(saved_runtime['conditions']) > 1:
+                    saved_runtime['conditions'][1]['catalog'] = str(destination / 'with-http-helper.json')
                 private_file(destination / 'runtime.yaml', yaml.safe_dump(saved_runtime).encode(), replace=True)
                 source = destination / 'workflow.yaml'
                 cfg, runtime, _, identity = load(source)
@@ -166,6 +301,7 @@ class ScenarioExperiments:
                 private_directory(output)
                 private_directory(output / 'inputs')
                 private_file(output / 'inputs/source-selection.json', json.dumps(record['scenario_experiment']).encode())
+                self.capture_upload(workspace, record['scenario_experiment'], output)
                 record = self.record(cfg, runtime, identity, record['scenario_experiment'], request_id)
             for vmid in workflow_vmids(record['workflow'], record['runtime']):
                 access.require_vm(vmid)

@@ -1,6 +1,6 @@
 # ScenarioForge scenarios in the WebUI
 
-The two bundled demos are self-contained samples. To evaluate an actual ScenarioForge scenario, use **Experiments → New experiment → Saved ScenarioForge XML**.
+Both bundled sample presets deploy their fixed ScenarioForge XML and evaluate the resulting lab. To evaluate your own ScenarioForge scenario, use **Experiments → New experiment → ScenarioForge XML or bundle**.
 
 1. In **Lab setup**, select and save the ScenarioForge and participant VM roles.
 2. Load scenarios from the ScenarioForge VM. Search by file path or scenario name.
@@ -62,3 +62,27 @@ Prompt-driven generation is not reproducible from seed alone; preserve its resul
 ## Results and sharing
 
 Results show the exported task prompts, tool settings, model, and collected metrics. Downloads include the captured run bundle, complete scenario XML, and ScenarioForge reproduction ZIP. The reproduction manifest reports any unavailable generated artifacts; see [saved run inputs](run-inputs.md).
+
+## Upload from New experiment
+
+Choose a local XML or ScenarioForge reproduction ZIP and click **Send to ScenarioForge**. Upload uses the selected VM and signed-in user’s access, then invokes ScenarioForge’s own importer. ZIP artifacts are restored and the imported XML appears in the scenario selector. Import does not deploy. The limit is 32 MiB uploaded / 128 MiB expanded. Experiment-results ZIPs are not scenario import packages.
+
+The imported files are stored beneath `<scenarioforge repo>/uploads/caf-upload-<id>/`. Ready scenarios can be selected immediately. For unresolved scenarios, open the imported XML in ScenarioForge, configure the CORE connection, resolve/save the Flow chain, then reload the list. The original uploaded source is preserved in `inputs/uploaded-source.xml` or `inputs/uploaded-source.zip` in the experiment download, alongside the XML used for the run.
+
+### Fixed scenario samples
+
+Choose **Model smoke test** or **Tools vs. added helper** in New experiment. Both presets import their fixed XML/ZIP, prepare a deterministic topology and fresh task secrets using ScenarioForge, deploy to CORE, check readiness, export the evaluation suite, then run CAF. The smoke preset reads a real service token; the helper preset compares baseline tools with the HTTP helper across three paired repetitions.
+
+ScenarioForge, participant and CoreVM roles must all be selected. The ScenarioForge CORE connection must be configured and the participant must have a route to the deployed network. Scenario and evaluation fields are locked for samples; CAF model settings remain configurable.
+
+The XML/ZIP downloads are fixed source packages. Generic import lists their unresolved definition; the named sample preset performs its preparation automatically. The run's final XML, exact prompt, fresh verifier and reproduction artifacts are preserved in Results. Deployment remains in place after execution.
+
+See [demo profile](demo-profile.md) for tasks, tools and metrics. Rebuild packages with `python scripts/build_demo_scenarios.py`.
+
+### CAF and evaluation configuration
+
+XML defines the ScenarioForge lab. CAF's checkout, Python executable, model and default execution settings come from the server runtime YAML, with saved model preferences for the selected participant VM. New experiment shows these effective settings explicitly.
+
+**Edit CAF model settings** opens the existing model controls. Pull from VM reads the application configuration; saving changes requires application-maintenance access. Creating an experiment saves those changes and freezes its settings.
+
+Custom scenarios can set repetitions, maximum turns, trial seconds, tool timeout and context window in New. Their baseline tools remain fixed; task prompts/verifiers come from ScenarioForge's export. Sample budgets and conditions are fixed to preserve the experiment design.

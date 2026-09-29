@@ -181,8 +181,9 @@ def test_revocation_before_queued_job_stops_all_guest_operations(pve, lab, tmp_p
 
 
 def test_https_launch_csrf_owner_isolation_results_and_csv(pve, lab, tmp_path, monkeypatch):
-    pve[0]['resources']['operator@pve'] = [vm(9403)]
-    install_backend(monkeypatch, tmp_path)
+    pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403), vm(9404)]
+    from scenario_fixture import install_transport
+    install_transport(monkeypatch, lab[2], lab[3])
     auth = make_auth(pve)
     dash = UserDashboard(lab[0], tmp_path / 'runs', 2, lambda b, a: Probe(b, a, []))
     try:
@@ -195,7 +196,7 @@ def test_https_launch_csrf_owner_isolation_results_and_csv(pve, lab, tmp_path, m
                 return cookie, {'X-CSRF-Token': session['csrf']}
             cookie, headers = login('operator@pve')
             bob, bh = login('bob@pve')
-            assert request(server, '/api/roles', dict(scenarioforge=None, participant=9403, core=None), cookie=cookie, headers=headers)[0] == 200
+            assert request(server, '/api/roles', dict(scenarioforge=9402, participant=9403, core=9404), cookie=cookie, headers=headers)[0] == 200
             body = {'sample_id': 'smoke', 'request_id': 'a' * 32}
             assert request(server, '/api/samples/run', body)[0] == 401
             assert request(server, '/api/samples/run', body, cookie=cookie)[0] == 403
@@ -209,7 +210,7 @@ def test_https_launch_csrf_owner_isolation_results_and_csv(pve, lab, tmp_path, m
             assert request(server, f'/api/runs/{run_id}/results', cookie=bob)[0] == 404
             code, response_headers, csv = request(server, f'/api/runs/{run_id}/dataset.csv', cookie=cookie)
             assert code == 200 and 'attachment' in response_headers['Content-Disposition']
-            assert b'condition_id' in csv and b'no-tools' in csv
+            assert b'condition_id' in csv and b'baseline' in csv
             assert request(server, f'/api/runs/{run_id}/dataset.csv', cookie=bob)[0] == 404
             dash.samples.enabled = ()
             assert request(server, '/api/samples/run', dict(body, request_id='b' * 32), cookie=cookie, headers=headers)[0] == 400
@@ -398,8 +399,9 @@ def test_saved_experiments_stop_and_rerun_preserve_results(pve, lab, tmp_path, m
 
 
 def test_experiment_http_create_run_validation_and_owner_isolation(pve, lab, tmp_path, monkeypatch):
-    install_backend(monkeypatch, tmp_path)
-    pve[0]['resources']['operator@pve'] = [vm(9403)]
+    from scenario_fixture import install_transport
+    install_transport(monkeypatch, lab[2], lab[3])
+    pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403), vm(9404)]
     dash = UserDashboard(lab[0], tmp_path / 'runs', 2, lambda b, a: Probe(b, a, []))
     try:
         with secure_server(dash, tmp_path / 'web', auth=make_auth(pve)) as server:
@@ -414,6 +416,8 @@ def test_experiment_http_create_run_validation_and_owner_isolation(pve, lab, tmp
             assert request(server, '/api/experiments/create', data)[0] == 401
             assert request(server, '/api/experiments/create', data, cookie=cookie)[0] == 403
             assert request(server, '/api/experiments/create', dict(data, vmid=999), cookie=cookie, headers=headers)[0] == 400
+            assert request(server, '/api/experiments/create', data, cookie=cookie, headers=headers)[0] == 400
+            request(server, '/api/roles', dict(scenarioforge=9402,participant=9403,core=9404), cookie=cookie,headers=headers)
             status, _, body = request(server, '/api/experiments/create', data, cookie=cookie, headers=headers)
             assert status == 202
             run_id = json.loads(body)['run_id']
@@ -421,7 +425,7 @@ def test_experiment_http_create_run_validation_and_owner_isolation(pve, lab, tmp
             assert request(server, '/api/experiments/run', run, cookie=bob, headers=bob_headers)[0] == 400
             assert request(server, '/api/experiments/stop', {'run_id':run_id}, cookie=bob, headers=bob_headers)[0] == 400
             assert request(server, '/api/experiments/stop', {'run_id':run_id}, cookie=cookie)[0] == 403
-            request(server, '/api/roles', dict(scenarioforge=None, participant=9403, core=None), cookie=cookie, headers=headers)
+            request(server, '/api/roles', dict(scenarioforge=9402, participant=9403, core=9404), cookie=cookie, headers=headers)
             assert request(server, '/api/experiments/run', run, cookie=cookie, headers=headers)[0] == 202
             dash.samples.jobs['operator@pve'].result(timeout=10)
             assert request(server, f'/api/runs/{run_id}/results', cookie=cookie)[0] == 200
