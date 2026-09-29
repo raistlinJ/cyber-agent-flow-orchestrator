@@ -41,7 +41,7 @@ function renderRunConfiguration(config){
  for(const [label,value] of [
   ['Model',config.model?.name],['Provider',config.model?.provider],['Endpoint',config.model?.url],
   ['Repetitions',config.repetitions],['Order seed',config.order_seed],
-  ['Maximum turns',config.execution?.max_turns],['Worker budget',config.execution?.wall_seconds==null?null:config.execution.wall_seconds+' seconds'],
+  ['Progressive hints',config.execution?.provide_progressive_hints?'On · up to 3 per trial':'Off'],['Maximum turns',config.execution?.max_turns],['Worker budget',config.execution?.wall_seconds==null?null:config.execution.wall_seconds+' seconds'],
   ['Tool timeout',config.execution?.tool_timeout==null?null:config.execution.tool_timeout+' seconds'],
   ['Context window',config.execution?.context_window]]){
   const row=el('div');row.append(el('dt',label),el('dd',value??'Not recorded'));settings.append(row);

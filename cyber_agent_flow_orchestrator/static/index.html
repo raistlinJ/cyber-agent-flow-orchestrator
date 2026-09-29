@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/http.js" defer></script><script src="/loading.js" defer></script><script src="/run_windows.js" defer></script><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/http.js" defer></script><script src="/loading.js" defer></script><script src="/run_windows.js" defer></script><script src="/task_editor.js" defer></script><script src="/app.js" defer></script></head>
 <body class="workspace">
 <header><a class="brand" href="#overview" aria-label="Orchestrator home"><span class="brand-mark">C</span>CYBER AGENT FLOW<span class="brand-divider">/</span><span class="brand-sub">Orchestrator</span></a><div class="user-menu"><span class="readonly">LAB MONITOR</span><span id="username-label"></span><button id="sign-out" type="button">Sign out</button></div></header>
 <nav class="workspace-nav" aria-label="Workspace pages">
@@ -72,7 +72,6 @@
 <label for="sample-sf-use">ScenarioForge use in this run</label><input form="experiment-form" id="sample-sf-use" value="Required · deploy, readiness check and evaluation export">
 <label for="sample-sf-companion">ScenarioForge scenario XML</label><input form="experiment-form" id="sample-sf-companion">
 <label for="sample-environment">Sample environment</label><input form="experiment-form" id="sample-environment">
-<label for="sample-prompt">Sample task prompt</label><textarea form="experiment-form" id="sample-prompt" rows="5"></textarea>
 </fieldset>
 <p class="small">The sample imports this fixed XML/bundle, prepares the topology and task, deploys on CORE, then runs CAF evaluation. Select all three VM roles in Lab setup.</p>
 </section>
@@ -94,7 +93,27 @@
 <p id="experiment-model-context" class="small"></p>
 <section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">CAF model settings on participant VM</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the current Cyber-agent-flow configuration and edit the model settings. Create experiment saves them to the VM and the experiment for future reruns. Without pulling, the current experiment defaults are used.</p><div id="model-config-cards" class="sample-cards"></div></section>
 </section><section role="tabpanel" tabindex="0" id="experiment-panel-evaluation" aria-labelledby="experiment-tab-evaluation" hidden><section class="experiment-settings" aria-labelledby="eval-settings-title">
-<h3 id="eval-settings-title">Evaluation configuration</h3>
+<section class="experiment-settings" aria-labelledby="evaluation-tasks-title">
+<h3 id="evaluation-tasks-title">Tasks and prompts</h3>
+<fieldset id="sample-task-info" disabled>
+<label for="sample-task-id">Task ID</label><input id="sample-task-id">
+<label for="sample-prompt">Task prompt template</label><textarea id="sample-prompt" rows="5"></textarea>
+<label for="sample-success">Success criteria</label><textarea id="sample-success" rows="3"></textarea>
+<label for="sample-checks">Required readiness checks</label><input id="sample-checks" value="containers, services, ports, injects">
+<p class="small">Fixed by this sample. The deployed address and fresh expected token or flags are resolved at run time; exact values are captured in Results.</p>
+</fieldset>
+<div id="custom-task-info" hidden>
+<label for="task-source">Task source</label><select id="task-source"><option value="scenario">Use tasks from the selected scenario</option><option value="custom">Define tasks for this experiment</option></select>
+<div class="result-actions"><button id="load-scenario-tasks" type="button">Load scenario tasks</button><button id="edit-scenario-tasks" type="button" hidden>Edit loaded tasks</button></div>
+<p id="task-source-note" class="small" role="status">Select a scenario, then load its tasks to review them. Without overrides, ScenarioForge uses its saved task definitions or its default flag-collection task.</p>
+<div id="task-edit-actions" hidden><label for="task-import">Import task definitions (JSON array, up to 64 KiB)</label><input id="task-import" type="file" accept=".json,application/json"><button id="add-task" type="button">Add task</button><p class="small">These tasks replace the selected scenario’s tasks in this experiment’s saved XML. Prompts must use actual scenario targets. ScenarioForge validates node references and discovery facts when it exports the deployed scenario.</p></div>
+<div id="task-editor"></div>
+<p id="task-editor-error" class="error" role="status"></p>
+</div>
+</section>
+<h3 id="eval-settings-title">Trial settings</h3>
+<label><input id="provide-progressive-hints" type="checkbox"> Provide progressive hints</label>
+<p class="small">Optional, off by default. After two turns without observed progress, or an incorrect final answer, release up to three hints within the existing trial budget. Both conditions use the same policy. Samples include hints; other scenarios need progressive_hints or discoverable_facts in their task definitions. Released hints, facts and assisted success are recorded in Results.</p>
 <p id="eval-settings-note" class="small"></p>
 <fieldset id="evaluation-settings" class="evaluation-grid">
 <label>Repetitions per task and condition<input form="experiment-form" id="eval-repetitions" type="number" min="1" max="100" required></label>

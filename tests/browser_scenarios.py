@@ -1,6 +1,8 @@
 """Saved ScenarioForge selector browser check; guest access is simulated."""
 from pathlib import Path
 import shutil
+import json
+import hashlib
 import sys
 import tempfile
 import time
@@ -15,6 +17,7 @@ from test_user_access import Probe, vm
 
 
 def main():
+    task_definitions=[dict(id='read-token',family='http',prompt='Read the token from http://10.77.0.10/.',verifier=dict(type='json_equals',expected={'token':'expected-token'}),required_checks=['containers','ports'])]
     with tempfile.TemporaryDirectory() as temp, pytest.MonkeyPatch.context() as patch:
         root = Path(temp)
         shutil.copytree(Path(__file__).resolve().parents[1] / 'examples', root / 'examples')
@@ -25,6 +28,9 @@ def main():
             def call(self, vmid, op, **data):
                 item = dict(id='a'*64, scenario='Demo saved scenario', path='/opt/scenarioforge/uploads/demo.xml',
                             sha256='b'*64, bytes=1024, resolved_chain=True, chain_length=3)
+                if op == 'tasks':
+                    content=json.dumps(task_definitions)
+                    return dict(chunk=content[data['offset']:data['offset']+4096],total=len(content),sha256=hashlib.sha256(content.encode()).hexdigest())
                 if op == 'list':
                     return dict(items=[item, dict(item, id='c'*64, scenario='Unresolved', resolved_chain=False)],
                                 roots=data['roots'], truncated=False)
@@ -67,6 +73,15 @@ def main():
                     expect(page.locator('#sample-scenario-xml')).to_have_attribute('href','/demo-smoke.xml')
                     expect(page.locator('#sample-scenario-bundle')).to_have_attribute('href','/demo-smoke.zip')
                     expect(page.locator('#sample-scenario-info')).to_be_visible()
+                    expect(page.locator('#experiment-panel-scenario #sample-prompt')).to_have_count(0)
+                    page.get_by_role('tab',name='Evaluation',exact=True).click()
+                    expect(page.locator('#sample-prompt')).to_be_visible()
+                    expect(page.locator('#sample-prompt')).to_be_disabled()
+                    expect(page.locator('#sample-task-id')).to_have_value('smoke')
+                    expect(page.locator('#provide-progressive-hints')).not_to_be_checked()
+                    expect(page.locator('#provide-progressive-hints')).to_be_enabled()
+                    page.locator('#provide-progressive-hints').check()
+                    page.get_by_role('tab',name='ScenarioForge',exact=True).click()
                     expect(page.locator('#sample-sf-use')).to_be_disabled()
                     expect(page.locator('#sample-sf-use')).to_have_value('Required · deploy, readiness check and evaluation export')
                     expect(page.locator('#sample-prompt')).to_have_value('Fetch http://<deployed-host>/ and read the service token from its response body. Return only JSON with service_token set to the exact observed token.')
@@ -123,6 +138,39 @@ def main():
                     page.get_by_role('tab',name='Evaluation',exact=True).click()
                     page.locator('#eval-repetitions').fill('2')
                     expect(page.locator('#create-experiment')).to_be_enabled()
+                    page.locator('#load-scenario-tasks').click()
+                    expect(page.locator('#task-source-note')).to_contain_text('Loaded 1 task')
+                    expect(page.locator('#task-0-prompt')).to_be_disabled()
+                    expect(page.locator('#task-0-prompt')).to_have_value(task_definitions[0]['prompt'])
+                    page.locator('#edit-scenario-tasks').click()
+                    expect(page.locator('#task-0-prompt')).to_be_enabled()
+                    page.locator('#task-0-prompt').fill('')
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.get_by_role('tab',name='Experiment',exact=True).click()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.get_by_role('tab',name='Evaluation',exact=True).click()
+                    page.locator('#task-0-prompt').fill('Edited task prompt')
+                    page.locator('#add-task').click()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.locator('[data-task-row="1"]').get_by_role('button',name='Remove task',exact=True).click()
+                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    imported=[dict(task_definitions[0],prompt='Review the HTTP service. '+('Detailed instructions. '*500)),dict(id='read-title',family='http',prompt='Read the page title.',verifier=dict(type='contains_all',expected=['Demo']),required_checks=['services'],split='test')]
+                    page.locator('#task-import').set_input_files({'name':'tasks.json','mimeType':'application/json','buffer':json.dumps(imported).encode()})
+                    expect(page.locator('[data-task-row]')).to_have_count(2)
+                    expect(page.locator('#task-1-id')).to_have_value('read-title')
+                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    page.locator('#task-1-id').fill('read-token')
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.locator('#task-1-id').fill('read-title')
+                    page.locator('#task-1-criteria').fill('{broken')
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.locator('#task-1-criteria').fill(json.dumps(imported[1]['verifier']))
+                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    page.set_viewport_size({'width':390,'height':844})
+                    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                    page.screenshot(path='/tmp/caf-evaluation-tasks-mobile.png')
+                    page.set_viewport_size({'width':1280,'height':1000})
+                    page.screenshot(path='/tmp/caf-evaluation-tasks.png')
                     page.screenshot(path='/tmp/caf-scenario-selector.png')
                     page.get_by_role('button', name='Create experiment', exact=True).click()
                     expect(page.locator('#experiment-dialog')).to_be_hidden(timeout=30000)
@@ -130,10 +178,12 @@ def main():
                     expect(row).to_contain_text('ready')
                     expect(row.get_by_role('button',name='Deploy and run',exact=True)).to_be_enabled()
                     journals=list((root/'runs').rglob('workflow.json'))
-                    import json
                     saved=json.loads(journals[0].read_text())
+                    assert saved['runtime']['execution']['provide_progressive_hints'] is True
                     assert saved['runtime']['execution']['max_turns'] == 9
                     assert saved['runtime']['repetitions'] == 2
+                    assert saved['scenario_experiment']['evaluation_tasks'] == imported
+                    assert json.loads((journals[0].parent/'inputs/evaluation-tasks.json').read_text()) == imported
                     assert not errors, errors
                     browser.close()
             finally:

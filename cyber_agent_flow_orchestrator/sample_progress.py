@@ -52,6 +52,13 @@ def build(root, journal, report, state, coordinator):
                                             for key in ('ActiveState', 'SubState', 'Result', 'ExecMainPID')}
             for event in record.get('phase_events', [])[-20:]:
                 events.append(dict(at=event['at'], kind='trial', message=f"{row['trial_id']} · {PHASES.get(event['phase'], event['phase'])}"))
+        assistance = reporting.within(root / 'evaluation', root / 'evaluation' / row['attempt_path'] / 'assistance.json')
+        if assistance.is_file():
+            audit = ev.read_json(assistance)
+            trial['hints_released'] = len(audit.get('events', []))
+            trial['facts_revealed'] = len(audit.get('revealed_fact_ids', []))
+            for event in audit.get('events', []):
+                events.append(dict(at=event['at'], kind='hint', message=f"{row['trial_id']} · hint after turn {event['turn']} ({event['reason']}): {clean(event['text'])}"))
         if row['status'] == 'running':
             if active: current = trial
             else: trial.update(status='unconfirmed', elapsed_seconds=None)

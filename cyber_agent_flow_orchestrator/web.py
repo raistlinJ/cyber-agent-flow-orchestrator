@@ -61,7 +61,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
     from .auth import LoginLimited, token_from_cookie, session_cookie
     assets = Path(__file__).with_name('static')
     authority = urlsplit(origin).netloc
-    public_assets = {'/http.js': ('http.js', 'text/javascript'), '/loading.js': ('loading.js', 'text/javascript'), '/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
+    public_assets = {'/task_editor.js': ('task_editor.js', 'text/javascript'), '/http.js': ('http.js', 'text/javascript'), '/loading.js': ('loading.js', 'text/javascript'), '/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
                      '/style.css': ('style.css', 'text/css')}
     protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
                         '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),
@@ -242,7 +242,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     self.respond(400, {'error': 'Invalid request framing'})
                     return
                 size = int(self.headers['Content-Length'])
-                if not 0 <= size <= 8192:
+                if not 0 <= size <= (128 * 1024 if urlsplit(self.path).path == '/api/experiments/create' else 8192):
                     self.respond(413, {'error': 'Request too large'})
                     return
                 data = json.loads(self.rfile.read(size))
@@ -305,6 +305,10 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     if set(data) != {'query'} or not isinstance(data['query'], str):
                         raise SampleRequestError('Supply scenario search text only')
                     self.respond(200, dashboard.scenarios.catalogue(auth.access(token, revalidate=False), data['query']))
+                elif path == '/api/scenarios/tasks' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                    if set(data) != {'selection_id'}:
+                        raise SampleRequestError('Supply a scenario selection ID only')
+                    self.respond(200, dashboard.scenarios.tasks(auth.access(token, revalidate=False), data['selection_id']))
                 elif path in ('/api/experiments/create', '/api/experiments/run', '/api/experiments/stop') and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
                     action = path.rsplit('/', 1)[1]
                     expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
@@ -312,7 +316,13 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         expected = {'selection_id', 'request_id', 'allowed_targets', 'disallowed_targets'}
                         if 'evaluation' in data:
                             expected.add('evaluation')
-                    if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k != 'evaluation'):
+                        if 'tasks' in data:
+                            expected.add('tasks')
+                    if action == 'create' and 'provide_progressive_hints' in data:
+                        expected.add('provide_progressive_hints')
+                        if type(data['provide_progressive_hints']) is not bool:
+                            raise SampleRequestError('provide_progressive_hints must be a boolean')
+                    if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k not in ('evaluation', 'tasks', 'provide_progressive_hints')):
                         raise SampleRequestError('Invalid experiment request fields')
                     self.respond(202, dashboard.experiment(auth.access(token, revalidate=False), action, data))
                 elif path == '/api/model-config' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':

@@ -124,11 +124,50 @@ def upload(data):
             'path': str(path)}
 
 
+def selected_source(data):
+    source = Path(data['path'])
+    roots = [Path(root).resolve() for root in data['roots']]
+    if source.is_symlink() or not any(source.resolve() == root or source.resolve().is_relative_to(root) for root in roots):
+        raise ValueError('Scenario is outside configured XML roots')
+    selected = next((item for item in inspect(source) if item['id'] == data['selection_id']), None)
+    if selected is None:
+        raise ValueError('Scenario XML changed; refresh the scenario list')
+    content = source.read_bytes()
+    if hashlib.sha256(content).hexdigest() != selected['sha256']:
+        raise ValueError('Scenario XML changed during capture; refresh the scenario list')
+    return selected, content
+
+
+def scenario_node(content, name):
+    root = ET.fromstring(content)
+    candidates = [root] if root.tag == 'Scenario' else root.findall('Scenario')
+    return root, next(s for s in candidates if s.get('name', '').strip() == name)
+
+
+def task_details(data):
+    selected, content = selected_source(data)
+    _, scenario = scenario_node(content, selected['scenario'])
+    tasks = None
+    for node in scenario.iter('FlowState'):
+        state = json.loads(node.text or '{}')
+        if isinstance(state, dict) and 'evaluation_tasks' in state:
+            tasks = state['evaluation_tasks']
+    encoded = json.dumps(tasks, allow_nan=False)
+    if len(encoded.encode()) > 64 * 1024:
+        raise ValueError('Scenario tasks exceed the 64 KiB editor limit; use the scenario tasks without editing')
+    offset = data.get('offset', 0)
+    if type(offset) is not int or not 0 <= offset <= len(encoded):
+        raise ValueError('Invalid task offset')
+    return dict(chunk=encoded[offset:offset+4096], total=len(encoded),
+                sha256=hashlib.sha256(encoded.encode()).hexdigest())
+
 def dispatch(data):
     if data['op'].startswith('upload-'):
         return upload(data)
     if data['op'] == 'list':
         return catalogue(data)
+    if data['op'] == 'tasks':
+        return task_details(data)
     token = data.get('token', '')
     if not re.fullmatch('[0-9a-f]{32}', token):
         raise ValueError('Invalid snapshot ID')
@@ -146,18 +185,24 @@ def dispatch(data):
         return {'path': str(destination), 'sha256': data['sha256']}
     if data['op'] != 'snapshot':
         raise ValueError('Unknown scenario operation')
-    source = Path(data['path'])
-    roots = [Path(root).resolve() for root in data['roots']]
-    if source.is_symlink() or not any(source.resolve() == root or source.resolve().is_relative_to(root) for root in roots):
-        raise ValueError('Scenario is outside configured XML roots')
-    selected = next((item for item in inspect(source) if item['id'] == data['selection_id']), None)
-    if selected is None:
-        raise ValueError('Scenario XML changed; refresh the scenario list')
+    selected, content = selected_source(data)
     if not selected['resolved_chain'] and not data.get('allow_unresolved', False):
         raise ValueError('Resolve and save the Flow chain in ScenarioForge before evaluation')
-    content = source.read_bytes()
-    if hashlib.sha256(content).hexdigest() != selected['sha256']:
-        raise ValueError('Scenario XML changed during capture; refresh the scenario list')
+    if data.get('tasks') is not None:
+        tasks = data['tasks']
+        if not isinstance(tasks, list) or not 1 <= len(tasks) <= 32 or len(json.dumps(tasks, allow_nan=False).encode()) > 64 * 1024:
+            raise ValueError('Invalid task definitions')
+        root, scenario = scenario_node(content, selected['scenario'])
+        nodes = list(scenario.iter('FlowState'))
+        if not nodes:
+            raise ValueError('Scenario has no saved Flow state')
+        for node in nodes:
+            state = json.loads(node.text or '{}')
+            state['evaluation_tasks'] = tasks
+            node.text = json.dumps(state, allow_nan=False)
+        content = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+        selected.update(source_sha256=selected['sha256'], sha256=hashlib.sha256(content).hexdigest(),
+                        bytes=len(content), task_source='experiment')
     import pwd
     user = data.get('user', '')
     if not re.fullmatch(r'[a-z_][a-z0-9_-]*[$]?', user):

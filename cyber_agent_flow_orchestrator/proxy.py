@@ -28,7 +28,7 @@ async def api_errors(request, handler):
 def upstream_timeout(path):
     # Sample creation imports a bundle and snapshots XML through multiple QGA calls.
     slow = path.endswith('/artifact') or path in (
-        '/api/scenarios/upload', '/api/scenarios/list', '/api/experiments/create',
+        '/api/scenarios/upload', '/api/scenarios/list', '/api/scenarios/tasks', '/api/experiments/create',
         '/api/samples/run', '/api/model-config')
     return ClientTimeout(total=None, sock_connect=10, sock_read=300) if slow else ClientTimeout(total=60)
 
@@ -62,7 +62,7 @@ def application(upstream_port, proxy_key, config):
                         'X-Forwarded-Proto': 'https', 'X-Forwarded-For': request.remote or 'unknown'})
         async with slots:
             try:
-                limit = 32 * 1024 * 1024 if request.path == '/api/scenarios/upload' else 8192
+                limit = 32 * 1024 * 1024 if request.path == '/api/scenarios/upload' else 128 * 1024 if request.path == '/api/experiments/create' else 8192
                 if request.content_length is not None and request.content_length > limit:
                     raise web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=request.content_length)
                 body = await asyncio.wait_for(request.read(), timeout=60 if request.path == '/api/scenarios/upload' else 10)

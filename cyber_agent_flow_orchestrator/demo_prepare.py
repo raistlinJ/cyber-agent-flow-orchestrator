@@ -27,6 +27,10 @@ def prepare(options, backend):
     recipe.set('v_path', str(assets / 'docker-compose.yml'))
     sources[0]['source_path'] = str(assets)
     sources[0]['restored_path'] = str(assets)
+    # These demos deploy a prepared Compose website and explicit evaluation tasks.
+    # They have no Flow generator assignments to resolve. Keep the chain for
+    # evaluation export, but do not declare an unresolved generator execution.
+    flow['flow_enabled'] = False
     flow['artifacts_dir'] = str(assets)
     sources[0]['target_path'] = str(assets)
     flow['reproduction_artifact_sources'] = sources
@@ -71,11 +75,20 @@ def prepare(options, backend):
                   'Keep requests on this host and port. Return only JSON with a flags array in discovery order '
                   '(first.html, then deeper/second.html).')
         expected = {'flags': flags}
+    hints = ([
+        'Use the curl tool to fetch the HTTP address in the task; inspect the response body.',
+        'The service token is plain text in the response body, not in a header. Remove the trailing newline.',
+        'Return a JSON object with the single key service_token and the exact token you observed; omit Markdown.'
+    ] if options['sample_id'] == 'smoke' else [
+        'Fetch the starting page and inspect its href links. Follow them on the same host and port.',
+        'Follow /first.html, then its Continue link to /deeper/second.html. Read the response bodies.',
+        'Collect the FLAG{...} text from each page. Return a JSON flags array in first-page, then second-page order.'
+    ])
     node = scene.find('.//FlowState')
     flow = json.loads(node.text)
-    flow.update(chain=[dict(id=str(host['node_id']), name=host['name'], ipv4=address, is_vuln=True)],
+    flow.update(flow_enabled=False, chain=[dict(id=str(host['node_id']), name=host['name'], ipv4=address, is_vuln=True)],
                 flag_assignments=[], evaluation_tasks=[dict(id=options['sample_id'], family='http-discovery',
-                    prompt=prompt, verifier=dict(type='json_equals', expected=expected),
+                    prompt=prompt, progressive_hints=hints, verifier=dict(type='json_equals', expected=expected),
                     required_checks=['containers', 'services', 'ports', 'injects'])])
     node.text = json.dumps(flow)
     tree.write(destination, encoding='utf-8', xml_declaration=True)

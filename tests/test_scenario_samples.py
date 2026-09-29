@@ -1,6 +1,8 @@
 """Full-path sample integration: only guest transport and model execution are simulated."""
 import hashlib
 import json
+import os
+import subprocess
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -87,6 +89,7 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id):
             return tree
         def _planner_persist_flow_plan(self,**kwargs):
             tree=ET.parse(kwargs['xml_path'])
+            assert json.loads(tree.find('.//FlowState').text)['flow_enabled'] is False
             preview=ET.SubElement(tree.getroot().find('.//ScenarioEditor'),'PlanPreview')
             preview.text=json.dumps({'full_preview':{'hosts':[dict(node_id=7,name='web',ip4='10.77.0.7/24',
                 vulnerabilities=['caf-demo-'+sample_id])]}})
@@ -97,11 +100,41 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id):
     demo_prepare.prepare(options,Backend())
     flow=json.loads(ET.parse(output).find('.//FlowState').text)
     task=flow['evaluation_tasks'][0]
+    assert flow['flow_enabled'] is False
+    assert flow['flag_assignments'] == []
     assert flow['chain'][0]['ipv4']=='10.77.0.7'
     assert 'http://10.77.0.7/' in task['prompt']
+    assert len(task['progressive_hints']) == 3
+    # Optional cross-repository contract check with ScenarioForge's own CLI.
+    sf_python = os.environ.get('SCENARIOFORGE_TEST_PYTHON')
+    if sf_python:
+        script = """
+import json, sys
+from pathlib import Path
+from scenarioforge.cli import _flow_state_from_xml, _validate_flow_state_for_cli_execute
+from scenarioforge.evaluation.export import export_package
+xml = Path(sys.argv[1])
+state = _flow_state_from_xml(str(xml), 'Fixed demo')
+assert state['chain'] and state['evaluation_tasks']
+assert _validate_flow_state_for_cli_execute(state, require_local_runtime_paths=True) == (True, None, [])
+# Prove this fix is specific to the declared non-generator demo contract.
+unresolved = dict(state); unresolved.pop('flow_enabled')
+assert _validate_flow_state_for_cli_execute(unresolved)[0] is False
+out = xml.parent / 'contract-export'
+export_package(xml_path=xml, graph={'schema_version': 2, 'scenario': 'Fixed demo',
+    'nodes': state['chain'], 'edges': []}, output=out, suite_id='demo-contract',
+    definitions=state['evaluation_tasks'])
+public = json.loads((out / 'participant/tasks.json').read_text())
+private = json.loads((out / 'evaluator/verifiers.json').read_text())
+assert public[0]['prompt'] == state['evaluation_tasks'][0]['prompt']
+assert private[public[0]['id']] == state['evaluation_tasks'][0]['verifier']
+"""
+        subprocess.run([sf_python, '-c', script, str(output)], check=True,
+                       cwd=Path(__file__).resolve().parents[2] / 'scenarioforge')
     expected=task['verifier']['expected']
     assert '10.77.0.7' not in json.dumps(expected)
     assert all(value not in task['prompt'] for value in ([expected['service_token']] if sample_id=='smoke' else expected['flags']))
     demo_prepare.prepare(options,Backend())
     updated=json.loads(ET.parse(output).find('.//FlowState').text)['evaluation_tasks'][0]['verifier']['expected']
     assert expected!=updated
+    assert all(value not in json.dumps(task['progressive_hints']) for value in ([expected['service_token']] if sample_id=='smoke' else expected['flags']))

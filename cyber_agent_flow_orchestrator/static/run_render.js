@@ -73,6 +73,7 @@ function renderProgress(run){
   if(trial){
    card.append(el('h4','Current trial on participant VM '+(run.saved_settings?.participant_vmid??'—')));
    card.append(el('p','Task: '+trial.task_id,'small'));
+   if(trial.hints_released!=null)card.append(el('p',`${trial.hints_released} hints released · ${trial.facts_revealed??0} required facts revealed`,'small'));
    card.append(el('p',`${trial.trial_id} · ${trial.condition_id} · repetition ${trial.repetition} · attempt ${trial.attempt}`));
    const timing=el('p',null,'small');timing.append(document.createTextNode('Trial elapsed (includes setup and collection): '),timer(trial.elapsed_seconds,p.observed_at,p.active,true));card.append(timing);
    if(transport?.files_total)card.append(el('p',`Inputs transferred: ${transport.files_uploaded} / ${transport.files_total} files · ${(transport.bytes_uploaded??0).toLocaleString()} / ${(transport.bytes_total??0).toLocaleString()} bytes acknowledged`,'small'));
@@ -103,6 +104,6 @@ function renderResultSummary(data){
  }
 
  const groups=Object.entries(data.evaluation.conditions||{});
- const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
- for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);
+ const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Unassisted successes','Assisted successes','Hints released','Facts revealed','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
+ for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',summary.unassisted_successes??'—'),el('td',summary.assisted_successes??'—'),el('td',summary.hints_released??0),el('td',summary.facts_revealed??0),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);
 }

@@ -161,7 +161,7 @@ def configuration(root):
         try:
             task_snapshot = saved_json(root, 'suite/participant/tasks.json')
         except FileNotFoundError:
-            pass
+            task_snapshot = journal.get('scenario_experiment', {}).get('evaluation_tasks', [])
     tasks = [{k: v for k, v in task.items() if k != 'verifier'} for task in task_snapshot]
     system_prompts = []
     for item in files(root):

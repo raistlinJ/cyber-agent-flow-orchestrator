@@ -243,7 +243,7 @@ function runActive(run){return run.coordinator_active||run.sample_progress?.acti
 function renderSamples(data){
  const samples=data.samples,vm=samples?.participant_vmid;
  $('new-experiment').disabled=!samples?.items?.length&&!data.scenarios?.enabled;
- if(scenarioChoiceVM!==null&&scenarioChoiceVM!==data.roles?.scenarioforge){scenarioChoices=[];scenarioChoiceVM=null;$('scenario-selection').replaceChildren(new Option('Reload scenarios for the selected VM',''));}
+ if(scenarioChoiceVM!==null&&scenarioChoiceVM!==data.roles?.scenarioforge){scenarioChoices=[];scenarioChoiceVM=null;taskScenarioChanged();$('scenario-selection').replaceChildren(new Option('Reload scenarios for the selected VM',''));}
  renderCAFSettings(data);
  $('experiment-model-context').textContent=vm?`Current experiment model: ${samples.provider} / ${samples.model} · Participant VM ${vm}. Pull from VM below to read its saved application settings.`:'Select and save a participant VM on Lab setup to enable Pull from VM and run experiments.';
  $('samples-context').textContent=vm?`New experiment defaults: Participant VM ${vm} · ${samples.provider} / ${samples.model}. Saved experiments retain their own settings.`:'Save a participant VM on Lab setup before running an experiment.';
@@ -277,6 +277,7 @@ function experimentMissingFields(){
   if(scenarioChoiceVM!==snapshot.roles.scenarioforge||!choice?.resolved_chain)return 'Choose a resolved scenario on the ScenarioForge tab.';
   if(!$('scenario-allowed').value.trim())return 'Enter allowed target IPs or CIDRs on the ScenarioForge tab.';
  }
+ const taskError=taskValidationMessage();if(taskError)return 'Evaluation: '+taskError;
  const invalid=[...$('experiment-form').elements].find(input=>input.willValidate&&(!input.validity.valid||(input.required&&typeof input.value==='string'&&!input.value.trim())));
  if(invalid){const panel=invalid.closest('[role="tabpanel"]');return 'Complete the required fields on the '+(panel?$(panel.getAttribute('aria-labelledby')).textContent:'Experiment')+' tab.';}
  if(modelDrafts.participant){
@@ -338,6 +339,7 @@ function renderEvaluationSettings(scenario,sample){
  const values=scenario?(customEvaluation||defaults):{...defaults,repetitions:sample?.profile?.repetitions||1,max_turns:sample?.max_turns||3,wall_seconds:sample?.wall_seconds||120,tool_timeout:sample?.profile?.tool_timeout||30};
  for(const key of evaluationKeys)$('eval-'+key).value=values[key];
  $('evaluation-settings').disabled=!scenario;
+ configureEvaluationTasks(scenario,sample);
  $('sample-scenario-info').hidden=scenario;
  if(!scenario){
   $('sample-scenario-xml').href='/demo-'+sample.id+'.xml';
@@ -349,7 +351,7 @@ function renderEvaluationSettings(scenario,sample){
  }
  $('eval-settings-note').textContent=scenario?'These settings are saved with this experiment. Reruns reuse them.':'Fixed by the sample to keep its prompt, tool comparison, and scoring consistent. CAF model settings remain configurable.';
  $('eval-tools').textContent='Tools / conditions: '+(scenario?'Baseline — nmap, curl, python3. Custom tool conditions are not editable here yet.':sample?.profile?.tools||'Sample-defined');
- $('eval-task-source').textContent=scenario?'Tasks, prompts, and verifiers are exported by ScenarioForge after deployment and shown in Results. This form does not override them.':'The deployed host address and fresh token/flags are resolved at run time. Exact prompts and XML are captured in Results.';
+ $('eval-task-source').textContent=scenario?'ScenarioForge exports the selected task definitions after deployment. Prompts and private verifiers are captured in Results.':'The deployed host address and fresh token/flags are resolved at run time. Exact prompts and XML are captured in Results.';
  renderCAFSettings(snapshot);
 }
 $('evaluation-settings').addEventListener('input',()=>{if(!$('evaluation-settings').disabled)customEvaluation=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));});
@@ -363,13 +365,13 @@ function describeSample(){
  $('experiment-budget').textContent=scenario?'Baseline tools · configure repetitions and trial limits below':sample?sample.trials+' trials · up to '+sample.max_turns+' turns and '+sample.wall_seconds+'s per trial':'';
 }
 
-$('new-experiment').addEventListener('click',()=>{if(isBusy())return;customEvaluation=null;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();syncCreateExperiment();});
+$('new-experiment').addEventListener('click',()=>{if(isBusy())return;customEvaluation=null;$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();syncCreateExperiment();});
 let scenarioChoices=[],scenarioChoiceVM=null;
 function describeScenarioSelection(){
  const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
  $('scenario-selection-info').textContent=choice?choice.path+' · '+choice.scenario+' · '+choice.chain_length+' Flow steps':'Select a saved scenario with a resolved Flow chain.';
 }
-$('scenario-selection').addEventListener('change',describeScenarioSelection);
+$('scenario-selection').addEventListener('change',()=>{describeScenarioSelection();taskScenarioChanged();});
 $('scenario-query').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();$('load-scenarios').click();}});
 $('load-scenarios').addEventListener('click',async()=>{
  if(isBusy())return;
@@ -384,7 +386,7 @@ $('load-scenarios').addEventListener('click',async()=>{
 });
 
 function showScenarioChoices(result){
- scenarioChoices=result.items;scenarioChoiceVM=result.vmid;
+ scenarioChoices=result.items;scenarioChoiceVM=result.vmid;taskScenarioChanged();
  const select=$('scenario-selection');select.replaceChildren(new Option('Choose a saved scenario',''));
  for(const item of scenarioChoices){const option=new Option(item.scenario+' — '+item.path.split('/').pop()+(item.resolved_chain?'':' (resolve Flow chain first)'),item.id);option.disabled=!item.resolved_chain;select.add(option);}
 }
@@ -423,7 +425,7 @@ $('experiment-form').addEventListener('submit',async event=>{
  $('experiment-error').textContent='';
  startCreationProgress(saveModel);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({request_id:crypto.randomUUID().replaceAll('-',''),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({request_id:crypto.randomUUID().replaceAll('-',''),provide_progressive_hints:$('provide-progressive-hints').checked,...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed');$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });
@@ -514,7 +516,7 @@ function schedulePoll(){
 }
 $('refresh-period').addEventListener('change',()=>{try{localStorage.setItem('caf-refresh-minutes',$('refresh-period').value);}catch{}schedulePoll();tick();syncBusy();});
 setInterval(()=>{tick();syncBusy();},1000);
-syncBusy();refresh(true);
+initTaskEditor();syncBusy();refresh(true);
 
 window.addEventListener('storage',event=>{if(event.key==='caf-refresh-minutes'&&refreshPeriods.includes(event.newValue)){$('refresh-period').value=event.newValue;schedulePoll();tick();syncBusy();}});
 

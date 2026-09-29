@@ -84,6 +84,49 @@ class ScenarioExperiments:
         private_file(path, json.dumps(dict(result, vmid=vmid, repo=repo, roots=roots)).encode(), replace=path.exists())
         return dict(result, vmid=vmid)
 
+
+    def tasks(self, access, selection_id):
+        import hashlib
+        if not isinstance(selection_id, str) or not re.fullmatch('[0-9a-f]{64}', selection_id):
+            raise SampleRequestError('Choose a listed scenario first')
+        workspace = Workspace(self.root, access.username)
+        vmid = workspace.roles()['scenarioforge']
+        access.require_vm(vmid)
+        try:
+            catalogue = ev.read_json(workspace.path / 'scenario-catalogue.json')
+        except FileNotFoundError:
+            raise SampleRequestError('Load scenarios from the VM first') from None
+        if catalogue['vmid'] != vmid:
+            raise SampleRequestError('ScenarioForge VM changed; reload its scenarios')
+        item = next((row for row in catalogue['items'] if row['id'] == selection_id), None)
+        if not item:
+            raise SampleRequestError('Reload the scenario list')
+        content, identity = '', None
+        with authorized_operations(access.qm):
+            remote = guest(self.runtime['backend'])
+            for _ in range(17):
+                result = remote.call(vmid, 'tasks', roots=catalogue['roots'], path=item['path'],
+                                     selection_id=selection_id, offset=len(content), timeout=40)
+                if not isinstance(result.get('chunk'), str) or not 0 <= result.get('total', -1) <= 65536:
+                    raise SampleRequestError('Invalid scenario task response')
+                if identity is not None and identity != result['sha256']:
+                    raise SampleRequestError('Scenario tasks changed while loading')
+                identity = result['sha256']
+                content += result['chunk']
+                if len(content) == result['total']:
+                    break
+            else:
+                raise SampleRequestError('Scenario task response is incomplete')
+        if hashlib.sha256(content.encode()).hexdigest() != identity:
+            raise SampleRequestError('Scenario task checksum mismatch')
+        access.current()
+        tasks = json.loads(content)
+        if tasks is not None:
+            from .evaluation_tasks import validate_tasks
+            tasks = validate_tasks(tasks)
+        return dict(selection_id=selection_id, tasks=tasks,
+                    source='scenario' if tasks is not None else 'scenario-default')
+
     def upload(self, access, content):
         import hashlib
         import uuid
@@ -123,11 +166,17 @@ class ScenarioExperiments:
             private_file(path, json.dumps(dict(result, vmid=vmid, repo=repo, roots=roots)).encode(), replace=path.exists())
         return dict(result, vmid=vmid, roots=roots, truncated=False)
 
-    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, _sample_id=None):
+    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False):
         if not re.fullmatch('[0-9a-f]{32}', request_id) or not re.fullmatch('[0-9a-f]{64}', selection_id):
             raise SampleRequestError('Choose a listed scenario and supply a valid request ID')
+        if type(provide_progressive_hints) is not bool:
+            raise SampleRequestError('provide_progressive_hints must be a boolean')
         policy = dict(allow=networks(allowed_targets, True), disallow=networks(disallowed_targets))
         overrides = evaluation_settings(evaluation) if evaluation is not None else None
+        from .evaluation_tasks import validate_tasks
+        definitions = validate_tasks(tasks) if tasks is not None else None
+        if _sample_id is not None and definitions is not None:
+            raise SampleRequestError('Sample tasks are fixed')
         access.current()
         workspace = Workspace(self.root, access.username)
         run_id = 'scenario-' + request_id
@@ -156,12 +205,15 @@ class ScenarioExperiments:
                 captured = guest(self.runtime['backend']).call(roles['scenarioforge'], 'snapshot',
                     roots=catalogue['roots'], repo=catalogue['repo'], path=item['path'],
                     selection_id=selection_id, token=request_id, user=sf.get('user', 'scenarioforge'),
-                    allow_unresolved=_sample_id is not None, timeout=40)
+                    allow_unresolved=_sample_id is not None, **({'tasks': definitions} if definitions is not None else {}), timeout=40)
             captured.update(snapshot_token=request_id, repo=catalogue['repo'])
+            if definitions is not None:
+                captured.update(evaluation_tasks=definitions, task_source='experiment')
             if item.get('upload'):
                 captured['upload'] = item['upload']
             runtime = deepcopy(self.runtime)
             runtime['execution']['network_policy'] = policy
+            runtime['execution']['provide_progressive_hints'] = provide_progressive_hints
             runtime['backend']['before_trial'] = []
             runtime['repetitions'] = 1
             if overrides:
@@ -193,11 +245,15 @@ class ScenarioExperiments:
             private_directory(output / 'inputs')
             private_file(output / 'inputs/source-selection.json', json.dumps(captured).encode())
             self.capture_upload(workspace, captured, output)
+            if definitions is not None:
+                private_file(output / 'inputs/evaluation-tasks.json', json.dumps(definitions, indent=2).encode())
             ev.write_json(output / 'workflow.json', self.record(cfg, runtime, identity, captured, request_id))
         return dict(run_id=run_id, status='ready')
 
-    def create_sample(self, access, sample_id, request_id):
+    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False):
         from .samples import CATALOG
+        if type(provide_progressive_hints) is not bool:
+            raise SampleRequestError('provide_progressive_hints must be a boolean')
         if sample_id not in self.samples.enabled or not re.fullmatch('[0-9a-f]{32}', request_id):
             raise SampleRequestError('Choose an enabled sample and valid request ID')
         workspace = Workspace(self.root, access.username)
@@ -217,7 +273,7 @@ class ScenarioExperiments:
         item = imported['items'][0]
         return self.create(access, item['id'], request_id,
             ','.join(self.runtime['execution']['network_policy']['allow']),
-            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id)
+            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints)
 
     def configure_sample(self, sample_id, cfg, runtime, captured, roles, token):
         from .samples import CATALOG
@@ -302,6 +358,8 @@ class ScenarioExperiments:
                 private_directory(output / 'inputs')
                 private_file(output / 'inputs/source-selection.json', json.dumps(record['scenario_experiment']).encode())
                 self.capture_upload(workspace, record['scenario_experiment'], output)
+                if record['scenario_experiment'].get('evaluation_tasks') is not None:
+                    private_file(output / 'inputs/evaluation-tasks.json', json.dumps(record['scenario_experiment']['evaluation_tasks'], indent=2).encode())
                 record = self.record(cfg, runtime, identity, record['scenario_experiment'], request_id)
             for vmid in workflow_vmids(record['workflow'], record['runtime']):
                 access.require_vm(vmid)
