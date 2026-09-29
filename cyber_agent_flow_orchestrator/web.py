@@ -61,7 +61,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
     from .auth import LoginLimited, token_from_cookie, session_cookie
     assets = Path(__file__).with_name('static')
     authority = urlsplit(origin).netloc
-    public_assets = {'/loading.js': ('loading.js', 'text/javascript'), '/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
+    public_assets = {'/http.js': ('http.js', 'text/javascript'), '/loading.js': ('loading.js', 'text/javascript'), '/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
                      '/style.css': ('style.css', 'text/css')}
     protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
                         '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),

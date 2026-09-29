@@ -13,7 +13,7 @@ async function refreshRun(){
  try{
   log('request',`GET ${endpoint}`);const response=await fetch(endpoint,{cache:'no-store'});log('response',`HTTP ${response.status}`);
   if(!response.ok){if([401,403,404].includes(response.status)){clearRun();retry=false;}throw Error(response.status===401?'Session expired. Sign in through the main dashboard, then Refresh.':response.status===403?'Access not granted.':response.status===404?'Run not found or results unavailable.':`Unable to load run: HTTP ${response.status}`);}
-  const data=await response.json();workflow=view==='results'?data.workflow:data;
+  const data=await dashboardJSON(response);workflow=view==='results'?data.workflow:data;
   if(view==='results'){renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);$('download-dataset').hidden=!data.evaluation;if(data.evaluation)$('download-dataset').href=`/api/runs/${encodeURIComponent(runId)}/dataset.csv`;}
   else renderProgress(workflow);
   $('run-error').hidden=true;const active=workflow.coordinator_active||workflow.sample_progress?.active||['queued','stopping'].includes(workflow.recorded_status);

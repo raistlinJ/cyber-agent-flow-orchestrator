@@ -62,11 +62,12 @@ function syncBusy(){
  $('loading-label').textContent=!busy&&loading?`Background refresh · ${label}`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
  loadingModal.set('dashboard',loading,label,percent);
  syncUpdateControls(busy?label:null);
+ syncCreateExperiment();
 }
 function sessionExpired(){redirecting=true;clearPrivateView();syncBusy();location.replace('/login');throw Error('Your session expired. Sign in again.');}
 async function loadSession(){
  if(sessionPromise)return sessionPromise;
- sessionPromise=(async()=>{const response=await apiFetch('/api/session',{cache:'no-store'});if(response.status===401)sessionExpired();if(!response.ok)throw Error('Unable to verify your session. Refresh to retry.');const session=await response.json();csrfToken=session.csrf;$('username-label').textContent=session.username;})();
+ sessionPromise=(async()=>{const response=await apiFetch('/api/session',{cache:'no-store'});if(response.status===401)sessionExpired();if(!response.ok)throw Error('Unable to verify your session. Refresh to retry.');const session=await dashboardJSON(response);csrfToken=session.csrf;$('username-label').textContent=session.username;})();
  try{await sessionPromise;}finally{sessionPromise=null;}
 }
 function duration(seconds) {if (seconds == null || !Number.isFinite(Number(seconds))) return 'Unknown'; seconds=Math.max(0, Math.floor(seconds)); const h=Math.floor(seconds/3600), m=Math.floor(seconds%3600/60), s=seconds%60; return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;}
@@ -113,7 +114,7 @@ async function refresh(force=false, background=false){
    const response=await apiFetch(force?'/api/status?refresh=1':'/api/status?refresh=0',{cache:'no-store'});
    if(response.status===401)sessionExpired();
    if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);
-   const data=await response.json();failed=false;render(data);return true;
+   const data=await dashboardJSON(response);failed=false;render(data);return true;
   }catch(error){failed=true;foregroundChecks=false;waitingForObservation=false;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();return false;}
   finally{fetching=false;blockingRefresh=false;initialized=true;syncBusy();}
  })();
@@ -157,7 +158,7 @@ $('role-form').addEventListener('submit',async event=>{
   if(!csrfToken)await loadSession();
   const roles=Object.fromEntries(['scenarioforge','participant','core'].map(role=>[role,$('role-'+role).value?Number($('role-'+role).value):null]));
   const response=await apiFetch('/api/roles',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(roles)});
-  const body=await response.json().catch(()=>({}));if(!response.ok)throw Error(response.status===504?'Saving VM roles timed out. Refresh to check whether they were saved.':body.error||'Unable to save roles');
+  const body=await dashboardJSON(response);if(!response.ok)throw Error(response.status===504?'Saving VM roles timed out. Refresh to check whether they were saved.':body.error||'Unable to save roles');
   rolesDirty=false;operation='Loading your updated VM selections…';syncBusy();$('roles-message').textContent='VM roles saved. Refreshing your dashboard…';await refresh(true);
  }catch(error){$('roles-message').textContent=error.message;}finally{rolesSaving=false;operation=null;syncBusy();schedulePoll();}
 });
@@ -221,12 +222,12 @@ async function modelConfigAction(role,action,creating=false){
   if(creating){
    creationProgress(0,'running','Saving file locally on orchestrator…');
    const staged=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action:'stage',token:body.token,settings:body.settings})});
-   const stagedData=await staged.json();if(!staged.ok)throw Error(stagedData.error||'Unable to save local model draft');
+   const stagedData=await dashboardJSON(staged);if(!staged.ok)throw Error(stagedData.error||'Unable to save local model draft');
    creationProgress(0,'complete','File saved locally on orchestrator · complete');
    creationProgress(1,'running','Pushing to VM · 0% acknowledged · awaiting guest save');
   }
   const response=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(body)});delete body.api_key;
-  const data=await response.json();if(!response.ok)throw Error(data.error||'Model configuration operation failed');
+  const data=await dashboardJSON(response);if(!response.ok)throw Error(data.error||'Model configuration operation failed');
   if(creating)creationProgress(1,'complete','VM push · 100% · guest save acknowledged');
   modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:action==='read'};
   for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=data.settings[key];$(`model-${role}-ssl`).checked=data.settings.ssl_verify;$(`model-${role}-key`).value='';$(`model-${role}-clear`).checked=false;
@@ -264,6 +265,36 @@ function renderExperiments(data){
  }
 }
 function openProgress(id){return openRunWindow('progress',id);}
+function experimentMissingFields(){
+ if(!snapshot||!$('experiment-sample').value)return 'Choose an experiment type.';
+ if(rolesDirty)return 'Save your VM role selections in Lab setup.';
+ const scenario=$('experiment-sample').value==='scenarioforge-xml';
+ const roles=scenario?['scenarioforge','participant']:['scenarioforge','participant','core'];
+ if(roles.some(role=>!snapshot.roles?.[role]))return 'Select and save '+(scenario?'ScenarioForge and participant':'ScenarioForge, participant and CoreVM')+' roles in Lab setup.';
+ if(scenario){
+  const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
+  if(scenarioChoiceVM!==snapshot.roles.scenarioforge||!choice?.resolved_chain)return 'Choose a resolved scenario on the ScenarioForge tab.';
+  if(!$('scenario-allowed').value.trim())return 'Enter allowed target IPs or CIDRs on the ScenarioForge tab.';
+ }
+ const invalid=[...$('experiment-form').elements].find(input=>input.willValidate&&(!input.validity.valid||(input.required&&typeof input.value==='string'&&!input.value.trim())));
+ if(invalid){const panel=invalid.closest('[role="tabpanel"]');return 'Complete the required fields on the '+(panel?$(panel.getAttribute('aria-labelledby')).textContent:'Experiment')+' tab.';}
+ if(modelDrafts.participant){
+  if(!snapshot.updates?.can_update)return 'Saving the model draft requires application maintenance access.';
+  const form=$('model-config-participant');
+  if(!form||[...form.elements].some(input=>input.willValidate&&(!input.validity.valid||(input.required&&!input.value.trim()))))return 'Complete the required model fields on the Cyber-agent-flow tab.';
+ }
+ return '';
+}
+function syncCreateExperiment(){
+ const busy=isBusy()||experimentCreating;
+ const reason=busy?'Wait for the current operation to finish.':experimentMissingFields();
+ $('create-experiment').disabled=Boolean(reason);
+ const hint=$('create-experiment-hint');if(hint.textContent!==reason)hint.textContent=reason;
+ hint.hidden=!reason;
+}
+$('experiment-dialog').addEventListener('input',syncCreateExperiment);
+$('experiment-dialog').addEventListener('change',syncCreateExperiment);
+
 function selectExperimentTab(name,{focus=false}={}){
  for(const button of document.querySelectorAll('[data-experiment-tab]')){
   const selected=button.dataset.experimentTab===name;
@@ -325,12 +356,13 @@ $('edit-caf-model').addEventListener('click',()=>{selectExperimentTab('caf');$('
 function describeSample(){
  const scenario=$('experiment-sample').value==='scenarioforge-xml',sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);
  $('scenario-options').hidden=!scenario;
+ $('scenario-allowed').required=scenario;
  renderEvaluationSettings(scenario,sample);
  $('experiment-description').textContent=scenario?'Deploy and evaluate an existing ScenarioForge scenario.':sample?.description||'';
  $('experiment-budget').textContent=scenario?'Baseline tools · configure repetitions and trial limits below':sample?sample.trials+' trials · up to '+sample.max_turns+' turns and '+sample.wall_seconds+'s per trial':'';
 }
 
-$('new-experiment').addEventListener('click',()=>{if(isBusy())return;customEvaluation=null;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();});
+$('new-experiment').addEventListener('click',()=>{if(isBusy())return;customEvaluation=null;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();syncCreateExperiment();});
 let scenarioChoices=[],scenarioChoiceVM=null;
 function describeScenarioSelection(){
  const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
@@ -343,7 +375,7 @@ $('load-scenarios').addEventListener('click',async()=>{
  operation='Loading saved scenarios from the ScenarioForge VM…';syncBusy();
  try{
   const response=await apiFetch('/api/scenarios/list',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({query:$('scenario-query').value})});
-  const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to load scenarios');
+  const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to load scenarios');
   showScenarioChoices(result);
   $('scenario-selection-info').textContent=result.items.length?(result.truncated?'Showing a limited list. Narrow the search to find another XML.':'Choose a scenario from VM '+result.vmid+'.'):'No matching saved XML found in '+result.roots.join(', ')+'.';
  }catch(error){$('scenario-selection-info').textContent=error.message;}
@@ -363,7 +395,7 @@ async function sendScenario(file){
  try{
   await finishDashboardRead();
   const response=await apiFetch('/api/scenarios/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':csrfToken},body:file});
-  const result=await response.json();if(!response.ok)throw Error(result.error||'Scenario import failed');
+  const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Scenario import failed');
   showScenarioChoices(result);
   const ready=result.items.filter(item=>item.resolved_chain);
   if(ready.length===1)$('scenario-selection').value=ready[0].id;
@@ -390,6 +422,7 @@ $('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating&&!op
 $('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating||operation)event.preventDefault();});
 $('experiment-form').addEventListener('submit',async event=>{
  event.preventDefault();if(isBusy()||experimentCreating)return;
+ const missing=experimentMissingFields();if(missing){syncCreateExperiment();return;}
  const scenario=$('experiment-sample').value==='scenarioforge-xml';
  if(!validateExperimentFields($('experiment-form')))return;
  if(scenario&&(!scenarioChoices.some(item=>item.id===$('scenario-selection').value)||rolesDirty)){selectExperimentTab('scenario');$('experiment-error').textContent=rolesDirty?'Save VM roles before creating an experiment.':'Load and choose a saved scenario first.';return;}
@@ -399,7 +432,7 @@ $('experiment-form').addEventListener('submit',async event=>{
  $('experiment-error').textContent='';
  startCreationProgress(saveModel);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({request_id:crypto.randomUUID().replaceAll('-',''),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await apiFetch('/api/experiments/create',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({request_id:crypto.randomUUID().replaceAll('-',''),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed');$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });
@@ -407,7 +440,7 @@ async function experimentAction(action,id){
  if(isBusy()||sampleStarting)return;
  if(action==='run'&&rolesDirty){$('sample-message').textContent='Save VM role changes on Lab setup before running.';return;}
  sampleStarting=true;operation=action==='stop'?'Requesting experiment stop…':'Starting experiment…';syncBusy();
- try{await finishDashboardRead();const response=await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})})});const result=await response.json();if(!response.ok)throw Error(result.error||'Experiment action failed');$('sample-message').textContent=action==='stop'?'Stop requested. The current stage or trial will finish and results will be collected.':'Experiment started.';const link=el('a',' Open progress ↗');link.href=runWindowURL('progress',result.run_id);link.addEventListener('click',event=>{event.preventDefault();openProgress(result.run_id);});$('sample-message').append(link);await refresh();}
+ try{await finishDashboardRead();const response=await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Experiment action failed');$('sample-message').textContent=action==='stop'?'Stop requested. The current stage or trial will finish and results will be collected.':'Experiment started.';const link=el('a',' Open progress ↗');link.href=runWindowURL('progress',result.run_id);link.addEventListener('click',event=>{event.preventDefault();openProgress(result.run_id);});$('sample-message').append(link);await refresh();}
  catch(error){$('sample-message').textContent=error.message;}
  finally{sampleStarting=false;operation=null;if(snapshot)renderExperiments(snapshot);syncBusy();schedulePoll();}
 }
@@ -472,7 +505,7 @@ async function maintain(role,action,ref,confirmation=null){
   await finishDashboardRead();
   if(!csrfToken)await loadSession();
   const response=await apiFetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action,ref,request_id:crypto.randomUUID().replaceAll('-',''),...(confirmation?{process_confirmation:confirmation.id}:{})})});
-  const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||`Maintenance request failed (HTTP ${response.status})`);
+  const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||`Maintenance request failed (HTTP ${response.status})`);
   $('update-message').textContent=`Maintenance ${result.id} submitted. Follow its status below.`;await refresh();
  }catch(error){$('update-message').textContent=error.message;}
  finally{maintenanceStarting=false;operation=null;syncBusy();schedulePoll();}

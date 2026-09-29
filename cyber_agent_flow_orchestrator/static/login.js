@@ -13,7 +13,7 @@ function resetChallenge(){
 }
 restart.addEventListener('click',()=>{if(submitting)return;resetChallenge();error.hidden=true;form.elements.password.focus();});
 loadingModal.set('auth',true,'Loading sign-in settings…');
-fetch('/api/auth',{credentials:'same-origin'}).then(r=>r.json()).then(info=>{
+fetch('/api/auth',{credentials:'same-origin'}).then(r=>dashboardJSON(r)).then(info=>{
  if(info.provider==='pve'){
   document.getElementById('login-intro').textContent='Sign in with your Proxmox account.';
   form.elements.username.placeholder='researcher@pve';
@@ -28,7 +28,7 @@ form.addEventListener('submit',async(event)=>{
   const data=challenge ? {challenge_id:challenge,otp:form.elements.otp.value.trim()} :
    {username:form.elements.username.value,password:form.elements.password.value,otp:form.elements.otp.value.trim()};
   const response=await fetch(challenge?'/api/login/totp':'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(data)});
-  const body=await response.json().catch(()=>({}));
+  const body=await dashboardJSON(response);
   form.elements.password.value=''; form.elements.otp.value='';
   if(response.status===202 && body.requires_totp){
    challenge=body.challenge_id; form.elements.username.disabled=true;

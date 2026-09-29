@@ -49,7 +49,7 @@ def main():
         patch.setattr(ev, 'GuestAgent', Agent)
         with pve_server(root) as pve:
             pve[0]['groups'] += ',caf-maintainers'
-            pve[0]['resources']['operator@pve'] = [vm(9403),vm(9402)]
+            pve[0]['resources']['operator@pve'] = [vm(9403),vm(9402),vm(9404)]
             dashboard = UserDashboard(root/'examples/01-reuse-export.yaml',root/'runs',2,lambda b,a:Probe(b,a,[]))
             original_create = dashboard.samples.create
             def create(*args, **kwargs):
@@ -68,7 +68,7 @@ def main():
                     page.get_by_role('button',name='Sign in',exact=True).click()
                     page.locator('[data-route=setup]').click()
                     expect(page.locator('#role-participant')).to_be_enabled(timeout=30000)
-                    page.locator('#role-participant').select_option('9403');page.locator('#role-scenarioforge').select_option('9402')
+                    page.locator('#role-core').select_option('9404');page.locator('#role-participant').select_option('9403');page.locator('#role-scenarioforge').select_option('9402')
                     page.get_by_role('button',name='Save VM roles').click()
                     expect(page.locator('[data-page=setup] #model-config-panel')).to_have_count(0)
                     page.locator('[data-route=experiments]').click()
@@ -85,7 +85,13 @@ def main():
                     expect(page.locator('#model-participant-save')).to_have_count(0)
                     expect(page.locator('#model-config-scenarioforge')).to_have_count(0)
                     expect(page.locator('.model-card-heading #model-participant-read')).to_be_visible()
+                    page.locator('#model-participant-model').fill('')
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.get_by_role('tab',name='Experiment',exact=True).click()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                     page.locator('#model-participant-model').fill('updated-model')
+                    expect(page.locator('#create-experiment')).to_be_enabled()
                     page.locator('#model-participant-key').fill('replacement-key')
                     fail_save[0] = True
                     page.get_by_role('button',name='Create experiment',exact=True).click()

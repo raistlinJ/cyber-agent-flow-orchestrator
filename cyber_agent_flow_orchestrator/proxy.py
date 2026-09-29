@@ -12,8 +12,29 @@ from .tls import settings, context, ensure_certificate
 from .web import Dashboard, handler
 
 
+@web.middleware
+async def api_errors(request, handler):
+    try:
+        return await handler(request)
+    except web.HTTPException as exc:
+        if not request.path.startswith('/api/'):
+            raise
+        return web.json_response({'error': exc.text or exc.reason}, status=exc.status,
+            headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+                     'Strict-Transport-Security': 'max-age=31536000',
+                     **{name: exc.headers[name] for name in ('Allow', 'Retry-After') if name in exc.headers}})
+
+
+def upstream_timeout(path):
+    # Sample creation imports a bundle and snapshots XML through multiple QGA calls.
+    slow = path.endswith('/artifact') or path in (
+        '/api/scenarios/upload', '/api/scenarios/list', '/api/experiments/create',
+        '/api/samples/run', '/api/model-config')
+    return ClientTimeout(total=None, sock_connect=10, sock_read=300) if slow else ClientTimeout(total=60)
+
+
 def application(upstream_port, proxy_key, config):
-    app = web.Application(client_max_size=32 * 1024 * 1024)
+    app = web.Application(client_max_size=32 * 1024 * 1024, middlewares=[api_errors])
     slots = asyncio.Semaphore(64)
     upstream = f'http://127.0.0.1:{upstream_port}'
 
@@ -50,7 +71,7 @@ def application(upstream_port, proxy_key, config):
                 async with request.app[CLIENT].request(request.method, upstream + request.rel_url.raw_path_qs,
                                                        headers=headers, data=body if request.method == 'POST' else None,
                                                        allow_redirects=False,
-                                                       timeout=ClientTimeout(total=None, sock_connect=10, sock_read=300) if request.path.endswith('/artifact') or request.path == '/api/scenarios/upload' else ClientTimeout(total=60)) as response:
+                                                       timeout=upstream_timeout(request.path)) as response:
                     if request.path.endswith('/artifact') and response.status == 200:
                         result = web.StreamResponse(status=response.status)
                         for key in ('Content-Type', 'Content-Length', 'Content-Disposition', 'Cache-Control',
@@ -75,7 +96,7 @@ def application(upstream_port, proxy_key, config):
                 raise
             except (TimeoutError, asyncio.TimeoutError):
                 logging.getLogger(__name__).warning('Dashboard backend timed out: %s %s', request.method, request.path)
-                raise web.HTTPGatewayTimeout(text='Dashboard request timed out') from None
+                raise web.HTTPGatewayTimeout(text='Dashboard request timed out. Refresh to check the current state before retrying.') from None
             except Exception:
                 raise web.HTTPBadGateway(text='Dashboard unavailable') from None
     app.router.add_route('*', '/{tail:.*}', forward)

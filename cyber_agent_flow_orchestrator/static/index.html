@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/loading.js" defer></script><script src="/run_windows.js" defer></script><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/http.js" defer></script><script src="/loading.js" defer></script><script src="/run_windows.js" defer></script><script src="/app.js" defer></script></head>
 <body class="workspace">
 <header><a class="brand" href="#overview" aria-label="Orchestrator home"><span class="brand-mark">C</span>CYBER AGENT FLOW<span class="brand-divider">/</span><span class="brand-sub">Orchestrator</span></a><div class="user-menu"><span class="readonly">LAB MONITOR</span><span id="username-label"></span><button id="sign-out" type="button">Sign out</button></div></header>
 <nav class="workspace-nav" aria-label="Workspace pages">
@@ -106,7 +106,7 @@
 <p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
 </section>
 </section></div><div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>
-<p id="experiment-error" class="error" role="status"></p><button id="create-experiment" type="submit" form="experiment-form">Create experiment</button></div>
+<p id="create-experiment-hint" class="small" role="status"></p><p id="experiment-error" class="error" role="status"></p><button id="create-experiment" type="submit" disabled aria-describedby="create-experiment-hint" form="experiment-form">Create experiment</button></div>
 </fieldset></dialog>
 <details id="debug-console" class="debug-console" open><summary>Troubleshooting console <span class="small">Commands, sample events and transfer progress</span></summary>
 <div class="console-content">
