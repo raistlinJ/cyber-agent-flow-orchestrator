@@ -25,7 +25,8 @@ def main():
             try:
                 with secure_server(dashboard,root/'web',auth=make_auth(pve)) as server,sync_playwright() as pw:
                     browser=pw.chromium.launch(channel='chrome',headless=True)
-                    page=browser.new_page(ignore_https_errors=True,viewport={'width':1440,'height':1080})
+                    context=browser.new_context(ignore_https_errors=True,viewport={'width':1440,'height':1080})
+                    page=context.new_page()
                     errors=[]
                     page.on('pageerror',lambda e:errors.append(str(e)))
                     page.goto(server['origin'])
@@ -62,6 +63,18 @@ def main():
                         result=service.results(path.parent)
                         assert result['evaluation']['planned_trials']==trials
                         assert result['run_configuration']['scenarioforge']['xml_available']
+                    progress_page=page.context.new_page()
+                    progress_page.on('pageerror',lambda e:errors.append(str(e)))
+                    progress_page.goto(server['origin']+'/run?view=progress&run='+path.parent.name)
+                    expect(progress_page.get_by_text('Workflow across VMs',exact=True)).to_be_visible()
+                    expect(progress_page.locator('.workflow-step')).to_have_count(9)
+                    expect(progress_page.locator('.workflow-step.completed')).to_have_count(9)
+                    expect(progress_page.locator('.workflow-vms')).to_contain_text('VM 9404')
+                    expect(progress_page.locator('.workflow-readiness')).to_contain_text('containers: pass')
+                    progress_page.screenshot(path='/tmp/caf-detailed-progress.png',full_page=True)
+                    progress_page.set_viewport_size({'width':390,'height':844})
+                    assert progress_page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                    progress_page.close()
                     page.locator('#new-experiment').click()
                     overview=page.get_by_role('tab',name='Experiment',exact=True)
                     expect(overview).to_have_attribute('aria-selected','true')

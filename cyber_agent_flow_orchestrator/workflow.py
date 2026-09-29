@@ -9,6 +9,7 @@ import yaml
 
 from cyber_agent_flow_eval import integration as ev
 from .config import load
+from .workflow_progress import step, observe_command, observe_transfers
 
 
 def sha(path):
@@ -103,7 +104,7 @@ class Workflow:
         self.save()
         self.notify(f'Running {key} on VM {command["vmid"]}')
         try:
-            with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{command['vmid']}.lock"):
+            with step(self, key), observe_command(self, command['vmid']), ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{command['vmid']}.lock"):
                 try:
                     result = self.agent.call(command['vmid'], 'hook', unit=attempt['unit'], log_path=attempt['log_path'],
                                              seconds=command['timeout_seconds'], timeout=command['timeout_seconds'] + 30,
@@ -194,64 +195,76 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                 archive = sf['archive']
             wf.notify('Collecting the ScenarioForge evaluation package')
             package = output / 'suite'
-            if 'fetch' not in journal['stages']:
-                if not package.exists():
-                    ev.ProxmoxBackend(runtime['backend'], runtime['engine'], agent=wf.agent).fetch_suite(archive, package)
+            with step(wf, "fetch"), observe_transfers(wf):
+                if 'fetch' not in journal['stages']:
+                    if not package.exists():
+                        ev.ProxmoxBackend(runtime['backend'], runtime['engine'], agent=wf.agent).fetch_suite(archive, package)
+                    _, snapshot = ev.load_suite(package)
+                    if marker and snapshot['package_hash'] != marker['package_hash']:
+                        raise ValueError('Downloaded suite differs from deployment export')
+                    journal['stages']['fetch'] = {'status': 'completed', 'files': wf.inventory(p for p in package.rglob('*') if p.is_file())}
+                    wf.save()
+            with step(wf, "readiness"):
                 _, snapshot = ev.load_suite(package)
-                if marker and snapshot['package_hash'] != marker['package_hash']:
-                    raise ValueError('Downloaded suite differs from deployment export')
-                journal['stages']['fetch'] = {'status': 'completed', 'files': wf.inventory(p for p in package.rglob('*') if p.is_file())}
+                ev.require_ready(snapshot, cfg['max_readiness_age_seconds'])
+                evidence = snapshot['readiness']
+                journal['readiness_progress'] = dict(checked_at=evidence.get('checked_at'),
+                    session_id=evidence.get('session_id'), overall=evidence.get('overall'),
+                    checks=[dict(key=check.get('key'), status=check.get('status'), items=len(check['items']) if isinstance(check.get('items'), list) else None)
+                            for check in evidence.get('checks', [])])
                 wf.save()
-            _, snapshot = ev.load_suite(package)
-            ev.require_ready(snapshot, cfg['max_readiness_age_seconds'])
-            if journal.get('sample_id') and journal.get('scenario_experiment'):
-                import ipaddress
-                import xml.etree.ElementTree as ET
-                tree = ET.parse(package / 'evaluator/scenario.xml')
-                state = json.loads(tree.find('.//FlowState').text)
-                addresses = [ipaddress.ip_interface(node['ipv4']).ip for node in state['chain']]
-                if not addresses or any(not ip.is_private or ip.is_loopback for ip in addresses):
-                    raise ValueError('Demo export must identify private deployed lab hosts')
-                runtime['execution']['network_policy']['allow'] = sorted({str(ip) + '/32' for ip in addresses})
-                journal['runtime'] = deepcopy(runtime)
-                wf.save()
+                if journal.get('sample_id') and journal.get('scenario_experiment'):
+                    import ipaddress
+                    import xml.etree.ElementTree as ET
+                    tree = ET.parse(package / 'evaluator/scenario.xml')
+                    state = json.loads(tree.find('.//FlowState').text)
+                    addresses = [ipaddress.ip_interface(node['ipv4']).ip for node in state['chain']]
+                    if not addresses or any(not ip.is_private or ip.is_loopback for ip in addresses):
+                        raise ValueError('Demo export must identify private deployed lab hosts')
+                    runtime['execution']['network_policy']['allow'] = sorted({str(ip) + '/32' for ip in addresses})
+                    journal['runtime'] = deepcopy(runtime)
+                    wf.save()
             wf.notify('Capturing scenario reproduction files')
-            if 'reproduction' not in journal['stages']:
-                from .run_artifacts import validate_reproduction
-                from .auth import private_file
-                if sf.get('reproduction_archive'):
-                    content = wf.agent.get(runtime['backend']['app_vmid'], sf['reproduction_archive'])
-                else:
-                    from .reproduction_capture import capture
-                    content = capture((package / 'evaluator/scenario.xml').read_bytes(), cfg, runtime, wf.agent)
-                validate_reproduction(content, (package / 'evaluator/scenario.xml').read_bytes(),
-                                      runtime['backend']['max_transfer_bytes'])
-                destination = output / 'reproduction/scenarioforge-reproduction.zip'
-                destination.parent.mkdir(mode=0o700, exist_ok=True)
-                private_file(destination, content, replace=destination.exists())
-                journal['stages']['reproduction'] = {'status': 'completed', 'files': wf.inventory([destination])}
-                wf.save()
+            with step(wf, "reproduction"), observe_transfers(wf):
+                if 'reproduction' not in journal['stages']:
+                    from .run_artifacts import validate_reproduction
+                    from .auth import private_file
+                    if sf.get('reproduction_archive'):
+                        content = wf.agent.get(runtime['backend']['app_vmid'], sf['reproduction_archive'])
+                    else:
+                        from .reproduction_capture import capture
+                        content = capture((package / 'evaluator/scenario.xml').read_bytes(), cfg, runtime, wf.agent)
+                    validate_reproduction(content, (package / 'evaluator/scenario.xml').read_bytes(),
+                                          runtime['backend']['max_transfer_bytes'])
+                    destination = output / 'reproduction/scenarioforge-reproduction.zip'
+                    destination.parent.mkdir(mode=0o700, exist_ok=True)
+                    private_file(destination, content, replace=destination.exists())
+                    journal['stages']['reproduction'] = {'status': 'completed', 'files': wf.inventory([destination])}
+                    wf.save()
             for command in cfg['artifacts']:
                 wf.command('artifact-' + command['id'], command, retry_steps)
-            if 'freeze' not in journal['stages']:
-                with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{runtime['backend']['participant_vmid']}.lock"):
-                    wf.freeze_runtime(runtime, files, cfg, identity)
+            with step(wf, "freeze"), observe_transfers(wf):
+                if 'freeze' not in journal['stages']:
+                    with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{runtime['backend']['participant_vmid']}.lock"):
+                        wf.freeze_runtime(runtime, files, cfg, identity)
             wf.notify('Preparing the agent evaluation settings')
             study = output / 'study.yaml'
-            if 'import' not in journal['stages']:
-                # Recreate only a derived config if interrupted before journaling.
-                study.unlink(missing_ok=True)
-                ev.import_config(package, output / 'runtime.yaml', study, cfg['max_readiness_age_seconds'])
-                journal['stages']['import'] = {'status': 'completed', 'files': wf.inventory([study])}
-                wf.save()
+            with step(wf, "import"):
+                if 'import' not in journal['stages']:
+                    # Recreate only a derived config if interrupted before journaling.
+                    study.unlink(missing_ok=True)
+                    ev.import_config(package, output / 'runtime.yaml', study, cfg['max_readiness_age_seconds'])
+                    journal['stages']['import'] = {'status': 'completed', 'files': wf.inventory([study])}
+                    wf.save()
             dataset = output / 'evaluation'
             journal['status'] = 'evaluating'
             if journal.get('scenario_experiment'):
                 journal['phase'] = 'evaluating'
             wf.save()
             wf.notify('Running agent evaluation')
-            rows = evaluator(study, dataset, resume=(dataset / 'manifest.json').exists(),
-                             retry_failed=retry_failed, reservation=reservation, progress=wf.notify)
+            with step(wf, "evaluate"):
+                rows = evaluator(study, dataset, resume=(dataset / 'manifest.json').exists(),
+                                 retry_failed=retry_failed, reservation=reservation, progress=wf.notify)
             latest = {}
             for row in rows:
                 latest[row['trial_id']] = row

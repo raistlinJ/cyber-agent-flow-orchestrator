@@ -48,7 +48,7 @@
 
 </div>
 </fieldset>
-<div data-page="setup" hidden><section aria-labelledby="refresh-title"><div class="section-title"><h2 id="refresh-title">Refresh preferences</h2></div><div class="refresh-settings"><label for="refresh-period">Automatic refresh</label><select id="refresh-period"><option value="0">Never</option><option value="1" selected>Every 1 minute</option><option value="2">Every 2 minutes</option><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option></select><span class="small">Saved in this browser. Active operations still report progress.</span></div>
+<div data-page="setup" hidden><section aria-labelledby="refresh-title"><div class="section-title"><h2 id="refresh-title">Refresh preferences</h2></div><div class="refresh-settings"><label for="refresh-period">Automatic refresh</label><select id="refresh-period"><option value="0">Never</option><option value="1" selected>Every 1 minute</option><option value="2">Every 2 minutes</option><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option></select><span class="small">Saved in this browser. Never pauses page refreshes; experiments still update when they finish.</span></div>
 </section></div>
 <footer><span>VM power, guest access, and application presence are checked separately.</span><span>Samples use ScenarioForge, CORE and your selected CAF participant</span></footer>
 </main>
@@ -63,9 +63,10 @@
 <form id="experiment-form" novalidate></form><div class="experiment-tabs" role="tablist" aria-label="New experiment sections"><button type="button" role="tab" id="experiment-tab-overview" aria-controls="experiment-panel-overview" aria-selected="true" tabindex="0" data-experiment-tab="overview">Experiment</button><button type="button" role="tab" id="experiment-tab-scenario" aria-controls="experiment-panel-scenario" aria-selected="false" tabindex="-1" data-experiment-tab="scenario">ScenarioForge</button><button type="button" role="tab" id="experiment-tab-caf" aria-controls="experiment-panel-caf" aria-selected="false" tabindex="-1" data-experiment-tab="caf">Cyber-agent-flow</button><button type="button" role="tab" id="experiment-tab-evaluation" aria-controls="experiment-panel-evaluation" aria-selected="false" tabindex="-1" data-experiment-tab="evaluation">Evaluation</button></div><div class="experiment-tab-content"><section role="tabpanel" tabindex="0" id="experiment-panel-overview" aria-labelledby="experiment-tab-overview"><p class="small">Choose a bundled sample or a saved ScenarioForge scenario and review its settings.</p>
 <label for="experiment-sample">Experiment type</label><select form="experiment-form" id="experiment-sample" required></select>
 <p id="experiment-description"></p><p id="experiment-budget" class="small"></p>
-<details class="demo-scenarios"><summary>Scenario packages for the two demos</summary><p class="small">Fixed sample packages include XML, website files, and demo profiles. The sample presets prepare and deploy them automatically using the configured ScenarioForge CORE connection.</p><p>Model smoke test: <a href="/demo-smoke.xml" download>XML</a> · <a href="/demo-smoke.zip" download>Scenario bundle</a> <button type="button" data-demo-scenario="smoke">Send smoke scenario</button></p><p>Tools vs. added helper: <a href="/demo-tools-vs-helper.xml" download>XML</a> · <a href="/demo-tools-vs-helper.zip" download>Scenario bundle</a> <button type="button" data-demo-scenario="tools-vs-helper">Send helper scenario</button></p></details>
 </section><section role="tabpanel" tabindex="0" id="experiment-panel-scenario" aria-labelledby="experiment-tab-scenario" hidden><section id="sample-scenario-info" class="experiment-settings" hidden>
 <h3>ScenarioForge · fixed by sample</h3>
+<p id="sample-scenario-package">Download this sample: <a id="sample-scenario-xml" download>Scenario XML</a> · <a id="sample-scenario-bundle" download>Scenario bundle (ZIP)</a></p>
+<p class="small">The bundle includes the XML, website files, and demo profile. This sample imports and prepares it automatically when you create the experiment.</p>
 <p class="small">These settings are locked to keep the sample task, prompt, and scoring consistent.</p>
 <fieldset disabled aria-label="Fixed sample scenario settings">
 <label for="sample-sf-use">ScenarioForge use in this run</label><input form="experiment-form" id="sample-sf-use" value="Required · deploy, readiness check and evaluation export">
@@ -88,7 +89,6 @@
 </section><section role="tabpanel" tabindex="0" id="experiment-panel-caf" aria-labelledby="experiment-tab-caf" hidden><section class="experiment-settings" aria-labelledby="caf-settings-title">
 <h3 id="caf-settings-title">Cyber-agent-flow configuration</h3>
 <p id="caf-settings-source" class="small"></p><dl id="caf-settings-summary"></dl>
-<button id="edit-caf-model" type="button">Edit CAF model settings</button>
 <p class="small">Model settings apply to the agent on the participant VM. The scenario XML supplies the lab definition, not the agent configuration.</p>
 </section>
 <p id="experiment-model-context" class="small"></p>

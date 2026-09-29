@@ -98,9 +98,12 @@ readable while an operation is active.
 Manual **Refresh view** starts fresh VM checks in PVE mode. **Lab setup → Automatic refresh**
 offers Never or every 1, 2, 5, or 10 minutes, defaulting to 1 minute. The preference
 is saved in this browser and can be changed while a check is running. Never stops
-idle polling; it does not cancel a check or job already started. Active checks,
-maintenance and experiments continue reporting progress every five seconds until
-finished. These progress reads do not start another VM check in PVE mode.
+periodic page refreshes; it does not cancel a check or job already started. With
+Never selected, active experiments receive quiet, read-only completion checks every
+five seconds. Only a terminal outcome updates the experiment row and open run windows,
+without a loading modal. These checks stop once the experiment finishes and do not
+start VM probes. With automatic refresh enabled, active operations report progress
+every five seconds.
 Automatic reads do not overlap, and polling pauses during a save or other
 foreground action. On a request
 failure, controls unlock for retry; temporary service errors do not themselves
@@ -242,8 +245,9 @@ or response bodies. Common credential fields are redacted. Previews cover up to
 reported explicitly; opening results does not attempt remote recovery.
 
 A compact status notice follows the active sample across all pages. The full
-panel and console update with the existing five-second progress reads, including
-when Automatic refresh is Never. Run/trial elapsed clocks advance between reads.
+panel and console update with five-second progress reads when automatic refresh
+is enabled. Never keeps the displayed progress stable until experiment completion
+or a manual refresh. Run/trial elapsed clocks advance between reads.
 All guest stages come from host transport journals; viewing progress adds no
 guest RPCs. Slow guest calls may leave a stage unchanged until they return.
 Live model tokens, conversation turns and individual tool calls are not streamed;
@@ -490,3 +494,7 @@ nonoverlapping requests, transient-error recovery and mobile layout:
 uv run --group dev python tests/browser_loading.py /tmp/caf-loading-preview
 uv run --group dev python tests/browser_refresh.py /tmp/caf-refresh-preview
 ```
+
+The Progress window shows the saved workflow timeline: XML verification, preparation, ScenarioForge deployment/readiness/export, package download, readiness validation, reproduction capture, configuration freeze, evaluation-plan import and agent trials. Each stage shows its VM, state, elapsed time, timestamps, attempts, saved log path and any failure. VM cards describe each role. Workflow-stage counts and trial completion are separate; neither is an estimate of time remaining.
+
+Download counters report bytes received by the existing guest-agent transfers and mark verification only after checksum validation. During guest commands, the latest existing QGA response is recorded without extra VM polling. ScenarioForge’s internal CORE operations and live model/tool calls are not streamed; the UI labels these waits explicitly. Participant upload counters and service state come from evaluator transport checkpoints. Progress is retained in workflow/results JSON and the run bundle. Older runs without stage timestamps retain their recorded stage states.

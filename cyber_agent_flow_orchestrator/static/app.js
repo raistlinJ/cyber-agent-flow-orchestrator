@@ -41,9 +41,10 @@ $('debug-console').addEventListener('toggle',()=>{try{localStorage.setItem('caf-
 $('download-console').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([$('console-output').textContent],{type:'text/plain'})),link=el('a');link.href=url;link.download='orchestrator-console.log';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 const refreshPeriods=['0','1','2','5','10'];
 try{const saved=localStorage.getItem('caf-refresh-minutes');if(refreshPeriods.includes(saved))$('refresh-period').value=saved;}catch{}
-function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||foregroundChecks||waitingForMaintenance||redirecting;}
+function autoRefreshEnabled(){return Number($('refresh-period').value)>0;}
+function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||(autoRefreshEnabled()&&(foregroundChecks||waitingForMaintenance))||redirecting;}
 function syncBusy(){
- const busy=isBusy(), loading=busy||fetching||waitingForObservation;if(loading&&!wasBusy)busySince=performance.now();wasBusy=loading;
+ const busy=isBusy(), loading=busy||fetching||(autoRefreshEnabled()&&waitingForObservation);if(loading&&!wasBusy)busySince=performance.now();wasBusy=loading;
  $('experiment-controls').disabled=busy;$('cancel-experiment').disabled=Boolean(operation)||experimentCreating;
  $('dashboard-controls').disabled=busy;$('dashboard-controls').setAttribute('aria-busy',String(busy));$('sign-out').disabled=busy;
  const lastChange=(snapshot?.updates?.jobs||[]).find(job=>job.action!=='inspect'&&(snapshot.updates.applications||[]).some(app=>app.role===job.role&&app.vmid===job.vmid));
@@ -53,8 +54,8 @@ function syncBusy(){
  let label, percent=null;
  if(redirecting)label='Opening sign-in…';
  else if(operation)label=operation;
- else if(waitingForMaintenance){const job=(snapshot?.updates?.jobs||[]).find(job=>['queued','running'].includes(job.status));label=job?.message||'Retrieving application state…';const transfer=job?.console?.transfer;if(transfer&&!transfer.verified&&label.startsWith('Transferring verified'))label+=` · ${transfer.percent}% of file acknowledged (${transfer.sent_bytes}/${transfer.total_bytes} bytes)`;}
- else if(waitingForObservation){if(snapshot?.loading){const info=snapshot.loading;percent=info.percent;label=`${info.status} · ${info.completed}/${info.total} VM checks complete · ${percent}%`;}else label='Checking VM power, guest access and applications…';}
+ else if(autoRefreshEnabled()&&waitingForMaintenance){const job=(snapshot?.updates?.jobs||[]).find(job=>['queued','running'].includes(job.status));label=job?.message||'Retrieving application state…';const transfer=job?.console?.transfer;if(transfer&&!transfer.verified&&label.startsWith('Transferring verified'))label+=` · ${transfer.percent}% of file acknowledged (${transfer.sent_bytes}/${transfer.total_bytes} bytes)`;}
+ else if(autoRefreshEnabled()&&waitingForObservation){if(snapshot?.loading){const info=snapshot.loading;percent=info.percent;label=`${info.status} · ${info.completed}/${info.total} VM checks complete · ${percent}%`;}else label='Checking VM power, guest access and applications…';}
  else if(fetching||!initialized)label=csrfToken?'Retrieving dashboard and verifying VM access…':'Checking your login session…';
  else if(failed){label='Loading failed. Use Refresh view to try again.';bar.hidden=true;}
  else{label=maintenanceFailed?`Dashboard loaded · ${lastChange.role} ${lastChange.action} ${lastChange.status}; see Applications`:'Dashboard loaded';bar.hidden=true;}
@@ -339,6 +340,8 @@ function renderEvaluationSettings(scenario,sample){
  $('evaluation-settings').disabled=!scenario;
  $('sample-scenario-info').hidden=scenario;
  if(!scenario){
+  $('sample-scenario-xml').href='/demo-'+sample.id+'.xml';
+  $('sample-scenario-bundle').href='/demo-'+sample.id+'.zip';
   $('sample-sf-use').value=sample?.profile?.scenarioforge_used?'Required · deploy, readiness check and evaluation export':'Not used by this bundled sample';
   $('sample-sf-companion').value=(sample?.profile?.companion_xml||'Unavailable')+' · fixed sample XML';
   $('sample-environment').value=sample?.profile?.environment||'Sample-defined environment';
@@ -347,11 +350,9 @@ function renderEvaluationSettings(scenario,sample){
  $('eval-settings-note').textContent=scenario?'These settings are saved with this experiment. Reruns reuse them.':'Fixed by the sample to keep its prompt, tool comparison, and scoring consistent. CAF model settings remain configurable.';
  $('eval-tools').textContent='Tools / conditions: '+(scenario?'Baseline — nmap, curl, python3. Custom tool conditions are not editable here yet.':sample?.profile?.tools||'Sample-defined');
  $('eval-task-source').textContent=scenario?'Tasks, prompts, and verifiers are exported by ScenarioForge after deployment and shown in Results. This form does not override them.':'The deployed host address and fresh token/flags are resolved at run time. Exact prompts and XML are captured in Results.';
- for(const button of document.querySelectorAll('[data-demo-scenario]'))button.hidden=!scenario;
  renderCAFSettings(snapshot);
 }
 $('evaluation-settings').addEventListener('input',()=>{if(!$('evaluation-settings').disabled)customEvaluation=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));});
-$('edit-caf-model').addEventListener('click',()=>{selectExperimentTab('caf');$('model-config-panel').scrollIntoView({behavior:'smooth',block:'start'});$('model-participant-read')?.focus({preventScroll:true});});
 
 function describeSample(){
  const scenario=$('experiment-sample').value==='scenarioforge-xml',sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);
@@ -406,16 +407,6 @@ async function sendScenario(file){
  finally{operation=null;syncBusy();schedulePoll();}
 }
 $('upload-scenario').addEventListener('click',()=>sendScenario($('scenario-file').files[0]));
-for(const button of document.querySelectorAll('[data-demo-scenario]'))button.addEventListener('click',async()=>{
- if(isBusy())return;
- $('experiment-sample').value='scenarioforge-xml';describeSample();selectExperimentTab('scenario');
- operation='Loading demo scenario package…';syncBusy();
- let file;
- try{const response=await apiFetch('/demo-'+button.dataset.demoScenario+'.zip');if(!response.ok)throw Error('Demo package is unavailable');file=await response.blob();}
- catch(error){$('scenario-upload-info').textContent=error.message;}
- finally{operation=null;syncBusy();schedulePoll();}
- if(file)await sendScenario(file);
-});
 
 $('experiment-sample').addEventListener('change',describeSample);
 $('cancel-experiment').addEventListener('click',()=>{if(!experimentCreating&&!operation)$('experiment-dialog').close();});
@@ -518,11 +509,31 @@ function schedulePoll(){
  if(fetching||operation||redirecting)return;
  const active=Boolean(snapshot?.refreshing||waitingForMaintenance||(snapshot?.runs||[]).some(runActive));
  const minutes=Number($('refresh-period').value);
- if(!active&&!minutes)return;
- pollTimer=setTimeout(()=>{if(!fetching&&!operation&&!redirecting)refresh(!active,true);},active?5000:minutes*60000);
+ if(!minutes){if((snapshot?.runs||[]).some(runActive))pollTimer=setTimeout(checkExperimentCompletion,5000);return;}
+ pollTimer=setTimeout(()=>{if(autoRefreshEnabled()&&!fetching&&!operation&&!redirecting)refresh(!active,true);},active?5000:minutes*60000);
 }
-$('refresh-period').addEventListener('change',()=>{try{localStorage.setItem('caf-refresh-minutes',$('refresh-period').value);}catch{}schedulePoll();tick();});
+$('refresh-period').addEventListener('change',()=>{try{localStorage.setItem('caf-refresh-minutes',$('refresh-period').value);}catch{}schedulePoll();tick();syncBusy();});
 setInterval(()=>{tick();syncBusy();},1000);
 syncBusy();refresh(true);
 
-window.addEventListener('focus',()=>{if(initialized&&!fetching&&!operation&&!redirecting)refresh(false,true);});
+window.addEventListener('storage',event=>{if(event.key==='caf-refresh-minutes'&&refreshPeriods.includes(event.newValue)){$('refresh-period').value=event.newValue;schedulePoll();tick();syncBusy();}});
+
+async function checkExperimentCompletion(){
+ if(fetching||operation||redirecting){schedulePoll();return;}
+ const active=(snapshot?.runs||[]).filter(runActive);let changed=false;
+ try{
+  for(const previous of active){
+   const id=previous.output?.split('/').pop()||previous.workflow_id;
+   const response=await apiFetch('/api/runs/'+encodeURIComponent(id)+'/status',{cache:'no-store'});
+   if(response.status===401){sessionExpired();return;}
+   if(!response.ok)continue;
+   const current=await dashboardJSON(response);
+   if(['completed','completed_with_errors','cancelled','failed','interrupted'].includes(current.recorded_status)&&!runActive(current)){
+    const index=snapshot?.runs.indexOf(previous)??-1;
+    if(index>=0){snapshot.runs[index]=current;changed=true;}
+   }
+  }
+  if(changed){renderExperiments(snapshot);syncBusy();}
+ }catch(error){console.warn('Experiment completion check failed',error.message);}
+ finally{schedulePoll();}
+}

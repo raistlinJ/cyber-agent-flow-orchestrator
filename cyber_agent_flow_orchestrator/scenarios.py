@@ -333,10 +333,13 @@ class ScenarioExperiments:
                 with ev.lease(output / '.workflow.lock'):
                     record = ev.read_json(output / 'workflow.json')
                     runtime, selection = record['runtime'], record['scenario_experiment']
-                    guest(runtime['backend']).call(runtime['backend']['app_vmid'], 'check',
-                        token=selection['snapshot_token'], repo=selection['repo'], sha256=selection['sha256'])
-                    record.update(started_at=now())
-                    ev.write_json(output / 'workflow.json', record)
+                    record.update(started_at=now(), status='preparing', phase='verifying', message='Verifying the saved scenario XML on ScenarioForge')
+                    from .workflow import Workflow
+                    from .workflow_progress import step
+                    observer = Workflow(output, record, agent=guest(runtime['backend']), progress=None)
+                    with step(observer, 'snapshot'):
+                        observer.agent.call(runtime['backend']['app_vmid'], 'check',
+                            token=selection['snapshot_token'], repo=selection['repo'], sha256=selection['sha256'])
                 from .service import run
                 run(source, output, resume=True, progress=progress)
         except Exception as exc:

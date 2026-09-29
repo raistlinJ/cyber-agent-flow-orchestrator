@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from cyber_agent_flow_eval import integration as ev, reporting
 from .config import load
+from .workflow_progress import build as workflow_progress
 from .workflow import execute_command, run as execute, recover
 
 
@@ -63,6 +64,7 @@ def status(output):
             'coordinator_active': coordinator_active,
             'sample_id': data.get('sample_id'), 'scenario_experiment': data.get('scenario_experiment'), 'message': 'Stop requested; finishing the current stage or trial and collecting results' if stopping else data.get('message'),
             'sample_progress': sample_progress,
+            'workflow_progress': workflow_progress(data, state, coordinator_active),
             'saved_settings': saved_settings,
             'error': data.get('error') if data['status'] in ('failed', 'interrupted') else None,
             'stages': {key: {'status': stage['status'], 'attempt_count': len(stage.get('attempts', [])),

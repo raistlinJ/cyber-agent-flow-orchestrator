@@ -1,3 +1,57 @@
+function renderWorkflowProgress(run,target){
+ const p=run.workflow_progress;if(!p)return;
+ const section=el('section',null,'workflow-progress');section.setAttribute('aria-label','Workflow stages and VM activity');
+ section.append(el('h3','Workflow across VMs'));
+ const current=p.current;
+ if(current){
+  const line=el('p',null,'sample-stage');line.append(document.createTextNode(current.label+' · '+current.status+' · '),timer(current.elapsed_seconds,p.observed_at,current.active));
+  section.append(line,el('p',current.description,'small'));
+ }
+ section.append(el('p',p.completed_steps+' / '+p.total_steps+' workflow stages completed. Stage counts do not estimate remaining time.','small'));
+ const roles=el('div',null,'workflow-vms');
+ for(const role of p.roles){
+  const card=el('article',null,'workflow-vm');card.append(el('h4',role.label+(role.vmid?' · VM '+role.vmid:role.role==='orchestrator'?' · host':' · VM not selected')));
+  let activity=role.responsibility;
+  if(current?.active){
+   if(role.role==='orchestrator')activity='Coordinating: '+current.label+'. '+role.responsibility;
+   else if(role.role==='core'&&current.id==='deploy')activity='Deployment and readiness checks requested through ScenarioForge. Waiting for its outcome.';
+   else if(role.vmid===current.vmid)activity='Current stage: '+current.label+'. '+role.responsibility;
+   else if(role.role==='participant'&&current.id!=='evaluate')activity='Waiting for scenario preparation and evaluation inputs. '+role.responsibility;
+  }
+  card.append(el('p',activity,'small'));roles.append(card);
+ }
+ section.append(roles);
+ const observation=p.guest_observation;
+ if(observation&&current?.active&&observation.step===current.id){
+  section.append(el('p','Last guest-agent response: VM '+observation.vmid+' · '+observation.state+' · '+new Date(observation.at).toLocaleTimeString()+(observation.pid?' · guest PID '+observation.pid:'')+'. This confirms guest-agent activity, not completion of the scenario.','small'));
+ }
+ if(p.readiness){
+  const ready=el('section',null,'workflow-readiness');ready.append(el('h4','Scenario readiness evidence'));
+  ready.append(el('p','CORE session '+(p.readiness.session_id??'unknown')+' · '+(p.readiness.overall??'checked')+' · Checked '+(p.readiness.checked_at?new Date(p.readiness.checked_at).toLocaleString():'time unavailable'),'small'));
+  for(const check of p.readiness.checks||[])ready.append(el('p',check.key+': '+check.status+(check.items==null?'':' · '+check.items+' reported items'),'small'));
+  ready.append(el('p','Saved readiness evidence from the deployment, not a continuous health check.','small'));section.append(ready);
+ }
+ const transfer=p.transfer;
+ if(transfer&&transfer.step===current?.id){
+  section.append(el('p','Download from VM '+transfer.vmid+': '+transfer.file+' · '+(transfer.received_bytes??0).toLocaleString()+' / '+(transfer.total_bytes==null?'unknown':transfer.total_bytes.toLocaleString())+' bytes · '+(transfer.verified?'Complete, checksum verified':transfer.status),'small'));
+ }
+ const list=el('ol',null,'workflow-stages');
+ for(const stage of p.steps){
+  const item=el('li',null,'workflow-step '+stage.status);
+  const heading=el('div',null,'result-actions');heading.append(el('strong',stage.label),badge(stage.status,stage.status==='completed'?'good':['failed','interrupted'].includes(stage.status)?'warn':''));
+  item.append(heading,el('p',(stage.vmid?'VM '+stage.vmid:'Orchestrator host')+' · '+stage.description,'small'));
+  if(stage.started_at){
+   const timing=el('p',null,'small');timing.append(document.createTextNode('Started '+new Date(stage.started_at).toLocaleTimeString()+' · '),timer(stage.elapsed_seconds,p.observed_at,stage.active));
+   if(stage.ended_at)timing.append(document.createTextNode(' · Finished '+new Date(stage.ended_at).toLocaleTimeString()));
+   if(stage.attempt_count)timing.append(document.createTextNode(' · '+stage.attempt_count+' command attempt(s)'));
+   item.append(timing);
+  }
+  if(stage.error)item.append(el('p',stage.error,'error'));
+  if(stage.log)item.append(el('p','Saved command log: '+stage.log+' (included in the run bundle)','small'));
+  list.append(item);
+ }
+ section.append(list);target.append(section);
+}
 /* Shared visual conventions; all run content is rendered as text. */
 function duration(seconds) {if (seconds == null || !Number.isFinite(Number(seconds))) return 'Unknown'; seconds=Math.max(0, Math.floor(seconds)); const h=Math.floor(seconds/3600), m=Math.floor(seconds%3600/60), s=seconds%60; return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;}
 function badge(text, tone='') {return el('span', text, 'badge '+tone);}
@@ -6,17 +60,19 @@ function renderProgress(run){
  const shown=run.sample_progress?[run]:[];
  const target=$('sample-activity');
  const expanded=new Set([...target.querySelectorAll('details[open]')].map(n=>n.dataset.run));
- target.replaceChildren();if(!shown.length)target.append(el('p',run.message||'Progress is not available yet.','small'));
+ target.replaceChildren();renderWorkflowProgress(run,target);if(!shown.length)target.append(el('p',run.message||'Progress is not available yet.','small'));
  for(const run of shown){
   const p=run.sample_progress,trial=p.current_trial,transport=trial?.transport;
   const card=el('article',null,'panel sample-activity'),head=el('div',null,'result-actions');head.append(el('h3',p.name),badge(run.recorded_status,run.recorded_status==='completed'?'good':['failed','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));
   card.append(head);
   card.append(el('p',run.recorded_status==='interrupted'?'Coordinator is no longer active. Inspect results before retrying.':run.recorded_status==='stopping'?run.message:transport?.activity||run.message||p.phase,'sample-stage'));
   const progress=el('progress');progress.max=100;progress.value=p.percent??0;progress.setAttribute('aria-label',`${p.name} trials finished`);
-  card.append(el('p',`${p.finished_trials} / ${p.planned_trials} trials finished · ${p.percent??0}% · ${p.verified_successes} verified successes · ${p.errors} trial errors`,'small'),progress);
+  card.append(el('p',p.planned_trials?`${p.finished_trials} / ${p.planned_trials} trials finished · ${p.percent??0}% · ${p.verified_successes} verified successes · ${p.errors} trial errors`:'Trial plan pending ScenarioForge export and evaluation initialization','small'),progress);
   card.append(el('p','Percentage counts finished trials, including errors. Cleanup and finalization may still be pending at 100%.','small'));
   const elapsed=el('p',null,'small');elapsed.append(document.createTextNode('Run elapsed: '),timer(p.elapsed_seconds,p.observed_at,p.active,true));card.append(elapsed);
   if(trial){
+   card.append(el('h4','Current trial on participant VM '+(run.saved_settings?.participant_vmid??'—')));
+   card.append(el('p','Task: '+trial.task_id,'small'));
    card.append(el('p',`${trial.trial_id} · ${trial.condition_id} · repetition ${trial.repetition} · attempt ${trial.attempt}`));
    const timing=el('p',null,'small');timing.append(document.createTextNode('Trial elapsed (includes setup and collection): '),timer(trial.elapsed_seconds,p.observed_at,p.active,true));card.append(timing);
    if(transport?.files_total)card.append(el('p',`Inputs transferred: ${transport.files_uploaded} / ${transport.files_total} files · ${(transport.bytes_uploaded??0).toLocaleString()} / ${(transport.bytes_total??0).toLocaleString()} bytes acknowledged`,'small'));
@@ -27,7 +83,7 @@ function renderProgress(run){
   if(p.trials.length){const wrap=el('div',null,'scroll'),table=el('table'),header=el('tr'),thead=el('thead'),body=el('tbody');for(const title of ['Trial','Condition','Status','Verified','Score'])header.append(el('th',title));thead.append(header);for(const trial of p.trials){const row=el('tr');for(const value of [trial.trial_id,trial.condition_id,trial.status,trial.verified_success===true?'Yes':trial.verified_success===false?'No':trial.status==='running'?'Pending':'Unavailable',trial.score??'—'])row.append(el('td',value));body.append(row);}table.append(thead,body);wrap.append(table);card.append(wrap);}
   for(const trial of p.trials)for(const error of trial.errors||[])card.append(el('p',`${trial.trial_id} · ${error}`,'error'));
   if(run.error)card.append(el('p',run.error,'error'));
-  const details=el('details'),summary=el('summary','Recent sample events');details.dataset.run=run.output;details.open=expanded.has(run.output);details.append(summary,el('pre',p.events.slice(-12).map(e=>`${e.at} · ${e.message}`).join('\n')));card.append(details);target.append(card);
+  const details=el('details'),summary=el('summary','Recent run events');details.dataset.run=run.output;details.open=expanded.has(run.output);details.append(summary,el('pre',p.events.slice(-100).map(e=>`${e.at} · ${e.message}`).join('\n')));card.append(details);if(trial&&run.workflow_progress)target.querySelector('.workflow-progress').insertBefore(card,target.querySelector('.workflow-vms'));else target.append(card);
  }
 }
 function renderResultSummary(data){

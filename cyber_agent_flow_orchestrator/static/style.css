@@ -71,3 +71,5 @@
 @media(max-width:650px){.experiment-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}.experiment-tabs button{white-space:normal;padding:9px 6px}}
 
 #create-experiment-hint{grid-column:1;margin:6px 0;color:var(--muted)}.experiment-dialog-footer #create-experiment{grid-row:1 / span 3}
+
+.workflow-progress{margin-bottom:1.5rem}.workflow-vms{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.workflow-vm{border:1px solid var(--border,#cbd5e1);border-radius:8px;padding:12px}.workflow-vm h4{margin:0 0 8px}.workflow-stages{padding-left:24px}.workflow-step{padding:12px;margin:8px 0;border-left:3px solid #94a3b8}.workflow-step.running{border-color:#2563eb}.workflow-step.completed{border-color:#16a34a}.workflow-step.failed,.workflow-step.interrupted{border-color:#dc2626}.workflow-step p{margin:6px 0}

@@ -412,7 +412,7 @@ you can keep them open alongside the dashboard.
 
 Select and save **ScenarioForge**, **Cyber-agent-flow participant**, and **CoreVM** roles on Lab setup. Configure ScenarioForge's CORE connection and ensure the participant can reach its lab network. Under **Experiments → New**, choose a sample and create it. Creation imports and freezes the fixed package; **Deploy and run** prepares topology and fresh task secrets, deploys the XML, checks readiness, exports the evaluation suite, and starts CAF.
 
-The modal shows effective CAF settings and locked sample XML, prompt template, tool conditions and limits. **Edit CAF model settings** opens the model editor. Custom scenarios can edit repetitions, turns, trial time, tool timeout and context window; sample budgets are fixed.
+The modal shows effective CAF settings and locked sample XML, prompt template, tool conditions and limits. Model controls are in the **Cyber-agent-flow** tab. Custom scenarios can edit repetitions, turns, trial time, tool timeout and context window; sample budgets are fixed.
 
 | Sample | Runs | What it checks |
 | --- | --- | --- |
