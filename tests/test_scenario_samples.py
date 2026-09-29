@@ -103,6 +103,7 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hi
     task=flow['evaluation_tasks'][0]
     assert flow['flow_enabled'] is False
     assert flow['flag_assignments'] == []
+    assert task['required_checks'] == ['containers', 'services', 'ports']
     assert flow['chain'][0]['ipv4']=='10.77.0.7'
     assert 'http://10.77.0.7/' in task['prompt']
     assert ('progressive_hints' in task) is hints_enabled
@@ -130,9 +131,38 @@ public = json.loads((out / 'participant/tasks.json').read_text())
 private = json.loads((out / 'evaluator/verifiers.json').read_text())
 assert public[0]['prompt'] == state['evaluation_tasks'][0]['prompt']
 assert private[public[0]['id']] == state['evaluation_tasks'][0]['verifier']
+# Reproduce the deployed report: healthy website, no configured injects.
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from scenarioforge import cli
+from scenarioforge.evaluation.execution import build_execution_package
+from scenarioforge.evaluation.export import sha256
+report = dict(status='complete', ok=True, overall='pass', session_confirmed=True,
+    scenario='Fixed demo', session_id=1, core_host='fixture.invalid',
+    checked_at=datetime.now(timezone.utc).isoformat(), xml_sha256=sha256(xml.read_bytes()),
+    checks=[dict(key=k, status='pass') for k in ('containers', 'services', 'ports')] +
+           [dict(key=k, status='skip') for k in ('injects', 'segmentation', 'traffic', 'reachability', 'flow_pivot', 'pivot_access')])
+def checks(**kwargs):
+    print(cli.CHECK_ARTIFACTS_MARKER + ' ' + json.dumps(report), file=kwargs['stream'])
+    return True
+cli._run_cli_artifact_checks = checks
+backend = SimpleNamespace(_attack_graph_for_chain=lambda **kw: dict(schema_version=2,
+    scenario='Fixed demo', nodes=kw['chain_nodes'], edges=[]))
+options = dict(backend=backend, xml_path=xml, scenario='Fixed demo', session_id=1,
+    core_cfg={'host':'fixture.invalid'}, output=xml.parent / 'contract-ready', suite_id='ready-demo')
+assert build_execution_package(**options)['readiness_passed'] is True
+required_injects = [dict(t, required_checks=t['required_checks'] + ['injects']) for t in state['evaluation_tasks']]
+options.update(output=xml.parent / 'contract-blocked', suite_id='blocked-demo', definitions=required_injects)
+assert build_execution_package(**options)['readiness_passed'] is False
 """
         subprocess.run([sf_python, '-c', script, str(output)], check=True,
                        cwd=Path(__file__).resolve().parents[2] / 'scenarioforge')
+        from cyber_agent_flow_eval.scenarioforge import load_suite, require_ready
+        _, snapshot = load_suite(output.parent / 'contract-ready')
+        require_ready(snapshot, 3600)
+        _, blocked = load_suite(output.parent / 'contract-blocked')
+        with pytest.raises(ValueError, match='prerequisite check'):
+            require_ready(blocked, 3600)
     expected=task['verifier']['expected']
     assert '10.77.0.7' not in json.dumps(expected)
     assert all(value not in task['prompt'] for value in ([expected['service_token']] if sample_id=='smoke' else expected['flags']))

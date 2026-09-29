@@ -46,3 +46,5 @@ Deployment is retained after the run or a stop request. Historical participant-o
 Enable **Provide progressive hints** under **New → Evaluation** to test recovery when the agent stalls. The default is off. Both conditions share up to three ordered, private scenario hints, released after two turns without observed progress or an incorrect final answer, within the original budget. Starting prompts and expected answers stay unchanged. Results separate successes with and without assistance and record hint text, source, timing, trigger and any facts revealed. See [the hint policy and guide/fact sources](scenario-experiments.md#optional-progressive-hints).
 
 The fixed demos use prepared Compose websites with explicit evaluation tasks. Their XML retains an evaluation chain and sets `flow_enabled: false` because no Flow generators are assigned; ScenarioForge still prepares the topology, deploys to CORE, checks readiness, and exports the evaluation package.
+
+Both demos require the containers, services and ports readiness checks to pass. Their websites use Compose mounts, so the unconfigured inject-file check may correctly be skipped.
