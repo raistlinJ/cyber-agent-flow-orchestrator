@@ -74,6 +74,7 @@ def main():
                     page.locator('[data-route=experiments]').click()
                     expect(page.locator('#new-experiment')).to_be_enabled(timeout=30000)
                     page.locator('#new-experiment').click()
+                    page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                     expect(page.locator('#experiment-dialog #model-config-panel')).to_be_visible()
                     expect(page.locator('#model-participant-read')).to_be_enabled(timeout=30000)
                     page.locator('#model-participant-read').click()

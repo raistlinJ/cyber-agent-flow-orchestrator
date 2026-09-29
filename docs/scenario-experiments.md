@@ -86,3 +86,7 @@ XML defines the ScenarioForge lab. CAF's checkout, Python executable, model and 
 **Edit CAF model settings** opens the existing model controls. Pull from VM reads the application configuration; saving changes requires application-maintenance access. Creating an experiment saves those changes and freezes its settings.
 
 Custom scenarios can set repetitions, maximum turns, trial seconds, tool timeout and context window in New. Their baseline tools remain fixed; task prompts/verifiers come from ScenarioForge's export. Sample budgets and conditions are fixed to preserve the experiment design.
+
+### New experiment tabs
+
+The enlarged modal separates **Experiment** (type and demo packages), **ScenarioForge** (fixed sample XML or custom scenario import/selection), **Cyber-agent-flow** (effective runtime and model editor), and **Evaluation** (limits and conditions). Settings persist when switching tabs. Create stays visible, and validation opens the tab containing a field that needs correction. Arrow keys, Home and End navigate the tab bar.

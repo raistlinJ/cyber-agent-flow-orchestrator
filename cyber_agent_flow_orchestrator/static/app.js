@@ -264,6 +264,32 @@ function renderExperiments(data){
  }
 }
 function openProgress(id){return openRunWindow('progress',id);}
+function selectExperimentTab(name,{focus=false}={}){
+ for(const button of document.querySelectorAll('[data-experiment-tab]')){
+  const selected=button.dataset.experimentTab===name;
+  button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;
+  $('experiment-panel-'+button.dataset.experimentTab).hidden=!selected;
+  if(selected&&focus)button.focus();
+ }
+ document.querySelector('.experiment-tab-content').scrollTop=0;
+}
+const experimentTabs=[...document.querySelectorAll('[data-experiment-tab]')];
+for(const button of experimentTabs){
+ button.addEventListener('click',()=>selectExperimentTab(button.dataset.experimentTab));
+ button.addEventListener('keydown',event=>{
+  const index=experimentTabs.indexOf(button);
+  const target=event.key==='ArrowRight'?(index+1)%experimentTabs.length:event.key==='ArrowLeft'?(index+experimentTabs.length-1)%experimentTabs.length:event.key==='Home'?0:event.key==='End'?experimentTabs.length-1:null;
+  if(target!==null){event.preventDefault();selectExperimentTab(experimentTabs[target].dataset.experimentTab,{focus:true});}
+ });
+}
+function validateExperimentFields(form){
+ const invalid=[...form.elements].find(input=>input.willValidate&&!input.validity.valid);
+ if(!invalid)return true;
+ const panel=invalid.closest('[role="tabpanel"]');
+ if(panel)selectExperimentTab(panel.id.replace('experiment-panel-',''));
+ invalid.reportValidity();invalid.focus();return false;
+}
+
 let customEvaluation=null;
 const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window'];
 function renderCAFSettings(data){
@@ -294,7 +320,7 @@ function renderEvaluationSettings(scenario,sample){
  renderCAFSettings(snapshot);
 }
 $('evaluation-settings').addEventListener('input',()=>{if(!$('evaluation-settings').disabled)customEvaluation=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));});
-$('edit-caf-model').addEventListener('click',()=>{$('model-config-panel').scrollIntoView({behavior:'smooth',block:'start'});$('model-participant-read')?.focus({preventScroll:true});});
+$('edit-caf-model').addEventListener('click',()=>{selectExperimentTab('caf');$('model-config-panel').scrollIntoView({behavior:'smooth',block:'start'});$('model-participant-read')?.focus({preventScroll:true});});
 
 function describeSample(){
  const scenario=$('experiment-sample').value==='scenarioforge-xml',sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);
@@ -304,7 +330,7 @@ function describeSample(){
  $('experiment-budget').textContent=scenario?'Baseline tools · configure repetitions and trial limits below':sample?sample.trials+' trials · up to '+sample.max_turns+' turns and '+sample.wall_seconds+'s per trial':'';
 }
 
-$('new-experiment').addEventListener('click',()=>{if(isBusy())return;customEvaluation=null;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();$('experiment-dialog').showModal();});
+$('new-experiment').addEventListener('click',()=>{if(isBusy())return;customEvaluation=null;const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();});
 let scenarioChoices=[],scenarioChoiceVM=null;
 function describeScenarioSelection(){
  const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
@@ -350,7 +376,7 @@ async function sendScenario(file){
 $('upload-scenario').addEventListener('click',()=>sendScenario($('scenario-file').files[0]));
 for(const button of document.querySelectorAll('[data-demo-scenario]'))button.addEventListener('click',async()=>{
  if(isBusy())return;
- $('experiment-sample').value='scenarioforge-xml';describeSample();
+ $('experiment-sample').value='scenarioforge-xml';describeSample();selectExperimentTab('scenario');
  operation='Loading demo scenario package…';syncBusy();
  let file;
  try{const response=await apiFetch('/demo-'+button.dataset.demoScenario+'.zip');if(!response.ok)throw Error('Demo package is unavailable');file=await response.blob();}
@@ -365,11 +391,11 @@ $('experiment-dialog').addEventListener('cancel',event=>{if(experimentCreating||
 $('experiment-form').addEventListener('submit',async event=>{
  event.preventDefault();if(isBusy()||experimentCreating)return;
  const scenario=$('experiment-sample').value==='scenarioforge-xml';
- if(!$('experiment-form').reportValidity())return;
- if(scenario&&(!scenarioChoices.some(item=>item.id===$('scenario-selection').value)||rolesDirty)){$('experiment-error').textContent=rolesDirty?'Save VM roles before creating an experiment.':'Load and choose a saved scenario first.';return;}
+ if(!validateExperimentFields($('experiment-form')))return;
+ if(scenario&&(!scenarioChoices.some(item=>item.id===$('scenario-selection').value)||rolesDirty)){selectExperimentTab('scenario');$('experiment-error').textContent=rolesDirty?'Save VM roles before creating an experiment.':'Load and choose a saved scenario first.';return;}
  const modelForm=$('model-config-participant'),saveModel=Boolean(modelDrafts.participant);
  if(saveModel&&(!snapshot?.updates?.can_update||rolesDirty)){$('experiment-error').textContent=rolesDirty?'Save VM role selections before creating an experiment.':'Model settings cannot be saved without application maintenance access.';return;}
- if(saveModel&&!modelForm.reportValidity())return;
+ if(saveModel&&!validateExperimentFields(modelForm))return;
  $('experiment-error').textContent='';
  startCreationProgress(saveModel);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;

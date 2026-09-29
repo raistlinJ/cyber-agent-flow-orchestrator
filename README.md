@@ -380,7 +380,7 @@ For a concise overview of tasks, prompts, tools, and collected metrics, see the
 
 ### Choose your model before running
 
-Open **Experiments → New → Application model settings**, then choose **Pull from VM** for
+Open **Experiments → New → Cyber-agent-flow**, then choose **Pull from VM** for
 Cyber-agent-flow. The editor reads `configs/cli.json` from the selected participant.
 For an OpenAI-compatible endpoint, select **OpenAI / compatible**, enter the API
 base URL (usually `https://your-server/v1`) and its exact model name, then press
