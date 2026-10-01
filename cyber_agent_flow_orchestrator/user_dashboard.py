@@ -8,6 +8,7 @@ from .config import load
 from .monitor import ProxmoxProbe, definitions, snapshot
 from .workspaces import Workspace, ROLES
 from . import service
+from .observation_cache import CachedProbe, ObservationCache
 
 
 class UserDashboard:
@@ -20,7 +21,7 @@ class UserDashboard:
         self.root, self.interval = runs_root, interval
         self.probe_factory = probe_factory or (lambda backend, access: ProxmoxProbe(backend, access))
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='user-monitor')
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.slots = threading.BoundedSemaphore(4)
         self.entries = {}
         from .samples import SampleManager
@@ -51,7 +52,7 @@ class UserDashboard:
             self.entries.pop(access.username, None)
         return {'roles': result}
 
-    def read(self, access, *, force=False, observe=True):
+    def read(self, access, *, force=False, observe=True, fresh=False):
         available = access.inventory()
         permitted = {row['vmid'] for row in available}
         # inventory() has just checked this identity. Recheck inventory/identity
@@ -65,7 +66,8 @@ class UserDashboard:
         with self.lock:
             entry = self.entries.get(access.username)
             if entry is None or entry['key'] != key:
-                entry = {'key': key, 'value': None, 'future': None, 'at': 0, 'completed': []}
+                entry = {'key': key, 'value': None, 'future': None, 'at': 0, 'completed': [],
+                         'observations': ObservationCache(), 'run_cache': {}, 'run_cache_lock': threading.Lock()}
                 self.entries[access.username] = entry
             future = entry['future']
             if future and future.done():
@@ -86,12 +88,21 @@ class UserDashboard:
                             entry['completed'] = completed
                     try:
                         entry['future'] = self.pool.submit(snapshot, self.cfg, self.runtime, workspace.runs,
-                                                          self.probe_factory(self.runtime['backend'], access), selected=selected,
-                                                          progress=progress)
+                                                          CachedProbe(self.probe_factory(self.runtime['backend'], access), entry['observations'], fresh=fresh),
+                                                          selected=selected, progress=progress, include_runs=False)
                     except BaseException:
                         self.slots.release()
                         raise
-                    entry['future'].add_done_callback(lambda _: self.slots.release())
+                    def finish(future):
+                        self.slots.release()
+                        with self.lock:
+                            if entry['future'] is future:
+                                try:
+                                    entry['value'] = future.result()
+                                except Exception:
+                                    entry['value'] = None
+                                entry['future'], entry['at'] = None, time.monotonic()
+                    entry['future'].add_done_callback(finish)
             value = deepcopy(entry['value']) if entry['value'] else {
                 'checked_at': None, 'workflow_id': self.cfg['id'], 'vms': [], 'runs': [], 'errors': []}
             value.update(refreshing=entry['future'] is not None, poll_seconds=self.interval,
@@ -105,6 +116,15 @@ class UserDashboard:
                         break
         # Remove revoked or moved VMs even if access changed during cache retrieval.
         latest = {r['vmid'] for r in access.inventory()}
+        # Warm caches can finish while the request performs its final access
+        # check. Return that observation immediately, avoiding another poll.
+        with self.lock:
+            if entry['value']:
+                for field in ('checked_at', 'vms', 'errors', 'scope'):
+                    if field in entry['value']:
+                        value[field] = deepcopy(entry['value'][field])
+            value['refreshing'] = entry['future'] is not None
+            completed = set(entry['completed'])
         value['vms'] = [vm for vm in value['vms'] if vm['vmid'] is None or vm['vmid'] in latest]
         value['available_vms'] = [vm for vm in available if vm['vmid'] in latest]
         value['roles'] = {k: v if v in latest else None for k, v in roles.items()}
@@ -114,7 +134,8 @@ class UserDashboard:
                             'percent': round(100 * done / total) if total else 100,
                             'status': 'Checking VM power, guest access and applications' if value['refreshing'] else 'VM checks complete'}
         # Trial progress is independent of a potentially slow guest observation.
-        value['runs'] = service.list_runs(workspace.runs)
+        with entry['run_cache_lock']:
+            value['runs'] = service.list_runs(workspace.runs, cache=entry['run_cache'])
         value['samples'] = self.samples.catalog(value['roles'], workspace)
         value['scenarios'] = dict(enabled=True, vmid=value['roles'].get('scenarioforge'),
             allowed_targets=', '.join(self.runtime['execution']['network_policy']['allow']),

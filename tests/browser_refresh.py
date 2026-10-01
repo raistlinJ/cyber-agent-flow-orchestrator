@@ -22,8 +22,9 @@ class Dashboard:
             dict(role='participant', vmid=9403, ref='main'),
             dict(role='scenarioforge', vmid=9402, ref='main')])
 
-    def read(self, access, *, force=False, observe=True):
+    def read(self, access, *, force=False, observe=True, fresh=False):
         access.current()
+        self.last_fresh = fresh
         return deepcopy(self.value)
 
     def maintain(self, access, data):
@@ -131,6 +132,10 @@ def main():
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 page.evaluate('scrollTo(0, 0)')
                 page.screenshot(path=str(destination / 'refresh-mobile.png'), full_page=True)
+                page.get_by_role('button', name='Recheck VMs', exact=True).click()
+                page.wait_for_timeout(100)
+                assert dashboard.last_fresh
+                assert any(url.endswith('refresh=1&fresh=1') for url in statuses)
                 # A failed background read must not dispatch the waiting action.
                 choose_period('1')
                 page.clock.fast_forward(60000)

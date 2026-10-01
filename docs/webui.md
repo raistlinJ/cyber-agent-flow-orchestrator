@@ -95,7 +95,7 @@ HTTP requests and maintenance operations use an indeterminate indicator and thei
 current status because their total work is unknown. Maintenance details remain
 readable while an operation is active.
 
-Manual **Refresh view** starts fresh VM checks in PVE mode. **Lab setup → Automatic refresh**
+Manual **Refresh view** updates the dashboard using short-lived VM observation caches in PVE mode. **Recheck VMs** bypasses those caches for a fresh scan. **Lab setup → Automatic refresh**
 offers Never or every 1, 2, 5, or 10 minutes, defaulting to 1 minute. The preference
 is saved in this browser and can be changed while a check is running. Never stops
 periodic page refreshes; it does not cancel a check or job already started. With
@@ -407,10 +407,17 @@ hypervisors are not implemented here.
 The browser's **Automatic refresh** setting controls idle status requests and new
 PVE VM-check batches. Intervals start after the preceding check/action completes;
 slow calls never pile up. A page load, a saved role change or **Refresh view** also
-requests fresh PVE VM checks. The three roles are checked concurrently with bounded
+requests PVE VM checks using short-lived observation caches. The three roles are checked concurrently with bounded
 guest timeouts, off the HTTP request path. Every read still revalidates access.
 Each user has a separate cached snapshot. `/api/status?refresh=0` reads progress
-without scheduling probes; `?refresh=1` requests a fresh batch if none is running.
+without scheduling probes; `?refresh=1` requests a batch if none is running.
+Guest application/process observations are cached for 60 seconds, or five seconds
+when workflow jobs are active; power observations are cached for five seconds.
+Cached guest observations retain their original timestamp and are labeled in VM
+cards. **Recheck VMs** (`?refresh=1&fresh=1`) bypasses observation caches.
+Completed experiment summaries are reused for up to five minutes, invalidated
+when workflow/evaluation data changes or a coordinator becomes active. Active
+experiment status and access checks remain fresh.
 The unqualified status API retains the server cache interval (`--poll-seconds`,
 default 10, minimum 2, maximum 300 seconds).
 

@@ -289,7 +289,11 @@ def test_observation_progress_counts_completed_authorized_vms_and_forced_refresh
         assert not dash.read(user)['refreshing']  # Respect ordinary observation interval.
         dash.entries[user.username]['at'] = 0  # The cached observation is now due.
         assert not dash.read(user, observe=False)['refreshing']  # Progress reads never restart probes.
-        assert dash.read(user, force=True)['refreshing']  # Manual refresh starts fresh checks.
+        # A warm refresh can finish in the same HTTP response.
+        warm = dash.read(user, force=True)
+        assert warm['checked_at'] and warm['vms'][0]['guest_cached']
+        release[101].clear()
+        assert dash.read(user, force=True, fresh=True)['refreshing']  # Explicit recheck bypasses cached guests.
     finally:
         for event in release.values(): event.set()
         dash.close()

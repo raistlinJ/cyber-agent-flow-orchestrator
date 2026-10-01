@@ -101,7 +101,7 @@ def recorded_commands(root):
     return jobs, errors
 
 
-def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None, progress=None):
+def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None, progress=None, include_runs=True):
     probe = probe or ProxmoxProbe(runtime['backend'])
     jobs, errors = recorded_commands(runs_root)
     def check(definition):
@@ -123,7 +123,7 @@ def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None, progress=Non
         try:
             row.update(probe.guest(vmid, definition, units))
             row['guest_access'] = 'reachable'
-            row['observed_at'] = now()
+            row['observed_at'] = row.get('guest_observed_at') or now()
             states = {s['unit']: s for s in row['services']}
             for job in row['jobs']:
                 state = states.get(job['unit'], {})
@@ -154,7 +154,7 @@ def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None, progress=Non
                 if progress:
                     progress(list(completed))
     try:
-        runs = service.list_runs(runs_root) if Path(runs_root).is_dir() else []
+        runs = service.list_runs(runs_root) if include_runs and Path(runs_root).is_dir() else []
     except Exception as exc:
         runs = []
         errors.append({'error': str(exc)})

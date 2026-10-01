@@ -85,6 +85,7 @@ function render(data) {
   label.append(el('h3',vm.label),el('div',vm.vmid ? `VM ${vm.vmid}${vm.name?' · '+vm.name:''}`:'No VM selected','vm-id'));
   const power=vm.qmp_status==='paused'?'paused':vm.power;
   top.append(el('span',vm.role==='core'?'◈':'▤','vm-icon'),label,badge(power,power==='running'?'good':power==='unknown'?'warn':''));card.append(top);
+  if(vm.guest_cached){const note=el('p',null,'small');note.append(document.createTextNode('Cached guest observation · '),timer(0,vm.observed_at,true),document.createTextNode(' ago · Recheck VMs for a fresh scan'));card.append(note);}
   const list=el('dl');detail(list,'Guest agent',vm.guest_access);if(vm.qmp_status && vm.qmp_status!==vm.power)detail(list,'Emulator state',vm.qmp_status);detail(list,'Application',vm.application_present==null?'Not checked':vm.application_present?'Present':'Not found at configured location');
   detail(list,'Processes observed',vm.guest_access==='reachable'?String(vm.processes.length):'Unknown');
   card.append(list);
@@ -106,13 +107,13 @@ function render(data) {
  waitingForMaintenance=Boolean((data.updates?.jobs||[]).some(job=>['queued','running'].includes(job.status)));waitingForObservation=Boolean(data.refreshing&&(data.loading?data.loading.total>0:(!data.checked_at||data.vms.length>0)));if(!waitingForObservation)foregroundChecks=false;tick();syncBusy();
 }
 function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,Number($('refresh-period').value)*120));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&(!stale||clock.dataset.source==='sample')&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale&&clock.dataset.source!=='sample'?'Last observation; refresh required':clock.dataset.source==='sample'?'Elapsed time since sample or trial start':'Elapsed time since process start';}}
-async function refresh(force=false, background=false){
+async function refresh(force=false, background=false, fresh=false){
  if(refreshPromise)return refreshPromise;
  clearTimeout(pollTimer);fetching=true;blockingRefresh=!background;if(force&&!background)foregroundChecks=true;syncBusy();
  refreshPromise=(async()=>{
   try{
    if(!csrfToken){await loadSession();syncBusy();}
-   const response=await apiFetch(force?'/api/status?refresh=1':'/api/status?refresh=0',{cache:'no-store'});
+   const response=await apiFetch(force?'/api/status?refresh=1'+(fresh?'&fresh=1':''):'/api/status?refresh=0',{cache:'no-store'});
    if(response.status===401)sessionExpired();
    if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);
    const data=await dashboardJSON(response);failed=false;render(data);return true;
@@ -121,12 +122,14 @@ async function refresh(force=false, background=false){
  })();
  try{return await refreshPromise;}finally{refreshPromise=null;schedulePoll();}
 }
-$('refresh').addEventListener('click',async()=>{
- if(isBusy())return;operation='Refreshing dashboard…';syncBusy();
- try{await finishDashboardRead(true);await refresh(true);}
+async function refreshView(fresh=false){
+ if(isBusy())return;operation=fresh?'Rechecking selected VMs…':'Refreshing dashboard…';syncBusy();
+ try{await finishDashboardRead(true);await refresh(true,false,fresh);}
  catch(error){if(!redirecting){$('notice').hidden=false;$('notice').textContent=error.message;}}
  finally{operation=null;syncBusy();schedulePoll();}
-});
+}
+$('refresh').addEventListener('click',()=>refreshView());
+$('recheck-vms').addEventListener('click',()=>refreshView(true));
 async function finishDashboardRead(allowFailure=false){
  if(refreshPromise&&!await refreshPromise&&!allowFailure)throw Error('Dashboard refresh failed. Refresh the view before retrying.');
  if(redirecting)throw Error('Your session expired. Sign in again.');

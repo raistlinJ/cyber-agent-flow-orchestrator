@@ -4,6 +4,8 @@ Functions return JSON-serializable values or raise exceptions; none print, parse
 CLI arguments, or start a web server. run/recover are the execution entry points.
 """
 from pathlib import Path
+from copy import deepcopy
+import time
 from datetime import datetime, timezone
 from cyber_agent_flow_eval import integration as ev, reporting
 from .config import load
@@ -73,7 +75,7 @@ def status(output):
             'evaluation': evaluation_status}
 
 
-def list_runs(root):
+def list_runs(root, *, cache=None):
     root = Path(root).resolve()
     if not root.is_dir():
         raise ValueError(f'Run root does not exist: {root}')
@@ -82,9 +84,35 @@ def list_runs(root):
         if child.is_symlink() or not (child / 'workflow.json').is_file():
             continue
         try:
-            rows.append(status(child))
+            key = str(child)
+            def stamp(name):
+                try:
+                    stat = (child / name).stat()
+                    return stat.st_mtime_ns, stat.st_size
+                except FileNotFoundError:
+                    return None
+            signature = tuple(stamp(name) for name in ('workflow.json', 'evaluation/manifest.json', 'evaluation/dataset.jsonl', 'stop-request.json'))
+            saved = cache.get(key) if cache is not None else None
+            if (saved and saved[0] == signature and time.monotonic() - saved[1] < 300
+                    and not reporting.active(child / '.workflow.lock')
+                    and not reporting.active(child / 'evaluation' / '.coordinator.lock')):
+                rows.append(deepcopy(saved[2]))
+                continue
+            row = status(child)
+            rows.append(row)
+            if cache is not None:
+                terminal = row['recorded_status'] in ('completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted')
+                if terminal and not row.get('coordinator_active') and not (row.get('evaluation') or {}).get('coordinator_active'):
+                    cache[key] = (signature, time.monotonic(), deepcopy(row))
+                else:
+                    cache.pop(key, None)
         except (ValueError, OSError, KeyError, TypeError) as exc:
             rows.append({'output': str(child), 'error': str(exc)})
+    if cache is not None:
+        present = {row['output'] for row in rows}
+        for key in list(cache):
+            if key not in present:
+                del cache[key]
     return rows
 
 

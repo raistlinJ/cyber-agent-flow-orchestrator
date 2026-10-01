@@ -155,6 +155,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
                             raise AccessDenied('A per-user dashboard is required for PVE login')
                         refresh = parse_qs(urlsplit(self.path).query).get('refresh')
                         options = {'observe': False} if refresh == ['0'] else {'force': refresh == ['1']}
+                        if refresh != ['0'] and parse_qs(urlsplit(self.path).query).get('fresh') == ['1']:
+                            options.update(force=True, fresh=True)
                         self.respond(200, dashboard.read(auth.access(token, revalidate=False), **options))
                     else:
                         self.respond(200, dashboard.read())
