@@ -26,6 +26,8 @@ class Agent:
 
     def call(self, vmid, op, **data):
         self.calls.append((vmid, op, data))
+        if op == 'preflight':
+            return {'ready':True,'stopped':[]}
         if op == 'stop':
             if self.stop_fail:
                 raise ValueError('guest unavailable')
@@ -149,7 +151,7 @@ def test_target_lock_blocks_all_guest_mutation(lab):
     with ev.TargetReservation(runtime['execution']['target_lock']):
         with pytest.raises(ValueError, match='Already locked'):
             workflow.run(config, output, agent=agent)
-    assert not agent.calls
+    assert not [call for call in agent.calls if call[1]!='preflight']
 
 
 def test_cleanup_failure_blocks_eval_and_is_recoverable(lab):
@@ -169,7 +171,7 @@ def test_config_change_refuses_resume_and_plan_has_no_guest_actions(lab, capsys)
     config, output, agent, _ = lab
     assert main(['plan', str(config)]) == 0
     assert 'exported tasks' in capsys.readouterr().out
-    assert not agent.calls
+    assert not [call for call in agent.calls if call[1]!='preflight']
     workflow.run(config, output, agent=agent)
     cfg = yaml.safe_load(config.read_text())
     cfg['id'] = 'changed'
@@ -213,7 +215,7 @@ def test_readiness_gate_precedes_generation(lab, monkeypatch):
     monkeypatch.setattr(ev, 'require_ready', expired)
     with pytest.raises(ValueError, match='readiness expired'):
         workflow.run(config, output, agent=agent)
-    assert not agent.calls
+    assert not [call for call in agent.calls if call[1]!='preflight']
     assert not (output / 'evaluation').exists()
 
 

@@ -5,22 +5,13 @@ const params=new URLSearchParams(location.search),view=params.get('view'),runId=
 let loading=false,poll=null,workflow=null,logs=[],retryAllowed=true,updatedAt=null;
 function refreshMinutes(){try{const value=localStorage.getItem('caf-refresh-minutes');return ['0','1','2','5','10'].includes(value)?Number(value):1;}catch{return 1;}}
 function runIsActive(){return workflow?.coordinator_active||workflow?.sample_progress?.active||['queued','stopping'].includes(workflow?.recorded_status);}
-function refreshDelay(){const minutes=refreshMinutes();if(!minutes)return 0;const active=workflow?.coordinator_active||workflow?.sample_progress?.active||['queued','stopping'].includes(workflow?.recorded_status);return active?5000:minutes*60000;}
-function showRefreshStatus(){if(!workflow||loading||!$('run-error').hidden)return;const delay=refreshDelay();$('run-status').textContent=workflow.recorded_status+' · Updated '+updatedAt+' · '+(delay?'Refreshes every '+(delay===5000?'5 seconds':refreshMinutes()+' minute(s)'):'Automatic refresh off'+(runIsActive()?' · Checking for experiment completion':''));}
-function scheduleRunRefresh(){clearTimeout(poll);const delay=refreshDelay();if(!loading&&retryAllowed){if(delay)poll=setTimeout(()=>{if(refreshMinutes())refreshRun();},delay);else if(runIsActive())poll=setTimeout(checkRunCompletion,5000);}}
+function refreshDelay(){return runIsActive()?5000:refreshMinutes()*60000;}
+function showRefreshStatus(){if(!workflow||loading||!$('run-error').hidden)return;const delay=refreshDelay();$('run-status').textContent=workflow.recorded_status+' · Updated '+updatedAt+' · '+(runIsActive()?'Live run updates every 5 seconds':delay?'Refreshes every '+refreshMinutes()+' minute(s)':'Automatic refresh off');}
+function scheduleRunRefresh(){clearTimeout(poll);const delay=refreshDelay();if(!loading&&retryAllowed){if(delay)poll=setTimeout(()=>{if(refreshDelay())refreshRun({silent:true});},delay);}}
 window.addEventListener('storage',event=>{if(event.key==='caf-refresh-minutes'){scheduleRunRefresh();showRefreshStatus();}});
 function log(kind,message){logs.push({at:new Date().toISOString(),kind,message});logs=logs.slice(-100);renderConsole();}
 function renderConsole(){const entries=[...logs,...(workflow?.sample_progress?.events||[])].sort((a,b)=>a.at.localeCompare(b.at));$('console-output').textContent=entries.slice(-300).map(e=>`${e.at} [${e.kind||'sample'}] ${e.message}`).join('\n')||'Waiting for activity…';}
 function clearRun(){$('window-notice').hidden=true;$('window-notice').replaceChildren();workflow=null;renderedConfiguration=null;scenarioPreviews.clear();$('run-configuration').replaceChildren();$('sample-activity').replaceChildren();$('result-summary').replaceChildren();$('result-content').textContent='';$('download-dataset').hidden=true;logs=[];renderConsole();}
-async function checkRunCompletion(){
- if(loading)return;
- try{
-  const response=await fetch('/api/runs/'+encodeURIComponent(runId)+'/status',{cache:'no-store'});
-  if([401,403,404].includes(response.status)){await refreshRun({silent:true});return;}
-  if(response.ok){const current=await dashboardJSON(response);if(['completed','completed_with_errors','cancelled','failed','interrupted'].includes(current.recorded_status)&&!current.coordinator_active&&!current.sample_progress?.active){await refreshRun({silent:true});return;}}
- }catch(error){log('error','Completion check: '+error.message);}
- scheduleRunRefresh();
-}
 async function refreshRun({silent=false}={}){
  if(loading)return;if(!silent)loadingModal.set('run',true,view==='results'?'Loading experiment results…':'Loading experiment progress…');clearTimeout(poll);loading=true;$('refresh-run').disabled=true;$('run-status').textContent='Loading saved run data…';
  const endpoint=`/api/runs/${encodeURIComponent(runId)}/${view==='results'?'results':'status'}`;

@@ -425,6 +425,8 @@ class ScenarioExperiments:
                     record.update(started_at=now(), status='preparing', phase='verifying', message='Verifying the saved scenario XML on ScenarioForge')
                     from .workflow import Workflow
                     from .workflow_progress import step, checkpoint
+                    from .vm_preflight import run as preflight
+                    preflight(Workflow(output, record, progress=None))
                     observer = Workflow(output, record, agent=guest(runtime['backend']), progress=None)
                     with step(observer, 'snapshot'):
                         checkpoint(observer, 'Connecting to ScenarioForge and verifying the frozen XML hash')

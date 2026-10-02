@@ -429,28 +429,32 @@ $('experiment-form').addEventListener('submit',async event=>{
  $('experiment-error').textContent='';
  startCreationProgress(saveModel);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment with saved model settings…';syncBusy();}creationProgress(2,'running','Saving experiment on orchestrator…');await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment · Model settings saved; preparing scenario request…';syncBusy();}creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed: '+error.message);$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });
 async function experimentRequestWithProgress(payload,action="create"){
- let finished=false,timer=null;
- const started=Date.now();
+ let finished=false,timer=null,lastStatus='Submitting request and checking access…';
+ const started=Date.now(),title=action==='run'?'Starting experiment':'Creating experiment';
+ const render=()=>{if(finished)return;const label=`${title} · ${lastStatus} · ${Math.floor((Date.now()-started)/1000)}s elapsed`;operation=label;if(action==='create')creationProgress(2,'running',label);syncBusy();};
+ render();
+ const heartbeat=setInterval(render,1000);
  const poll=async()=>{
+  const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),10000);
   try{
-   const response=await apiFetch('/api/experiments/'+(action==='run'?'start-status':'creation-status')+'?request_id='+encodeURIComponent(payload.request_id));
-   if(response.ok){const status=await dashboardJSON(response);if(!finished){
-    const prefix=status.total?`Step ${status.step}/${status.total}`:'Connecting';
-    const label=`${action==='run'?'Starting experiment':'Creating experiment'} · ${prefix} · ${status.message} · ${Math.floor((Date.now()-started)/1000)}s elapsed`;
-    operation=label;if(action==='create')creationProgress(2,'running',label);syncBusy();
-   }}
-  }catch(error){/* Creation response remains authoritative; progress reads can retry. */}
+   const response=await apiFetch('/api/experiments/'+(action==='run'?'start-status':'creation-status')+'?request_id='+encodeURIComponent(payload.request_id),{cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error(`Progress status HTTP ${response.status}`);
+   const status=await dashboardJSON(response);
+   if(!finished){lastStatus=(status.total?`Step ${status.step}/${status.total}`:'Awaiting server checkpoint')+' · '+status.message;render();}
+  }catch(error){if(!finished){lastStatus=`Progress update unavailable (${error.name==='AbortError'?'request timed out':error.message}); retrying. Creation/launch request is still pending`;render();}}
+  finally{clearTimeout(deadline);}
   if(!finished)timer=setTimeout(poll,2000);
  };
- timer=setTimeout(poll,500);
+ timer=setTimeout(poll,250);
  try{return await apiFetch('/api/experiments/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(payload)});}
- finally{finished=true;clearTimeout(timer);}
+ finally{finished=true;clearTimeout(timer);clearInterval(heartbeat);}
 }
+
 async function experimentAction(action,id){
  if(isBusy()||sampleStarting)return;
  if(action==='run'&&rolesDirty){$('sample-message').textContent='Save VM role changes on Lab setup before running.';return;}

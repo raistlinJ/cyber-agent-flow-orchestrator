@@ -100,7 +100,7 @@ offers Never or every 1, 2, 5, or 10 minutes, defaulting to 1 minute. The prefer
 is saved in this browser and can be changed while a check is running. Never stops
 periodic page refreshes; it does not cancel a check or job already started. With
 Never selected, active experiments receive quiet, read-only completion checks every
-five seconds. Only a terminal outcome updates the experiment row and open run windows,
+five seconds. Only a terminal outcome updates the dashboard experiment row,
 without a loading modal. These checks stop once the experiment finishes and do not
 start VM probes. With automatic refresh enabled, active operations report progress
 every five seconds.
@@ -192,6 +192,12 @@ Each row has four labeled icon buttons:
 | ◴ | Open the selected run's progress window |
 
 ![Experiment table and persistent console with simulated results](images/experiment-table.png)
+
+Before scenario preparation, a VM preflight reserves the selected VMs and checks
+for leftover CAF services. It stops jobs recorded in inactive runs, including
+evaluation workers and preparation hooks, while preserving their files and logs.
+An active run or an unrecognized active CAF service blocks startup. The Progress
+window shows the readiness and cleanup outcome for each VM.
 
 Only one experiment can run per account at a time. The server enforces this
 across browser tabs, and Run buttons stay disabled during execution and cleanup.
@@ -545,3 +551,8 @@ readiness checks and trial outcomes. Checkpoint history is retained per stage ev
 when the main console rolls over. Command previews show at most 60 lines, with
 common credentials redacted. These views only read saved host data. Existing runs
 can show their saved command logs and artifacts; new checkpoints require a new run.
+
+Active Progress and Results windows poll their saved run data every five seconds,
+independently of the dashboard Automatic refresh setting, including Never.
+These updates run silently without reopening the loading modal. With Never set,
+polling stops when the run finishes; dashboard VM observations remain unchanged.

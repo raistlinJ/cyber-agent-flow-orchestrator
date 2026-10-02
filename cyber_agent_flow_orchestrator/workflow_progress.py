@@ -27,6 +27,7 @@ def definitions(journal):
     steps += [('freeze', 'Freeze run configuration', participant, 'Save the exact tool catalogs, guidance and runtime settings on the orchestrator.'),
               ('import', 'Build evaluation plan', None, 'Import tasks and verifiers; combine tasks, tool conditions and repetitions.'),
               ('evaluate', 'Run and score trials', participant, 'Transfer trial inputs, run the CAF worker, collect outputs and score each trial on the orchestrator.')]
+    steps.insert(0, ('preflight', 'Check VM readiness and clean up leftover jobs', None, 'Reserve configured VMs, stop recorded jobs from inactive runs, and verify no active CAF services remain.'))
     return steps, app, core, participant
 
 
@@ -171,7 +172,7 @@ def build(journal, state, active, root=None):
                           active=status == 'running', error=clean(record.get('error') or old.get('error')) if record.get('error') or old.get('error') else None,
                           attempt_count=len(old.get('attempts', [])), log=old.get('log'),
                           live_log_bytes=attempt.get('live_log_bytes'), last_output_at=attempt.get('last_output_at'),
-                          operation=record.get('operation'), events=record.get('events', [])[-60:],
+                          vm_checks=record.get('vm_checks', []), operation=record.get('operation'), events=record.get('events', [])[-60:],
                           guest_observation=record.get('guest_observation'), transfers=record.get('transfers', [])[-20:],
                           timeout_seconds=attempt.get('timeout_seconds'), exitcode=attempt.get('exitcode'), log_tail=log_tail,
                           file_count=len(files), files=list(files)[:100],

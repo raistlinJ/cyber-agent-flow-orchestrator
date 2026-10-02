@@ -32,7 +32,10 @@ def main():
                     run_reads.append(route.request.url)
                     route.fulfill(json=current)
                 context.route('**/api/runs/demo/status',status)
-                context.route('**/api/runs/demo/results',lambda route:route.fulfill(json={'workflow':current,'evaluation':None,'run_configuration':None}))
+                def results(route):
+                    run_reads.append(route.request.url)
+                    route.fulfill(json={'workflow':current,'evaluation':None,'run_configuration':None})
+                context.route('**/api/runs/demo/results',results)
                 page.goto(server['origin'])
                 page.get_by_label('Username').fill('operator@pve')
                 page.get_by_label('Password',exact=True).fill(PASSWORD)
@@ -51,18 +54,21 @@ def main():
                 for view in ('progress','results'):
                     tab=context.new_page()
                     tab.goto(server['origin']+'/run?view='+view+'&run=demo')
-                    expect(tab.locator('#run-status')).to_contain_text('Automatic refresh off')
+                    expect(tab.locator('#run-status')).to_contain_text('Live run updates every 5 seconds')
                     expect(tab.locator('#loading-modal')).not_to_be_visible()
                     tab.clock.install()
                     tab.evaluate("dispatchEvent(new StorageEvent('storage',{key:'caf-refresh-minutes',newValue:'0'}))")
                     pages.append(tab)
                 for tab in pages:
                     tab.evaluate("""() => {window.loadingShows=0;new MutationObserver(()=>{if(document.getElementById('loading-modal').open)window.loadingShows++;}).observe(document.getElementById('loading-modal'),{attributes:true,attributeFilter:['open']});}""")
+                current['message']='Participant is uploading trial inputs'
                 before=len(dashboard_reads)
                 for tab in pages:
                     tab.clock.fast_forward(5000)
                     tab.wait_for_timeout(100)
                     expect(tab.locator('#loading-modal')).not_to_be_visible()
+                expect(pages[1].locator('#sample-activity')).to_contain_text('Participant is uploading trial inputs')
+                expect(pages[2].locator('#result-summary')).to_contain_text('Participant is uploading trial inputs')
                 assert len(run_reads)>=5
                 assert len(dashboard_reads)==before
                 expect(row).to_have_attribute('data-preserved','yes')
@@ -87,7 +93,7 @@ def main():
                 assert len(run_reads)==before_runs+1
                 assert not errors,errors
                 browser.close()
-    print('PASS: Never prevents page refreshes; silent completion updates dashboard, progress and results once')
+    print('PASS: Never prevents dashboard refreshes; active run windows update independently and stop at completion')
 
 
 if __name__=='__main__':

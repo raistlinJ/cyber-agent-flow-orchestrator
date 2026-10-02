@@ -95,6 +95,7 @@ def test_invalid_tasks(tasks):
 
 
 def test_tasks_create_preview_and_rerun_preserve_definitions(pve,lab,tmp_path,monkeypatch):
+    monkeypatch.setattr(ev, 'GuestAgent', lambda backend: lab[2])
     pve[0]['resources']['operator@pve']=[vm(9402),vm(9403)]
     user=access(pve)
     workspace=Workspace(tmp_path/'runs',user.username)

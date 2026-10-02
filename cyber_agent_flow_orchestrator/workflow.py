@@ -179,8 +179,10 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
         wf = Workflow(output, journal, agent, progress=progress)
         wf.save()
         wf.check_files()
-        wf.recover_jobs()
         try:
+            from .vm_preflight import run as preflight
+            preflight(wf)
+            wf.recover_jobs()
             if journal.get('scenario_experiment'):
                 journal.update(status='preparing', phase='preparing')
                 wf.save()

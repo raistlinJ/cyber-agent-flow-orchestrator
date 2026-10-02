@@ -56,6 +56,7 @@ function renderWorkflowProgress(run,target){
   details.append(el('summary','Stage details and output'));
   details.append(el('p',stage.operation|| (stage.status==='pending'?'Waiting for earlier stages.':'Detailed checkpoints were not recorded for this stage.'),'small'));
   if(stage.timeout_seconds!=null)details.append(el('p','Command limit: '+stage.timeout_seconds+'s'+(stage.exitcode!=null?' · Exit code: '+stage.exitcode:''),'small'));
+  for(const check of stage.vm_checks||[])details.append(el('p','VM '+check.vmid+' · '+(check.ready?'Ready':'Not ready')+' · '+(check.stopped||[]).length+' recorded job(s) stopped','small'));
   const observation=stage.guest_observation;
   if(observation)details.append(el('p','Last guest response: '+new Date(observation.at).toLocaleTimeString()+' · '+observation.state+(observation.pid?' · PID '+observation.pid:''),'small'));
   for(const transfer of stage.transfers||[])details.append(el('p','VM '+transfer.vmid+' · '+transfer.file+' · '+transfer.received_bytes+' / '+(transfer.total_bytes??'unknown')+' bytes · '+(transfer.verified?'Checksum verified':transfer.status),'small'));

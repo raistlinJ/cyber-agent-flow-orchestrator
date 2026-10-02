@@ -50,6 +50,7 @@ def test_unresolved_scenario_cannot_snapshot(tmp_path):
 
 @pytest.mark.parametrize("real_workflow", [False, True])
 def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, monkeypatch, real_workflow):
+    monkeypatch.setattr(ev, 'GuestAgent', lambda backend: lab[2])
     pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403)]
     user = access(pve)
     workspace = Workspace(tmp_path / 'runs', user.username)
