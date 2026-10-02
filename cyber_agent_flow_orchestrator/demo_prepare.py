@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 
 def prepare(options, backend):
+    print('[prepare] Validating frozen scenario XML', flush=True)
     source, destination = Path(options['source']), Path(options['destination'])
     destination.parent.mkdir(parents=True, exist_ok=True)
     tree = ET.parse(source)
@@ -21,7 +22,9 @@ def prepare(options, backend):
         raise ValueError('Demo requires its imported website artifact bundle')
     original = Path(sources[0]['restored_path'])
     assets = Path(options.get('artifacts', str(destination.parent / 'website')))
+    print('[prepare] Copying website assets', flush=True)
     shutil.copytree(original, assets, dirs_exist_ok=True)
+    print('[prepare] Website assets copied', flush=True)
     # Keep a local compose path so ScenarioForge transfers the entire recipe to CORE.
     recipe = scene.find(".//section[@name='Vulnerabilities']/item")
     recipe.set('v_path', str(assets / 'docker-compose.yml'))
@@ -35,6 +38,7 @@ def prepare(options, backend):
     sources[0]['target_path'] = str(assets)
     flow['reproduction_artifact_sources'] = sources
     flow_node.text = json.dumps(flow)
+    print('[prepare] Reading ScenarioForge CORE connection settings', flush=True)
     cfg = backend._core_backend_defaults(include_password=True)
     if not cfg:
         raise ValueError('Configure the ScenarioForge CORE connection before running samples')
@@ -45,10 +49,12 @@ def prepare(options, backend):
         tree.getroot().remove(old)
     tree.getroot().insert(0, connection)
     tree.write(destination, encoding='utf-8', xml_declaration=True)
+    print('[prepare] Resolving and persisting topology with the ScenarioForge planner', flush=True)
     result = backend._planner_persist_flow_plan(xml_path=str(destination), scenario=options['scenario'],
                                                seed=42, persist_plan_file=False)
     if result.get('persisted') is False:
         raise ValueError('ScenarioForge could not persist the demo topology')
+    print('[prepare] Topology planner completed; validating website host', flush=True)
     tree = ET.parse(destination)
     scene = tree.getroot().find('Scenario')
     preview = json.loads(scene.find('.//PlanPreview').text)['full_preview']
@@ -75,6 +81,7 @@ def prepare(options, backend):
                   'Keep requests on this host and port. Return only JSON with a flags array in discovery order '
                   '(first.html, then deeper/second.html).')
         expected = {'flags': flags}
+    print('[prepare] Website content prepared; writing evaluation task and optional hints', flush=True)
     hints = ([
         'Use the curl tool to fetch the HTTP address in the task; inspect the response body.',
         'The service token is plain text in the response body, not in a header. Remove the trailing newline.',
@@ -94,9 +101,11 @@ def prepare(options, backend):
         flow['evaluation_tasks'][0]['progressive_hints'] = hints
     node.text = json.dumps(flow)
     tree.write(destination, encoding='utf-8', xml_declaration=True)
-    print('Prepared fixed scenario XML, website and reviewed evaluation task')
+    print('[prepare] Prepared fixed scenario XML, website and reviewed evaluation task', flush=True)
 
 
 if __name__ == '__main__':
+    print('[prepare] Loading ScenarioForge backend', flush=True)
     from webapp import app_backend
+    print('[prepare] ScenarioForge backend loaded', flush=True)
     prepare(json.loads(sys.argv[1]), app_backend)

@@ -81,3 +81,63 @@ def test_interrupted_stage_does_not_keep_running(lab):
     result = build(journal, 'interrupted', False)
     assert result['current']['status']=='interrupted'
     assert not result['current']['active']
+
+
+def test_command_streams_partial_log_redacts_console_and_heartbeats(tmp_path, monkeypatch):
+    import time
+    clock = [0]
+    monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
+    calls = []
+    content = b'planner starting\npassword=hidden-value\n'
+    class Agent:
+        def qm(self, args, **kwargs):
+            return dict(pid=12, exited=False)
+        def call(self, vmid, op, **data):
+            calls.append((op, data))
+            self.qm(['guest', 'exec', vmid])
+            return {'content':base64.b64encode(content[data['offset']:]).decode()}
+    agent = Agent()
+    original = agent.qm
+    (tmp_path/'logs').mkdir()
+    wf = SimpleNamespace(agent=agent, output=tmp_path, journal={'current_step':'prepare-demo'}, save=lambda:None)
+    attempt = dict(log_path='/tmp/demo.log', host_log='logs/demo.log', timeout_seconds=900)
+    with observe_command(wf, 9402, attempt):
+        agent.qm(['guest', 'exec-status', 9402, 12])
+        assert (tmp_path/'logs/demo.log').read_bytes() == content
+        assert attempt['live_log_bytes'] == len(content)
+        clock[0] = 5
+        agent.qm(['guest', 'exec-status', 9402, 12])
+        assert len(calls) == 1
+        clock[0] = 31
+        agent.qm(['guest', 'exec-status', 9402, 12])
+        assert calls[-1][1]['offset'] == len(content)
+        assert len(calls) == 2  # Nested log-read qm calls do not recurse.
+        attempt['exitcode'] = 0
+        clock[0] = 62
+        agent.qm(['guest', 'exec-status', 9402, 12])
+        assert len(calls) == 2  # Cleanup/download operations cannot append duplicate output.
+    assert agent.qm == original
+    events = wf.journal['events']
+    assert any(e['kind']=='heartbeat' and '31s' in e['message'] for e in events)
+    assert 'hidden-value' not in str(events)
+    assert any('planner starting' in e['message'] for e in events)
+
+
+def test_live_log_failure_does_not_fail_command_or_repeat_warnings(tmp_path, monkeypatch):
+    import time
+    clock = [0]
+    monkeypatch.setattr(time, 'monotonic', lambda:clock[0])
+    class Agent:
+        def qm(self, *a, **k):
+            return dict(pid=12, exited=False)
+        def call(self, *a, **k):
+            raise ValueError('secret RPC payload')
+    agent = Agent()
+    wf = SimpleNamespace(agent=agent, output=tmp_path, journal={'current_step':'deploy'}, save=lambda:None)
+    attempt = dict(log_path='/tmp/demo.log', host_log='logs/demo.log', timeout_seconds=900)
+    with observe_command(wf, 9402, attempt):
+        agent.qm([])
+        clock[0] = 11
+        agent.qm([])
+    assert len(wf.journal['events']) == 1
+    assert 'secret RPC payload' not in str(wf.journal)

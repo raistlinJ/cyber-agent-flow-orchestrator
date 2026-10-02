@@ -27,6 +27,7 @@ def load(path):
         raise ValueError('Only workflow version 1 is supported')
     ev.identifier(cfg['id'])
     runtime = ev.read_runtime(path.parent / cfg['runtime'])
+    runtime['execution'].setdefault('auto_approve_dangerous', True)
     if runtime['backend']['type'] != 'proxmox':
         raise ValueError('Orchestration currently requires proxmox; macos/linux/windows are placeholders')
     backend = runtime['backend']

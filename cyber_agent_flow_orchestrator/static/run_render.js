@@ -47,6 +47,7 @@ function renderWorkflowProgress(run,target){
    item.append(timing);
   }
   if(stage.error)item.append(el('p',stage.error,'error'));
+  if(stage.live_log_bytes!=null)item.append(el('p','Command output collected: '+stage.live_log_bytes+' bytes'+(stage.last_output_at?' · Last output '+new Date(stage.last_output_at).toLocaleTimeString():''),'small'));
   if(stage.log)item.append(el('p','Saved command log: '+stage.log+' (included in the run bundle)','small'));
   list.append(item);
  }
@@ -60,7 +61,7 @@ function renderProgress(run){
  const shown=run.sample_progress?[run]:[];
  const target=$('sample-activity');
  const expanded=new Set([...target.querySelectorAll('details[open]')].map(n=>n.dataset.run));
- target.replaceChildren();renderWorkflowProgress(run,target);if(!shown.length)target.append(el('p',run.message||'Progress is not available yet.','small'));
+ target.replaceChildren();renderTrialFailures(run,target);renderWorkflowProgress(run,target);if(!shown.length)target.append(el('p',run.message||'Progress is not available yet.','small'));
  for(const run of shown){
   const p=run.sample_progress,trial=p.current_trial,transport=trial?.transport;
   const card=el('article',null,'panel sample-activity'),head=el('div',null,'result-actions');head.append(el('h3',p.name),badge(run.recorded_status,run.recorded_status==='completed'?'good':['failed','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));
@@ -94,16 +95,36 @@ function renderResultSummary(data){
  if(workflow.error)target.append(el('p',workflow.error,'error'));
  if(!data.evaluation){target.append(el('p','Trial results will appear here once evaluation starts.','small'));return;}
  for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
- for(const item of data.failure_diagnostics||[]){
-  const section=el('section',null,'failure-diagnostics');section.append(el('h3',`${item.trial_id} · attempt ${item.attempt} · Failure details`));
-  section.append(el('p','Saved on the orchestrator host. Log tails are limited to 80 lines; common credential fields are redacted.','small'));
-  for(const record of item.model_errors||[])section.append(el('p',record.error,'error'));
-  for(const log of item.logs||[]){const details=el('details');details.append(el('summary','Collected worker log'),el('div',log.path,'small'),el('pre',log.text||'(Log is empty)'));section.append(details);}
-  for(const note of item.notes||[])section.append(el('p',note,'small'));
-  target.append(section);
- }
+ renderTrialFailures(workflow,target,data.failure_diagnostics);
 
  const groups=Object.entries(data.evaluation.conditions||{});
  const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Unassisted successes','Assisted successes','Hints released','Facts revealed','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
  for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',summary.unassisted_successes??'—'),el('td',summary.assisted_successes??'—'),el('td',summary.hints_released??0),el('td',summary.facts_revealed??0),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);
+}
+
+function renderTrialFailures(run,target,providedDiagnostics){
+ const failures=run.trial_failures||[],diagnostics=providedDiagnostics||run.failure_diagnostics||[];
+ if(!failures.length&&!diagnostics.length&&run.recorded_status!=='completed_with_errors')return;
+ const section=el('section',null,'panel failure-summary');section.setAttribute('aria-label','Experiment errors');
+ section.append(el('h3','Experiment errors'),el('p',failures.length?`${failures.length} trial(s) ended with an execution error. Deployment may still have succeeded.`:'This experiment completed with errors. Inspect the trial records and collected worker logs below.','error'));
+ for(const trial of failures){
+  section.append(el('h4',`${trial.trial_id} · attempt ${trial.attempt} · ${trial.status}`),el('p',`Condition: ${trial.condition_id||'unknown'} · Task: ${trial.task_id||'unknown'}`,'small'));
+  for(const error of trial.errors||[])section.append(el('p',error,'error'));
+  if(trial.attempt_path)section.append(el('p','Run bundle: evaluation/'+trial.attempt_path+'/attempt.json','small'));
+ }
+ target.append(section);
+ for(const item of diagnostics||[]){
+  const section=el('section',null,'failure-diagnostics');section.append(el('h3',`${item.trial_id} · attempt ${item.attempt} · Failure details`));
+  section.append(el('p','Saved on the orchestrator host. Log tails are limited to 80 lines; common credential fields are redacted.','small'));
+  for(const decision of item.interactions||[])section.append(el('p',decision.explanation+(decision.tool?' Tool: '+decision.tool:'')+(decision.timeout_seconds!=null?' · Checkpoint: '+decision.timeout_seconds+'s':''),'error'));
+  if(item.status)section.append(el('p','Trial status: '+item.status,'error'));
+  for(const error of item.errors||[])section.append(el('p',error,'error'));
+  const transport=item.transport;
+  if(transport){section.append(el('p','Last saved guest phase: '+transport.phase+' · Service: '+transport.unit,'small'));const state=transport.service||{};section.append(el('p',Object.entries(state).map(([key,value])=>key+': '+value).join(' · ')||'No saved service exit state.','small'));}
+  for(const result of item.worker_results||[]){section.append(el('p','Saved worker result: '+result.status+' · '+result.path,'small'));for(const error of result.errors||[])section.append(el('p',error,'error'));}
+  for(const record of item.model_errors||[])section.append(el('p',record.error,'error'));
+  for(const log of item.logs||[]){const details=el('details');details.open=true;details.append(el('summary','Collected worker log'),el('div',log.path,'small'),el('pre',log.text||'(Log is empty)'));section.append(details);}
+  for(const note of item.notes||[])section.append(el('p',note,'small'));
+  target.append(section);
+ }
 }

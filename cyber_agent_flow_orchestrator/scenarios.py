@@ -310,7 +310,7 @@ class ScenarioExperiments:
                        artifacts=sf['repo'] + '/outputs/flag_generators_runs/caf-demo-' + token)
         sf['xml'] = destination
         cfg['prepare'] = [dict(id='fixed-demo-xml', vmid=roles['scenarioforge'],
-            argv=[sf['python'], '-c', Path(__file__).with_name('demo_prepare.py').read_text(), json.dumps(options)],
+            argv=[sf['python'], '-u', '-c', Path(__file__).with_name('demo_prepare.py').read_text(), json.dumps(options)],
             timeout_seconds=sf['timeout_seconds'], user=sf['user'], cwd=sf['repo'],
             **({'environment_file': sf['environment_file']} if sf.get('environment_file') else {}))]
 

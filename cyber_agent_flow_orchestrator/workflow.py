@@ -20,7 +20,7 @@ def execute_command(sf, backend, token):
     destination = sf['output_root'].rstrip('/') + '/' + token
     return dict(id='deploy', vmid=backend['app_vmid'], user=sf['user'], cwd=sf['repo'],
                 timeout_seconds=sf['timeout_seconds'],
-                argv=[sf['python'], '-m', 'scenarioforge.cli', 'execute', '--xml', sf['xml'],
+                argv=[sf['python'], '-u', '-m', 'scenarioforge.cli', 'execute', '--xml', sf['xml'],
                       '--scenario', sf['scenario'], '--evaluation-export', '--evaluation-output-dir',
                       destination, '--suite-id', sf['suite_id'], '--eval-split', sf['split'],
                       *(['--evaluation-tasks', sf['tasks']] if 'tasks' in sf else [])],
@@ -94,7 +94,7 @@ class Workflow:
                              'use --resume --retry-steps only when rerunning that command is appropriate.')
         stage = self.journal['stages'].setdefault(key, {'attempts': []})
         attempt = dict(vmid=command['vmid'], unit='caf-orchestrator-' + uuid.uuid4().hex, stopped=False,
-                       argv=command['argv'], started_at=datetime.now(timezone.utc).isoformat())
+                       argv=command['argv'], timeout_seconds=command['timeout_seconds'], started_at=datetime.now(timezone.utc).isoformat())
         stage['attempts'].append(attempt)
         stage['status'] = 'running'
         log = self.output / 'logs' / f'{key}-{len(stage["attempts"]):04d}.log'
@@ -104,7 +104,7 @@ class Workflow:
         self.save()
         self.notify(f'Running {key} on VM {command["vmid"]}')
         try:
-            with step(self, key), observe_command(self, command['vmid']), ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{command['vmid']}.lock"):
+            with step(self, key), observe_command(self, command['vmid'], attempt), ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{command['vmid']}.lock"):
                 try:
                     result = self.agent.call(command['vmid'], 'hook', unit=attempt['unit'], log_path=attempt['log_path'],
                                              seconds=command['timeout_seconds'], timeout=command['timeout_seconds'] + 30,

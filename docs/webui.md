@@ -504,6 +504,22 @@ uv run --group dev python tests/browser_refresh.py /tmp/caf-refresh-preview
 
 The Progress window shows the saved workflow timeline: XML verification, preparation, ScenarioForge deployment/readiness/export, package download, readiness validation, reproduction capture, configuration freeze, evaluation-plan import and agent trials. Each stage shows its VM, state, elapsed time, timestamps, attempts, saved log path and any failure. VM cards describe each role. Workflow-stage counts and trial completion are separate; neither is an estimate of time remaining.
 
-Download counters report bytes received by the existing guest-agent transfers and mark verification only after checksum validation. During guest commands, the latest existing QGA response is recorded without extra VM polling. ScenarioForge’s internal CORE operations and live model/tool calls are not streamed; the UI labels these waits explicitly. Participant upload counters and service state come from evaluator transport checkpoints. Progress is retained in workflow/results JSON and the run bundle. Older runs without stage timestamps retain their recorded stage states.
+Download counters report bytes received by the existing guest-agent transfers and mark verification only after checksum validation. During guest commands, the coordinator records QGA responses and reads up to 8 KiB of new command output every ten seconds. Partial command logs are saved on the host while execution is active; redacted excerpts appear in the troubleshooting console. A thirty-second heartbeat reports elapsed time, collected log bytes and the configured command limit even when output is quiet. Demo preparation reports backend loading, asset copying, CORE settings, topology planning and evaluation-task creation; Python demo/deployment commands run unbuffered. ScenarioForge output exposes its reported CORE operations; live model/tool calls are not streamed. Status and results requests only read host-saved data and never initiate these VM reads. Participant upload counters and service state come from evaluator transport checkpoints. Progress is retained in workflow/results JSON and the run bundle. Older runs without stage timestamps retain their recorded stage states.
 
 In **New → Evaluation**, sample task definitions are visible and locked. Custom experiments can preview ScenarioForge tasks, edit a copy, add/remove tasks or import a JSON task array. Create remains disabled for missing prompts, duplicate/invalid IDs, malformed criteria or missing readiness checks. Custom task definitions are frozen in the experiment XML and retained in reruns and downloads. See [scenario experiments](scenario-experiments.md#caf-and-evaluation-configuration).
+
+When an experiment completes with errors, **Progress** and **Results** show an
+**Experiment errors** section identifying each unsuccessful trial, condition,
+status and recorded error. Missing error messages receive an explicit fallback.
+Available collected worker log tails open automatically, and model-call errors
+appear beside them. The experiment table shows a trial error count. All of these
+reads use saved host artifacts; an agent answer that fails verification while
+execution completes is reported through the verified score, not a trial error.
+
+Orchestrated experiments default to `execution.auto_approve_dangerous: true`,
+CAF's Python equivalent of `--dangerous-no-prompt`. The flag is saved in the run
+configuration and passed to the participant session. Network allow/disallow rules,
+tool selection and wall-clock budgets still apply. The participant CAF checkout
+must support this option and unattended continuation at tool timeout checkpoints.
+Saved interaction events appear in Failure details with the decision type, tool
+and timeout checkpoint; arguments and command bodies are omitted from this preview.

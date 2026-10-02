@@ -260,6 +260,7 @@ function renderExperiments(data){
   const row=el('tr');row.dataset.runId=id;const title=el('td');title.append(el('strong',sample?.name||run.scenario_experiment?.scenario||run.workflow_id||id),el('div',id,'small'));
   if(run.saved_settings){const settings=run.saved_settings;title.append(el('div',`VM ${settings.participant_vmid} · ${settings.provider} / ${settings.model}`,'small'));}
   const state=el('td');state.append(badge(run.recorded_status||'unavailable',run.recorded_status==='completed'?'good':['failed','cancelled','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));if(run.message)state.append(el('div',run.message,'small'));
+  if(run.trial_failures?.length)state.append(el('div',`${run.trial_failures.length} trial error(s) · Open Progress or Results for details`,'error'));
   const actions=el('td',null,'experiment-actions');
   actions.append(iconAction(run.scenario_experiment?(ready?'Deploy and run':'Deploy and run again'):(ready?'Run experiment':'Run again'),'▶',!data.owner||!(sample||run.scenario_experiment)||!(run.saved_settings?.participant_vmid||data.samples.participant_vmid)||active||sampleStarting,()=>experimentAction('run',id)));
   actions.append(iconAction(run.scenario_experiment?'Stop after current stage or trial':'Stop after current trial','■',!data.owner||!(run.sample_id||run.scenario_experiment)||!live||run.recorded_status==='stopping',()=>experimentAction('stop',id)));

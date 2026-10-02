@@ -78,7 +78,13 @@ def test_failed_results_include_collected_diagnostics_without_guest_calls(lab):
     ev.write_json(guest / 'model_calls/call-000001.json', dict(
         request={'prompt':'PRIVATE PROMPT', 'api_key':'PRIVATE KEY'},
         response={'text':'PRIVATE RESPONSE'}, error='Model missing; api_key=secret-value'))
+    journal = ev.read_json(output / 'workflow.json')
+    journal.update(sample_id='smoke', status='completed_with_errors')
+    ev.write_json(output / 'workflow.json', journal)
     calls = len(agent.calls)
+    status = service.status(output)
+    assert status['trial_failures'][0]['errors'] == record['errors']
+    assert status['failure_diagnostics'][0]['model_errors']
     result = service.results(output)
     diagnostic = result['failure_diagnostics'][0]
     assert diagnostic['model_errors'][0]['error'] == 'Model missing; api_key=[redacted]'
@@ -101,3 +107,50 @@ def test_failure_diagnostics_do_not_follow_paths_outside_attempt(tmp_path):
     result = collected_failures(root, rows)
     assert result[0]['notes'] and not result[0]['logs']
     assert 'PRIVATE OTHER USER' not in json.dumps(result)
+
+
+def test_trial_failure_without_errors_has_explanation():
+    from cyber_agent_flow_orchestrator.failure_details import trial_failures
+    rows = [dict(trial_id='one', attempt=1, status='timeout', errors=[], condition_id='baseline'),
+            dict(trial_id='two', attempt=1, status='completed', verified_success=False),
+            dict(trial_id='three', attempt=1, status='running')]
+    failures = trial_failures(rows)
+    assert len(failures) == 1
+    assert failures[0]['status'] == 'timeout'
+    assert 'did not record an error message' in failures[0]['errors'][0]
+
+
+def test_empty_worker_log_exposes_result_and_service_exit_state(tmp_path):
+    from cyber_agent_flow_orchestrator.failure_details import collected_failures
+    root = tmp_path / 'evaluation'
+    folder = root / 'trials/trial-1/attempt-0001'
+    guest = folder / 'guest-output'
+    guest.mkdir(parents=True)
+    (guest / 'worker.log').write_text('')
+    ev.write_json(guest / 'result.json', dict(status='error', errors=['Connection refused; token=private'],
+                                           final_answer='PRIVATE ANSWER', messages=['PRIVATE PROMPT']))
+    ev.write_json(folder / 'transport.json', dict(phase='collected', unit='caf-eval-test', collected=True,
+        service_status=dict(Result='exit-code', ExecMainStatus='1'), environment={'api_key':'PRIVATE KEY'}))
+    rows = [dict(trial_id='trial-1', attempt=1, status='error', errors=['Guest worker failed'],
+                 attempt_path='trials/trial-1/attempt-0001')]
+    item = collected_failures(root, rows)[0]
+    assert item['errors'] == ['Guest worker failed']
+    assert item['worker_results'][0]['errors'] == ['Connection refused; token=[redacted]']
+    assert item['transport']['service']['ExecMainStatus'] == '1'
+    assert any('log is empty' in note for note in item['notes'])
+    assert 'PRIVATE' not in json.dumps(item) and 'private' not in json.dumps(item)
+
+
+def test_interaction_diagnostics_identify_timeout_without_exposing_args(tmp_path):
+    from cyber_agent_flow_orchestrator.failure_details import collected_failures
+    root = tmp_path / 'evaluation'
+    folder = root / 'trials/trial-1/attempt-0001/guest-output'
+    folder.mkdir(parents=True)
+    (folder / 'events.jsonl').write_text(json.dumps(dict(type='tool_timeout_decision',tool='curl',timeout_seconds=30,
+        args={'password':'PRIVATE'},command='PRIVATE COMMAND'))+'\n')
+    rows = [dict(trial_id='trial-1',attempt=1,status='interaction_required',errors=[],attempt_path='trials/trial-1/attempt-0001')]
+    item = collected_failures(root,rows)[0]
+    assert item['interactions'][0]['tool'] == 'curl'
+    assert item['interactions'][0]['timeout_seconds'] == 30
+    assert 'interactive decision' in item['errors'][0]
+    assert 'PRIVATE' not in json.dumps(item)

@@ -19,7 +19,7 @@ def definitions(journal):
         steps.insert(0, ('snapshot', 'Verify saved scenario XML', app, 'Check that the ScenarioForge snapshot still matches the XML frozen for this experiment.'))
     if cfg['scenarioforge']['mode'] == 'execute':
         steps.append(('deploy', 'Deploy and check scenario', app,
-                      'ScenarioForge executes the XML on CORE, checks readiness and exports evaluation tasks. Awaiting the command outcome; individual CORE operations are not streamed.'))
+                      'ScenarioForge executes the XML on CORE, checks readiness and exports evaluation tasks. Command output and coordinator heartbeats are collected during execution.'))
     steps += [('fetch', 'Download evaluation package', app, 'Transfer the exported suite to the orchestrator and verify its package hash.'),
               ('readiness', 'Validate readiness', None, 'Validate the exported readiness evidence and its age before evaluation.'),
               ('reproduction', 'Capture scenario bundle', app, 'Collect XML and available reproduction files from ScenarioForge and CORE; validate the saved bundle.')]
@@ -53,22 +53,64 @@ def step(workflow, key):
 
 
 @contextmanager
-def observe_command(workflow, vmid):
-    """Observe existing QGA polls without extra guest calls or exposing RPC payloads."""
+def observe_command(workflow, vmid, attempt=None):
+    """Collect bounded live output during coordinator polls, never status reads."""
+    import base64
+    import time
     agent = workflow.agent
     original = getattr(agent, 'qm', None)
     if original is None:
         yield
         return
+    started = time.monotonic()
+    last_read, last_heartbeat, offset = -float('inf'), started, 0
+    collecting = False
+
+    def event(kind, message):
+        workflow.journal.setdefault('events', []).append(dict(at=now(), kind=kind, message=clean(message)))
+        workflow.journal['events'] = workflow.journal['events'][-100:]
+
     def observed(args, **kwargs):
+        nonlocal collecting, last_read, last_heartbeat, offset
         result = original(args, **kwargs)
+        if collecting:
+            return result
+        clock = time.monotonic()
         workflow.journal['guest_observation'] = dict(vmid=vmid, at=now(), step=workflow.journal.get('current_step'),
             state='Guest operation returned' if result.get('exited') else 'Guest operation is still running',
             pid=result.get('pid'), exited=result.get('exited'), exitcode=result.get('exitcode'))
+        if attempt and 'exitcode' not in attempt and clock - last_read >= 10:
+            last_read = clock
+            collecting = True
+            try:
+                block = agent.call(vmid, 'read', path=attempt['log_path'], offset=offset, length=8192, timeout=10)
+                content = base64.b64decode(block['content'], validate=True)
+                if content:
+                    # Preserve the full partial log privately; console excerpts are redacted.
+                    with (workflow.output / attempt['host_log']).open('ab') as stream:
+                        stream.write(content)
+                    offset += len(content)
+                    text = content.decode('utf-8', errors='replace')
+                    for line in text.splitlines()[-20:]:
+                        event('command-output', f"VM {vmid} · {workflow.journal.get('current_step')}: {line}")
+                    attempt['live_log_bytes'] = offset
+                    attempt['last_output_at'] = now()
+            except Exception as exc:
+                # Log may not exist until systemd starts. Diagnostics never fail a command.
+                if not attempt.get('live_log_warning'):
+                    event('log-observation', f'VM {vmid}: live output unavailable ({type(exc).__name__}); retrying; full log collected at command end')
+                    attempt['live_log_warning'] = True
+            finally:
+                collecting = False
+        if clock - last_heartbeat >= 30 and not result.get('exited') and (not attempt or 'exitcode' not in attempt):
+            last_heartbeat = clock
+            age = round(clock - started)
+            event('heartbeat', f"VM {vmid} · {workflow.journal.get('current_step')}: guest operation still running after {age}s; "
+                  f"{offset} log bytes collected; command limit {attempt.get('timeout_seconds', 'unknown') if attempt else 'unknown'}s")
         try:
             workflow.save()
         except OSError:
-            pass  # Optional observations must not interrupt command cleanup.
+            pass
         return result
     agent.qm = observed
     try:
@@ -101,7 +143,8 @@ def build(journal, state, active):
                           started_at=started, ended_at=ended,
                           elapsed_seconds=elapsed(started, ended or (None if active else journal.get('ended_at', journal.get('updated_at')))),
                           active=status == 'running', error=clean(record.get('error') or old.get('error')) if record.get('error') or old.get('error') else None,
-                          attempt_count=len(old.get('attempts', [])), log=old.get('log')))
+                          attempt_count=len(old.get('attempts', [])), log=old.get('log'),
+                          live_log_bytes=attempt.get('live_log_bytes'), last_output_at=attempt.get('last_output_at')))
     selected = next((s for s in steps if s['id'] == current), None)
     roles = [
         dict(role='scenarioforge', label='ScenarioForge', vmid=app, responsibility='Prepares and deploys the scenario; exports tasks and readiness evidence.'),

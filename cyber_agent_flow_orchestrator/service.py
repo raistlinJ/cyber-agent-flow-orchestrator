@@ -50,12 +50,18 @@ def status(output):
     stopping = state in ('queued', 'preparing', 'evaluating') and (root / 'stop-request.json').is_file()
     if stopping: state = 'stopping'
     evaluation_status, sample_progress = None, None
+    failures, diagnostics = [], []
     if (evaluation / 'manifest.json').is_file():
         evaluation_status = reporting.results(evaluation) if browser_experiment else reporting.status(evaluation)
     if browser_experiment:
         from .sample_progress import build
         sample_progress = build(root, data, evaluation_status, state, coordinator_active)
-        if evaluation_status: evaluation_status.pop('attempts', None)
+        if evaluation_status:
+            from .failure_details import trial_failures, collected_failures
+            attempts = evaluation_status.pop('attempts', [])
+            failures = trial_failures(attempts)
+            if not coordinator_active and state in ('failed', 'completed_with_errors', 'interrupted', 'cancelled'):
+                diagnostics = collected_failures(evaluation, attempts)
     runtime = data.get('runtime') or {}
     saved_settings = None
     if browser_experiment and runtime:
@@ -66,6 +72,7 @@ def status(output):
             'coordinator_active': coordinator_active,
             'sample_id': data.get('sample_id'), 'scenario_experiment': data.get('scenario_experiment'), 'message': 'Stop requested; finishing the current stage or trial and collecting results' if stopping else data.get('message'),
             'sample_progress': sample_progress,
+            'trial_failures': failures, 'failure_diagnostics': diagnostics,
             'workflow_progress': workflow_progress(data, state, coordinator_active),
             'saved_settings': saved_settings,
             'error': data.get('error') if data['status'] in ('failed', 'interrupted') else None,
