@@ -30,6 +30,16 @@ def definitions(journal):
     return steps, app, core, participant
 
 
+def checkpoint(workflow, message, kind='checkpoint'):
+    key = workflow.journal.get('current_step')
+    record = workflow.journal.setdefault('progress_steps', {}).setdefault(key, {})
+    event = dict(at=now(), kind=kind, message=clean(message))
+    record['operation'] = event['message']
+    record.setdefault('events', []).append(event)
+    record['events'] = record['events'][-60:]
+    workflow.save()
+
+
 @contextmanager
 def step(workflow, key):
     records = workflow.journal.setdefault('progress_steps', {})
@@ -38,18 +48,18 @@ def step(workflow, key):
     workflow.journal['current_step'] = key
     workflow.journal.setdefault('events', []).append(dict(at=record['started_at'], kind='stage', message=key+' started'))
     workflow.journal['events'] = workflow.journal['events'][-100:]
-    workflow.save()
+    checkpoint(workflow, 'Started '+key)
     try:
         yield
     except BaseException as exc:
         record.update(status='failed', ended_at=now(), error=clean(str(exc)))
-        workflow.save()
+        checkpoint(workflow, 'Failed: '+str(exc), 'error')
         raise
     else:
         record.update(status='completed', ended_at=now())
         workflow.journal.setdefault('events', []).append(dict(at=record['ended_at'], kind='stage', message=key+' completed'))
         workflow.journal['events'] = workflow.journal['events'][-100:]
-        workflow.save()
+        checkpoint(workflow, 'Completed '+key)
 
 
 @contextmanager
@@ -69,6 +79,9 @@ def observe_command(workflow, vmid, attempt=None):
     def event(kind, message):
         workflow.journal.setdefault('events', []).append(dict(at=now(), kind=kind, message=clean(message)))
         workflow.journal['events'] = workflow.journal['events'][-100:]
+        record = workflow.journal.setdefault('progress_steps', {}).setdefault(workflow.journal.get('current_step'), {})
+        record.setdefault('events', []).append(dict(at=now(), kind=kind, message=clean(message)))
+        record['events'] = record['events'][-60:]
 
     def observed(args, **kwargs):
         nonlocal collecting, last_read, last_heartbeat, offset
@@ -79,6 +92,7 @@ def observe_command(workflow, vmid, attempt=None):
         workflow.journal['guest_observation'] = dict(vmid=vmid, at=now(), step=workflow.journal.get('current_step'),
             state='Guest operation returned' if result.get('exited') else 'Guest operation is still running',
             pid=result.get('pid'), exited=result.get('exited'), exitcode=result.get('exitcode'))
+        workflow.journal.setdefault('progress_steps', {}).setdefault(workflow.journal.get('current_step'), {})['guest_observation'] = workflow.journal['guest_observation']
         if attempt and 'exitcode' not in attempt and clock - last_read >= 10:
             last_read = clock
             collecting = True
@@ -119,7 +133,7 @@ def observe_command(workflow, vmid, attempt=None):
         agent.qm = original
 
 
-def build(journal, state, active):
+def build(journal, state, active, root=None):
     if 'scenarioforge' not in journal.get('workflow', {}):
         return None  # Historical participant-only samples use their existing trial view.
     definitions_, app, core, participant = definitions(journal)
@@ -132,19 +146,36 @@ def build(journal, state, active):
         status = record.get('status', old.get('status', 'pending'))
         attempt = (old.get('attempts') or [{}])[-1]
         if key == 'evaluate' and state in ('completed', 'completed_with_errors'):
-            status = 'completed'
+            status = state
         if status == 'running' and not active:
             status = 'interrupted' if state == 'interrupted' else 'cancelled' if state == 'cancelled' else 'failed' if state == 'failed' else 'waiting'
         if key == current and state in ('cancelled', 'interrupted') and status in ('running', 'failed'):
             status = state
         started = record.get('started_at', attempt.get('started_at'))
         ended = record.get('ended_at')
+        log_tail = None
+        if root is not None and old.get('log'):
+            from cyber_agent_flow_eval import reporting
+            try:
+                path = reporting.within(root, root / old['log'])
+                with path.open('rb') as stream:
+                    stream.seek(0, 2)
+                    stream.seek(max(0, stream.tell() - 32768))
+                    log_tail = '\n'.join(clean(line) for line in stream.read(32768).decode(errors='replace').splitlines()[-60:])[-12000:]
+            except (OSError, ValueError):
+                pass
+        files = old.get('files', {})
         steps.append(dict(id=key, label=label, vmid=vmid, description=description, status=status,
                           started_at=started, ended_at=ended,
                           elapsed_seconds=elapsed(started, ended or (None if active else journal.get('ended_at', journal.get('updated_at')))),
                           active=status == 'running', error=clean(record.get('error') or old.get('error')) if record.get('error') or old.get('error') else None,
                           attempt_count=len(old.get('attempts', [])), log=old.get('log'),
-                          live_log_bytes=attempt.get('live_log_bytes'), last_output_at=attempt.get('last_output_at')))
+                          live_log_bytes=attempt.get('live_log_bytes'), last_output_at=attempt.get('last_output_at'),
+                          operation=record.get('operation'), events=record.get('events', [])[-60:],
+                          guest_observation=record.get('guest_observation'), transfers=record.get('transfers', [])[-20:],
+                          timeout_seconds=attempt.get('timeout_seconds'), exitcode=attempt.get('exitcode'), log_tail=log_tail,
+                          file_count=len(files), files=list(files)[:100],
+                          readiness=journal.get('readiness_progress') if key=='readiness' else None))
     selected = next((s for s in steps if s['id'] == current), None)
     roles = [
         dict(role='scenarioforge', label='ScenarioForge', vmid=app, responsibility='Prepares and deploys the scenario; exports tasks and readiness evidence.'),
@@ -152,7 +183,7 @@ def build(journal, state, active):
         dict(role='participant', label='CAF participant', vmid=participant, responsibility='Runs the agent and tools for each trial; returns outputs for scoring.'),
         dict(role='orchestrator', label='Orchestrator', vmid=None, responsibility='Coordinates stages, verifies transfers, scores trials and stores run artifacts.')]
     return dict(steps=steps, current_step=current, current=selected, roles=roles,
-                completed_steps=sum(s['status']=='completed' for s in steps), total_steps=len(steps),
+                completed_steps=sum(s['status'] in ('completed', 'completed_with_errors') for s in steps), total_steps=len(steps),
                 observed_at=now(), guest_observation=journal.get('guest_observation'), transfer=journal.get('transfer'), readiness=journal.get('readiness_progress'))
 
 @contextmanager
@@ -171,6 +202,9 @@ def observe_transfers(workflow):
         transfer = dict(vmid=vmid, step=workflow.journal.get('current_step'), file=PurePosixPath(path).name, received_bytes=0,
                         total_bytes=None, verified=False, status='downloading', started_at=now())
         workflow.journal['transfer'] = transfer
+        record = workflow.journal.setdefault('progress_steps', {}).setdefault(workflow.journal.get('current_step'), {})
+        record.setdefault('transfers', []).append(transfer)
+        record['transfers'] = record['transfers'][-20:]
         persist()
         def call(target, op, **data):
             result = original_call(target, op, **data)

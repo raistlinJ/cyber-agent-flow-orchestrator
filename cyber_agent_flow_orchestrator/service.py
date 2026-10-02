@@ -67,13 +67,19 @@ def status(output):
     if browser_experiment and runtime:
         saved_settings = {'participant_vmid': runtime['backend']['participant_vmid'],
                           'provider': runtime['model']['provider'], 'model': runtime['model']['name']}
+    stages_progress = workflow_progress(data, state, coordinator_active, root=root)
+    if stages_progress and sample_progress:
+        for stage in stages_progress['steps']:
+            if stage['id'] == 'evaluate':
+                stage['trials'] = sample_progress['trials']
+                stage['events'] = (stage['events'] + [event for event in sample_progress['events'] if event.get('kind') in ('trial', 'hint')])[-60:]
     return {'output': str(root), 'workflow_id': data['workflow']['id'],
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,
             'coordinator_active': coordinator_active,
             'sample_id': data.get('sample_id'), 'scenario_experiment': data.get('scenario_experiment'), 'message': 'Stop requested; finishing the current stage or trial and collecting results' if stopping else data.get('message'),
             'sample_progress': sample_progress,
             'trial_failures': failures, 'failure_diagnostics': diagnostics,
-            'workflow_progress': workflow_progress(data, state, coordinator_active),
+            'workflow_progress': stages_progress,
             'saved_settings': saved_settings,
             'error': data.get('error') if data['status'] in ('failed', 'interrupted') else None,
             'stages': {key: {'status': stage['status'], 'attempt_count': len(stage.get('attempts', [])),

@@ -523,3 +523,25 @@ tool selection and wall-clock budgets still apply. The participant CAF checkout
 must support this option and unattended continuation at tool timeout checkpoints.
 Saved interaction events appear in Failure details with the decision type, tool
 and timeout checkpoint; arguments and command bodies are omitted from this preview.
+
+The creation loading modal displays server-reported steps and elapsed time. Sample
+creation covers eight steps: validation, ScenarioForge connection, bundle transfer,
+import, scenario validation, XML snapshot, CAF configuration and experiment storage.
+Existing scenario selections use the final four steps. Progress reads are scoped to
+the signed-in owner and request ID; they do not initiate guest operations.
+
+The starting-experiment loading modal reports five server checkpoints: saved-run
+validation, coordinator capacity, run configuration, VM access and launch-journal
+storage, and coordinator submission. It shows elapsed time while the request is
+pending. Once the coordinator accepts the run, the Progress view reports the
+actual deployment and evaluation stages. Launch status is scoped to the owner and
+request ID independently of creation status.
+
+Every workflow stage has an expandable **Stage details and output** panel. Active
+and failed stages open automatically; expansion choices persist while the window
+is open. Panels show saved checkpoints, recent output, per-stage guest responses,
+command limits/exit codes, checksum-verified transfer counts, saved artifact paths,
+readiness checks and trial outcomes. Checkpoint history is retained per stage even
+when the main console rolls over. Command previews show at most 60 lines, with
+common credentials redacted. These views only read saved host data. Existing runs
+can show their saved command logs and artifacts; new checkpoints require a new run.

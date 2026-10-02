@@ -142,7 +142,7 @@ class ScenarioExperiments:
         return dict(selection_id=selection_id, tasks=tasks,
                     source='scenario' if tasks is not None else 'scenario-default')
 
-    def upload(self, access, content):
+    def upload(self, access, content, progress=lambda step, message: None):
         import hashlib
         import uuid
         from .scenario_upload import validate
@@ -159,9 +159,12 @@ class ScenarioExperiments:
         token = uuid.uuid4().hex
         with self.samples.lock, submission_lock(workspace), authorized_operations(access.qm):
             remote = guest(self.runtime['backend'])
+            progress(1, 'Connecting to ScenarioForge and preparing import workspace')
             prepared = remote.call(vmid, 'upload-start', repo=repo, token=token)
+            progress(2, 'Transferring the sample scenario bundle to ScenarioForge')
             ev.GuestAgent(self.runtime['backend']).put(vmid, prepared['path'], content)
             try:
+                progress(3, 'Importing XML and website assets into ScenarioForge')
                 result = remote.call(vmid, 'upload-import', repo=repo, token=token,
                     sha256=hashlib.sha256(content).hexdigest(), user=self.cfg['scenarioforge'].get('user', 'scenarioforge'),
                     timeout=120)
@@ -181,7 +184,8 @@ class ScenarioExperiments:
             private_file(path, json.dumps(dict(result, vmid=vmid, repo=repo, roots=roots)).encode(), replace=path.exists())
         return dict(result, vmid=vmid, roots=roots, truncated=False)
 
-    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False):
+    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False, progress=lambda step, message: None):
+        progress(1, "Validating scenario, evaluation settings and VM access")
         if not re.fullmatch('[0-9a-f]{32}', request_id) or not re.fullmatch('[0-9a-f]{64}', selection_id):
             raise SampleRequestError('Choose a listed scenario and supply a valid request ID')
         if type(provide_progressive_hints) is not bool:
@@ -217,6 +221,7 @@ class ScenarioExperiments:
             if not item or (not item['resolved_chain'] and _sample_id is None):
                 raise SampleRequestError('Choose a scenario with a saved resolved Flow chain')
             sf = self.cfg['scenarioforge']
+            progress(2, 'Connecting to ScenarioForge and freezing the selected scenario XML')
             with authorized_operations(access.qm):
                 captured = guest(self.runtime['backend']).call(roles['scenarioforge'], 'snapshot',
                     roots=catalogue['roots'], repo=catalogue['repo'], path=item['path'],
@@ -227,6 +232,7 @@ class ScenarioExperiments:
                 captured.update(evaluation_tasks=definitions, task_source='experiment')
             if item.get('upload'):
                 captured['upload'] = item['upload']
+            progress(3, 'Building CAF runtime, tools, tasks and fixed demo configuration')
             runtime = deepcopy(self.runtime)
             runtime['execution']['network_policy'] = policy
             progressive_hint_settings(runtime['execution'], provide_progressive_hints)
@@ -257,6 +263,7 @@ class ScenarioExperiments:
                 saved_runtime['conditions'][1]['catalog'] = str(source.parent / 'with-http-helper.json')
             private_file(source.parent / 'runtime.yaml', yaml.safe_dump(saved_runtime).encode(), replace=True)
             cfg, runtime, _, identity = load(source)
+            progress(4, 'Saving experiment inputs, reproduction source and workflow journal')
             private_directory(output)
             private_directory(output / 'inputs')
             private_file(output / 'inputs/source-selection.json', json.dumps(captured).encode())
@@ -266,7 +273,8 @@ class ScenarioExperiments:
             ev.write_json(output / 'workflow.json', self.record(cfg, runtime, identity, captured, request_id))
         return dict(run_id=run_id, status='ready')
 
-    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False):
+    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False, progress=lambda step, message: None):
+        progress(1, "Validating sample selection and VM access")
         from .samples import CATALOG
         if type(provide_progressive_hints) is not bool:
             raise SampleRequestError('provide_progressive_hints must be a boolean')
@@ -286,11 +294,12 @@ class ScenarioExperiments:
                 raise SampleRequestError('Request ID belongs to another experiment')
             return dict(run_id=existing.name, status=record['status'])
         bundle = Path(__file__).with_name('static') / ('demo-' + sample_id + '.zip')
-        imported = self.upload(access, bundle.read_bytes())
+        imported = self.upload(access, bundle.read_bytes(), progress=lambda step, message: progress(step + 1, message))
         item = imported['items'][0]
         return self.create(access, item['id'], request_id,
             ','.join(self.runtime['execution']['network_policy']['allow']),
-            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints)
+            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints,
+            progress=lambda step, message: progress(step + 4 if step > 1 else 5, message))
 
     def configure_sample(self, sample_id, cfg, runtime, captured, roles, token):
         from .samples import CATALOG
@@ -335,12 +344,13 @@ class ScenarioExperiments:
                     created_at=now(), updated_at=now(), stages={}, events=[],
                     message='Ready. Run deploys the saved scenario and evaluates it with baseline tools.')
 
-    def run_saved(self, access, run_id, request_id):
+    def run_saved(self, access, run_id, request_id, progress=lambda step, message: None):
         if not re.fullmatch('[0-9a-f]{32}', request_id):
             raise SampleRequestError('Invalid request ID')
         access.current()
         workspace = Workspace(self.root, access.username)
         output = workspace.run_path(run_id)
+        progress(2, 'Checking coordinator capacity and waiting for the launch workspace')
         with self.samples.lock, submission_lock(workspace):
             record = ev.read_json(output / 'workflow.json')
             if not record.get('scenario_experiment'):
@@ -353,6 +363,7 @@ class ScenarioExperiments:
             from .service import list_runs
             if any(row.get('coordinator_active') or row.get('recorded_status') in ('queued', 'stopping') for row in list_runs(workspace.runs)):
                 raise SampleBusy('Only one experiment can run at a time for this account')
+            progress(3, 'Preparing the saved configuration and a new run folder when needed')
             source = workspace.path / 'inputs' / run_id / 'workflow.yaml'
             if record['status'] != 'ready':
                 new_id = 'scenario-' + request_id
@@ -379,11 +390,13 @@ class ScenarioExperiments:
                 if record['scenario_experiment'].get('evaluation_tasks') is not None:
                     private_file(output / 'inputs/evaluation-tasks.json', json.dumps(record['scenario_experiment']['evaluation_tasks'], indent=2).encode())
                 record = self.record(cfg, runtime, identity, record['scenario_experiment'], request_id)
+            progress(4, 'Verifying access to all configured VMs and saving the launch journal')
             for vmid in workflow_vmids(record['workflow'], record['runtime']):
                 access.require_vm(vmid)
             record.update(status='queued', phase='queued', launch_request_id=request_id, queued_at=now(),
                           message='Waiting to deploy and evaluate the saved scenario')
             ev.write_json(output / 'workflow.json', record)
+            progress(5, 'Submitting the experiment to the deployment and evaluation coordinator')
             self.samples.jobs[access.username] = self.samples.pool.submit(self._run, workspace, source, output, access)
         return dict(run_id=run_id, status='queued')
 
@@ -411,9 +424,10 @@ class ScenarioExperiments:
                     runtime, selection = record['runtime'], record['scenario_experiment']
                     record.update(started_at=now(), status='preparing', phase='verifying', message='Verifying the saved scenario XML on ScenarioForge')
                     from .workflow import Workflow
-                    from .workflow_progress import step
+                    from .workflow_progress import step, checkpoint
                     observer = Workflow(output, record, agent=guest(runtime['backend']), progress=None)
                     with step(observer, 'snapshot'):
+                        checkpoint(observer, 'Connecting to ScenarioForge and verifying the frozen XML hash')
                         observer.agent.call(runtime['backend']['app_vmid'], 'check',
                             token=selection['snapshot_token'], repo=selection['repo'], sha256=selection['sha256'])
                 from .service import run

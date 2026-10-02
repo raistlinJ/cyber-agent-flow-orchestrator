@@ -1,3 +1,4 @@
+const stageDetailExpansion=new Map();
 function renderWorkflowProgress(run,target){
  const p=run.workflow_progress;if(!p)return;
  const section=el('section',null,'workflow-progress');section.setAttribute('aria-label','Workflow stages and VM activity');
@@ -38,7 +39,7 @@ function renderWorkflowProgress(run,target){
  const list=el('ol',null,'workflow-stages');
  for(const stage of p.steps){
   const item=el('li',null,'workflow-step '+stage.status);
-  const heading=el('div',null,'result-actions');heading.append(el('strong',stage.label),badge(stage.status,stage.status==='completed'?'good':['failed','interrupted'].includes(stage.status)?'warn':''));
+  const heading=el('div',null,'result-actions');heading.append(el('strong',stage.label),badge(stage.status,stage.status==='completed'?'good':['failed','interrupted','completed_with_errors'].includes(stage.status)?'warn':''));
   item.append(heading,el('p',(stage.vmid?'VM '+stage.vmid:'Orchestrator host')+' · '+stage.description,'small'));
   if(stage.started_at){
    const timing=el('p',null,'small');timing.append(document.createTextNode('Started '+new Date(stage.started_at).toLocaleTimeString()+' · '),timer(stage.elapsed_seconds,p.observed_at,stage.active));
@@ -49,6 +50,21 @@ function renderWorkflowProgress(run,target){
   if(stage.error)item.append(el('p',stage.error,'error'));
   if(stage.live_log_bytes!=null)item.append(el('p','Command output collected: '+stage.live_log_bytes+' bytes'+(stage.last_output_at?' · Last output '+new Date(stage.last_output_at).toLocaleTimeString():''),'small'));
   if(stage.log)item.append(el('p','Saved command log: '+stage.log+' (included in the run bundle)','small'));
+  const details=el('details',null,'stage-details'),key=run.output+'|'+stage.id;
+  details.dataset.stageKey=key;details.open=stageDetailExpansion.has(key)?stageDetailExpansion.get(key):stage.active||['failed','interrupted','completed_with_errors'].includes(stage.status);
+  details.addEventListener('toggle',()=>{stageDetailExpansion.set(key,details.open);if(stageDetailExpansion.size>200)stageDetailExpansion.delete(stageDetailExpansion.keys().next().value);});
+  details.append(el('summary','Stage details and output'));
+  details.append(el('p',stage.operation|| (stage.status==='pending'?'Waiting for earlier stages.':'Detailed checkpoints were not recorded for this stage.'),'small'));
+  if(stage.timeout_seconds!=null)details.append(el('p','Command limit: '+stage.timeout_seconds+'s'+(stage.exitcode!=null?' · Exit code: '+stage.exitcode:''),'small'));
+  const observation=stage.guest_observation;
+  if(observation)details.append(el('p','Last guest response: '+new Date(observation.at).toLocaleTimeString()+' · '+observation.state+(observation.pid?' · PID '+observation.pid:''),'small'));
+  for(const transfer of stage.transfers||[])details.append(el('p','VM '+transfer.vmid+' · '+transfer.file+' · '+transfer.received_bytes+' / '+(transfer.total_bytes??'unknown')+' bytes · '+(transfer.verified?'Checksum verified':transfer.status),'small'));
+  if(stage.readiness)for(const check of stage.readiness.checks||[])details.append(el('p','Readiness '+check.key+': '+check.status,'small'));
+  if(stage.file_count){details.append(el('p',stage.file_count+' saved file(s)'+(stage.file_count>100?' · showing first 100':''),'small'));details.append(el('pre',stage.files.join('\n')));}
+  for(const trial of stage.trials||[]){details.append(el('p',trial.trial_id+' · '+trial.condition_id+' · '+trial.status+' · Verified: '+(trial.verified_success??'pending'),'small'));if(trial.transport)details.append(el('p',trial.transport.activity+' · '+(trial.transport.files_uploaded??0)+' / '+(trial.transport.files_total??'unknown')+' files transferred','small'));for(const error of trial.errors||[])details.append(el('p',error,'error'));}
+  if(stage.events?.length)details.append(el('h4','Checkpoints and recent output'),el('pre',stage.events.map(event=>`${event.at} [${event.kind}] ${event.message}`).join('\n')));
+  if(stage.log_tail!=null)details.append(el('h4','Saved command log · last 60 lines'),el('pre',stage.log_tail||'(No output recorded yet)'));
+  item.append(details);
   list.append(item);
  }
  section.append(list);target.append(section);

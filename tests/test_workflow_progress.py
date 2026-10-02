@@ -19,6 +19,12 @@ def test_stage_progress_survives_results_and_status_is_read_only(lab):
     assert result['transfer']['vmid'] == 9403
     assert [r['vmid'] for r in result['roles']] == [9402, None, 9403, None]
     assert result['current_step'] == 'evaluate'
+    fetch = next(stage for stage in result['steps'] if stage['id']=='fetch')
+    assert fetch['transfers'] and fetch['transfers'][0]['verified']
+    assert fetch['file_count'] and fetch['events']
+    prepare = next(stage for stage in result['steps'] if stage['id']=='artifact-generate')
+    assert prepare['log_tail'] is not None
+    assert prepare['timeout_seconds'] and prepare['exitcode'] == 0
     assert result['readiness']['session_id'] == 9
     assert all(c['status']=='pass' for c in result['readiness']['checks'])
 
@@ -141,3 +147,22 @@ def test_live_log_failure_does_not_fail_command_or_repeat_warnings(tmp_path, mon
         agent.qm([])
     assert len(wf.journal['events']) == 1
     assert 'secret RPC payload' not in str(wf.journal)
+
+
+def test_stage_log_preview_is_bounded_redacted_and_cannot_escape_run(lab, tmp_path):
+    config, output, agent, _ = lab
+    workflow.run(config, output, agent=agent, progress=None)
+    journal = ev.read_json(output/'workflow.json')
+    stage = journal['stages']['artifact-generate']
+    path = output/stage['log']
+    path.write_text('old line\n'*100+'password=secret-value\n')
+    view = build(journal, 'completed', False, root=output)
+    preview = next(s for s in view['steps'] if s['id']=='artifact-generate')['log_tail']
+    assert len(preview.splitlines()) <= 60
+    assert 'secret-value' not in preview and '[redacted]' in preview
+    outside = tmp_path/'outside.log'
+    outside.write_text('PRIVATE OTHER RUN')
+    path.unlink()
+    path.symlink_to(outside)
+    view = build(journal, 'completed', False, root=output)
+    assert next(s for s in view['steps'] if s['id']=='artifact-generate')['log_tail'] is None

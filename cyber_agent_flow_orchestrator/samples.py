@@ -178,7 +178,7 @@ class SampleManager:
                     'Select a participant VM before running; settings will be saved on first run'))
         return {'run_id':run_id, 'status':'ready'}
 
-    def run_saved(self, access, run_id, request_id):
+    def run_saved(self, access, run_id, request_id, progress=lambda step, message: None):
         if not isinstance(request_id, str) or not re.fullmatch('[0-9a-f]{32}', request_id):
             raise SampleRequestError('Invalid experiment request ID')
         access.current()
@@ -191,10 +191,11 @@ class SampleManager:
             raise SampleRequestError('This experiment cannot be run from the WebUI')
         if record.get('launch_request_id') == request_id:
             return {'run_id':run_id, 'status':record['status']}
+        progress(2, 'Checking whether the saved experiment is already active')
         if reporting.active(output / '.workflow.lock') or record['status'] in ('queued', 'preparing', 'evaluating'):
             raise SampleBusy('This experiment is already active; refresh its progress')
         return self.submit(access, record['sample_id'], run_id.removeprefix('sample-') if record['status'] == 'ready' else request_id,
-                           launch_request_id=request_id, saved_runtime=record.get('runtime'))
+                           launch_request_id=request_id, saved_runtime=record.get('runtime'), progress=progress)
 
     def stop(self, access, run_id):
         access.current()
@@ -212,7 +213,7 @@ class SampleManager:
         ev.write_json(output / 'stop-request.json', {'requested_at':now()})
         return {'run_id':run_id, 'status':'stopping'}
 
-    def submit(self, access, sample_id, request_id, *, launch_request_id=None, saved_runtime=None):
+    def submit(self, access, sample_id, request_id, *, launch_request_id=None, saved_runtime=None, progress=lambda step, message: None):
         if sample_id not in self.enabled:
             raise SampleRequestError('This sample is not enabled')
         if not isinstance(request_id, str) or not re.fullmatch(r'[0-9a-f]{32}', request_id):
@@ -233,11 +234,13 @@ class SampleManager:
         if vmid is None:
             raise SampleRequestError('Save a Cyber-agent-flow VM selection first')
         access.require_vm(vmid)
+        progress(3, 'Preparing CAF runtime and participant VM settings')
         runtime = deepcopy(saved_runtime) if saved_runtime else self.selected_runtime(workspace, vmid)
         journal = dict(version=1, sample_id=sample_id, created_at=now(), status='queued',
                        workflow={'id': 'sample-' + sample_id, 'prepare': [], 'artifacts': []},
                        runtime=runtime, stages={}, workflow_hash=ev.digest({'sample': sample_id, 'runtime': runtime}),
                        message='Waiting for sample worker', phase='queued', updated_at=now(), events=[], launch_request_id=launch_request_id)
+        progress(4, 'Checking coordinator capacity and saving the launch journal')
         with self.lock, submission_lock(workspace):
             if output.exists():
                 previous = ev.read_json(output / 'workflow.json')
@@ -254,6 +257,7 @@ class SampleManager:
                 raise SampleBusy('Only one experiment can run at a time for this account')
             private_directory(output)
             ev.write_json(output / 'workflow.json', journal)
+            progress(5, 'Submitting the experiment to the evaluation coordinator')
             future = self.pool.submit(self._run, workspace, output, journal, access, request_id)
             self.jobs[access.username] = future
         return {'run_id': run_id, 'status': 'queued'}

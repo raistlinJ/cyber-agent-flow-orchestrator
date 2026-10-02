@@ -9,7 +9,7 @@ import yaml
 
 from cyber_agent_flow_eval import integration as ev
 from .config import load
-from .workflow_progress import step, observe_command, observe_transfers
+from .workflow_progress import step, observe_command, observe_transfers, checkpoint
 
 
 def sha(path):
@@ -56,6 +56,8 @@ class Workflow:
             self.journal.setdefault('events', []).append(dict(at=self.journal['updated_at'], kind='scenario', message=message))
             self.journal['events'] = self.journal['events'][-100:]
             self.save()
+        if self.journal.get('progress_steps', {}).get(self.journal.get('current_step'), {}).get('status') == 'running':
+            checkpoint(self, message)
         if self.progress is not None:
             self.progress(message)
 
@@ -196,6 +198,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
             wf.notify('Collecting the ScenarioForge evaluation package')
             package = output / 'suite'
             with step(wf, "fetch"), observe_transfers(wf):
+                checkpoint(wf, 'Downloading exported suite; verifying archive and package identity')
                 if 'fetch' not in journal['stages']:
                     if not package.exists():
                         ev.ProxmoxBackend(runtime['backend'], runtime['engine'], agent=wf.agent).fetch_suite(archive, package)
@@ -205,6 +208,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                     journal['stages']['fetch'] = {'status': 'completed', 'files': wf.inventory(p for p in package.rglob('*') if p.is_file())}
                     wf.save()
             with step(wf, "readiness"):
+                checkpoint(wf, 'Checking session confirmation, required checks, XML identity and readiness age')
                 _, snapshot = ev.load_suite(package)
                 ev.require_ready(snapshot, cfg['max_readiness_age_seconds'])
                 evidence = snapshot['readiness']
@@ -226,6 +230,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                     wf.save()
             wf.notify('Capturing scenario reproduction files')
             with step(wf, "reproduction"), observe_transfers(wf):
+                checkpoint(wf, 'Collecting reproduction XML and assets; validating the importable bundle')
                 if 'reproduction' not in journal['stages']:
                     from .run_artifacts import validate_reproduction
                     from .auth import private_file
@@ -244,12 +249,14 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
             for command in cfg['artifacts']:
                 wf.command('artifact-' + command['id'], command, retry_steps)
             with step(wf, "freeze"), observe_transfers(wf):
+                checkpoint(wf, 'Capturing catalogs, guidance and exact runtime settings')
                 if 'freeze' not in journal['stages']:
                     with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{runtime['backend']['participant_vmid']}.lock"):
                         wf.freeze_runtime(runtime, files, cfg, identity)
             wf.notify('Preparing the agent evaluation settings')
             study = output / 'study.yaml'
             with step(wf, "import"):
+                checkpoint(wf, 'Combining exported tasks, verifiers, conditions and repetitions')
                 if 'import' not in journal['stages']:
                     # Recreate only a derived config if interrupted before journaling.
                     study.unlink(missing_ok=True)
@@ -263,6 +270,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
             wf.save()
             wf.notify('Running agent evaluation')
             with step(wf, "evaluate"):
+                checkpoint(wf, 'Launching participant trials and collecting outputs for host scoring')
                 rows = evaluator(study, dataset, resume=(dataset / 'manifest.json').exists(),
                                  retry_failed=retry_failed, reservation=reservation, progress=wf.notify)
             latest = {}

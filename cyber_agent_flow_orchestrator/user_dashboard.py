@@ -22,6 +22,8 @@ class UserDashboard:
         self.probe_factory = probe_factory or (lambda backend, access: ProxmoxProbe(backend, access))
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='user-monitor')
         self.lock = threading.RLock()
+        self.creation_records = {}
+        self.start_records = {}
         self.slots = threading.BoundedSemaphore(4)
         self.entries = {}
         from .samples import SampleManager
@@ -170,10 +172,59 @@ class UserDashboard:
         return self.scenarios.run_saved(access, created['run_id'], request_id)
 
     def experiment(self, access, action, data):
-        if action == 'create' and 'sample_id' in data:
-            return self.scenarios.create_sample(access, **data)
-        if action == 'create' and 'selection_id' in data:
-            return self.scenarios.create(access, **data)
+        if action != 'run':
+            return self._experiment(access, action, data)
+        import re
+        from .samples import SampleRequestError
+        request_id = data.get('request_id', '')
+        if not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise SampleRequestError('Supply a valid request ID')
+        key = (access.username, request_id)
+        def progress(step, message, state='running'):
+            from datetime import datetime, timezone
+            with self.lock:
+                self.start_records[key] = dict(step=step, total=5, message=message, state=state,
+                    updated_at=datetime.now(timezone.utc).isoformat())
+                while len(self.start_records) > 256:
+                    self.start_records.pop(next(iter(self.start_records)))
+        progress(1, 'Validating the saved experiment and account access')
+        try:
+            result = self._experiment(access, action, data, progress=progress)
+            progress(5, 'Coordinator accepted the experiment; follow execution in Progress', 'completed')
+            return result
+        except Exception:
+            with self.lock:
+                current = self.start_records.get(key, {})
+            progress(current.get('step', 1), current.get('message', 'Starting experiment'), 'failed')
+            raise
+
+    def _experiment(self, access, action, data, progress=lambda step, message: None):
+        if action == 'create' and ('sample_id' in data or 'selection_id' in data):
+            import re
+            from .samples import SampleRequestError
+            request_id = data.get('request_id', '')
+            if not re.fullmatch('[0-9a-f]{32}', request_id):
+                raise SampleRequestError('Supply a valid request ID')
+            key = (access.username, request_id)
+            total = 8 if 'sample_id' in data else 4
+            def progress(step, message, state='running'):
+                from datetime import datetime, timezone
+                with self.lock:
+                    self.creation_records[key] = dict(step=step, total=total, message=message,
+                        state=state, updated_at=datetime.now(timezone.utc).isoformat())
+                    while len(self.creation_records) > 256:
+                        self.creation_records.pop(next(iter(self.creation_records)))
+            progress(1, 'Checking experiment inputs and waiting for the creation workspace')
+            try:
+                create = self.scenarios.create_sample if 'sample_id' in data else self.scenarios.create
+                result = create(access, **data, progress=progress)
+                progress(total, 'Experiment saved; ready to run', 'completed')
+                return result
+            except Exception:
+                with self.lock:
+                    current = self.creation_records.get(key, {})
+                progress(current.get('step', 1), current.get('message', 'Creating experiment'), 'failed')
+                raise
         if action != 'create':
             path = self.workspace(access).run_path(data['run_id'])
             from cyber_agent_flow_eval import integration as ev
@@ -183,8 +234,17 @@ class UserDashboard:
                 from .samples import SampleRequestError
                 raise SampleRequestError('Experiment not found') from None
             if record.get('scenario_experiment'):
-                return {'run': self.scenarios.run_saved, 'stop': self.scenarios.stop}[action](access, **data)
-        return {'create':self.samples.create, 'run':self.samples.run_saved, 'stop':self.samples.stop}[action](access, **data)
+                return {'run': self.scenarios.run_saved, 'stop': self.scenarios.stop}[action](access, **data, **({'progress':progress} if action == 'run' else {}))
+        return {'create':self.samples.create, 'run':self.samples.run_saved, 'stop':self.samples.stop}[action](access, **data, **({'progress':progress} if action == 'run' else {}))
+
+    def creation_status(self, access, request_id, *, starting=False):
+        import re
+        if not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise ValueError('Invalid creation request ID')
+        access.current()
+        with self.lock:
+            return deepcopy((self.start_records if starting else self.creation_records).get((access.username, request_id),
+                dict(step=0, total=None, state='pending', message='Waiting for the launch request to start' if starting else 'Waiting for the creation request to start')))
 
     def maintain(self, access, data):
         return self.updates.submit(access, **data)

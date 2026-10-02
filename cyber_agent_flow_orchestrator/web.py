@@ -149,6 +149,9 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     return
                 if path == '/api/session':
                     self.respond(200, session)
+                elif path in ('/api/experiments/creation-status', '/api/experiments/start-status') and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                    request_id = parse_qs(urlsplit(self.path).query).get('request_id', [''])[0]
+                    self.respond(200, dashboard.creation_status(auth.access(token, revalidate=False), request_id, starting=path.endswith('/start-status')))
                 elif path == '/api/status':
                     if auth.provider.name == 'pve':
                         if not getattr(dashboard, 'scoped', False):

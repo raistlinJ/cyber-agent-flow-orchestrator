@@ -31,7 +31,11 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
             item=dict(id='a'*64,scenario='Fixed demo',path='/uploads/demo.xml',sha256='b'*64,
                       resolved_chain=False,chain_length=0,bytes=100)
             if op=='upload-start': return {'path':'/uploads/source'}
-            if op=='upload-import': return dict(items=[item],path=item['path'],kind='reproduction-bundle',fidelity='portable-artifacts')
+            if op=='upload-import':
+                progress=dashboard.creation_status(user,'a'*32)
+                assert progress['step']==4 and progress['total']==8
+                assert 'Importing' in progress['message']
+                return dict(items=[item],path=item['path'],kind='reproduction-bundle',fidelity='portable-artifacts')
             if op=='snapshot':
                 assert data['allow_unresolved']
                 return dict(item,snapshot_path='/saved/demo.xml')
@@ -40,6 +44,9 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
     monkeypatch.setattr(scenarios,'guest',lambda backend:Remote())
     try:
         result=dashboard.experiment(user,'create',dict(sample_id=sample_id,request_id='a'*32))
+        progress=dashboard.creation_status(user,'a'*32)
+        assert progress['state']=='completed' and progress['step']==progress['total']==8
+        assert dashboard.creation_status(type('Other',(),{'username':'other@pve','current':lambda self:None})(),'a'*32)['state']=='pending'
         output=workspace.run_path(result['run_id'])
         saved=ev.read_json(output/'workflow.json')
         assert saved['workflow']['scenarioforge']['mode']=='execute'
@@ -49,6 +56,9 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         agent.marker=dict(state='complete',readiness_passed=True,archive='/exports/suite.zip',
                           package_hash=manifest['package_hash'],suite_id=saved['workflow']['scenarioforge']['suite_id'])
         dashboard.experiment(user,'run',dict(run_id=result['run_id'],request_id='b'*32))
+        launch=dashboard.creation_status(user,'b'*32,starting=True)
+        assert launch['state']=='completed' and launch['step']==launch['total']==5
+        assert dashboard.creation_status(user,'b'*32)['state']=='pending'
         dashboard.samples.jobs[user.username].result(timeout=15)
         report=service.results(output)
         assert report['workflow']['recorded_status']=='completed',ev.read_json(output/'workflow.json')
