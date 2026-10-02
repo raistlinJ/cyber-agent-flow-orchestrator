@@ -39,3 +39,27 @@ def test_preflight_does_not_touch_jobs_in_a_locked_run(lab):
         vm_preflight.run(wf)
     assert not agent.calls
     assert current['progress_steps']['preflight']['status']=='failed'
+
+
+def test_preflight_handles_older_participant_only_and_unconfigured_samples(lab):
+    config, output, agent, _ = lab
+    workflow.run(config, output, agent=agent, progress=None)
+    journal = ev.read_json(output/'workflow.json')
+    sample = output.parent/'sample-old'
+    sample.mkdir()
+    participant = journal['runtime']['backend']['participant_vmid']
+    ev.write_json(sample/'workflow.json', dict(workflow={'id':'sample-old'},
+        runtime={'backend':{'participant_vmid':participant}}, stages={}))
+    transport = sample/'evaluation/trials/trial-000001/attempt-0001/transport.json'
+    transport.parent.mkdir(parents=True)
+    ev.write_json(transport, dict(vmid=participant, unit='caf-eval-abcd', stopped=False))
+    pending = output.parent/'sample-unconfigured'
+    pending.mkdir()
+    ev.write_json(pending/'workflow.json', dict(workflow={'id':'sample-pending'}, runtime=None, stages={}))
+    wf = workflow.Workflow(output, journal, agent, progress=None)
+    agent.calls.clear()
+    vm_preflight.run(wf)
+    assert ev.read_json(transport)['stopped']
+    assert any(vmid==participant and op=='preflight' and 'caf-eval-abcd' in data['units']
+               for vmid,op,data in agent.calls)
+    assert journal['progress_steps']['preflight']['status']=='completed'

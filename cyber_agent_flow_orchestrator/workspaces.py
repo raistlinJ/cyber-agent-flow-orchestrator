@@ -131,8 +131,11 @@ class Workspace:
 
 
 def workflow_vmids(cfg, runtime):
-    result = {runtime['backend']['app_vmid'], runtime['backend']['participant_vmid']}
+    # Historical participant-only samples have no app VM; unscheduled samples
+    # may not have runtime settings yet. Neither should break sibling discovery.
+    backend = (runtime or {}).get('backend', {})
+    result = {backend[key] for key in ('app_vmid', 'participant_vmid') if backend.get(key) is not None}
     if cfg.get('monitoring', {}).get('core_vmid'):
         result.add(cfg['monitoring']['core_vmid'])
-    result.update(c['vmid'] for c in cfg.get('prepare', []) + cfg.get('artifacts', []) + runtime['backend'].get('before_trial', []))
+    result.update(c['vmid'] for c in cfg.get('prepare', []) + cfg.get('artifacts', []) + backend.get('before_trial', []))
     return result
