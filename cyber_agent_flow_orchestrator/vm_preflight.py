@@ -42,7 +42,12 @@ def run(workflow):
             jobs = [(record,path) for record,path in candidates if record['vmid']==vmid]
             units = sorted({record['unit'] for record,path in jobs})
             checkpoint(workflow, f'VM {vmid}: checking guest services; {len(units)} recorded leftover job(s) to stop')
-            result = workflow.agent.call(vmid, 'preflight', units=units, timeout=max(60, len(units)*45))
+            try:
+                result = workflow.agent.call(vmid, 'preflight', units=units, timeout=max(60, len(units)*45))
+            except ValueError as exc:
+                if 'Unknown guest operation: preflight' in str(exc):
+                    raise ValueError('VM preflight requires the updated cyber-agent-flow-eval package on the orchestrator host. Update that checkout, sync the orchestrator environment, and restart the WebUI process. The helper is sent from the host; guest reprovisioning is not required.') from exc
+                raise
             if result.get('ready') is not True:
                 raise ValueError(f'VM {vmid}: cleanup readiness was not confirmed')
             for record,path in jobs:

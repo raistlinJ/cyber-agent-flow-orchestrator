@@ -63,3 +63,16 @@ def test_preflight_handles_older_participant_only_and_unconfigured_samples(lab):
     assert any(vmid==participant and op=='preflight' and 'caf-eval-abcd' in data['units']
                for vmid,op,data in agent.calls)
     assert journal['progress_steps']['preflight']['status']=='completed'
+
+
+def test_preflight_explains_outdated_host_evaluator(lab):
+    config, output, agent, _ = lab
+    workflow.run(config, output, agent=agent, progress=None)
+    journal = ev.read_json(output/'workflow.json')
+    wf = workflow.Workflow(output, journal, agent, progress=None)
+    def outdated(vmid, op, **data):
+        raise ValueError('Guest operation preflight failed: Unknown guest operation: preflight')
+    agent.call = outdated
+    with pytest.raises(ValueError, match='updated cyber-agent-flow-eval package on the orchestrator host'):
+        vm_preflight.run(wf)
+    assert journal['progress_steps']['preflight']['status'] == 'failed'
