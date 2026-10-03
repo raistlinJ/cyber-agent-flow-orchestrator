@@ -15,18 +15,24 @@ def check_evaluator():
                             'digest', 'fields', 'identifier', 'positive', 'read_json', 'write_json'),
             'reporting': ('active', 'status', 'results', 'logs', 'tail'),
             'proxmox': ('authorized_operations', 'UPLOAD_CHUNK'),
-            'guest_agent': ('MAINTENANCE_LOCK', 'MAINTENANCE_PENDING', 'RPC_INPUT_LIMIT'),
+            'guest_agent': ('MAINTENANCE_LOCK', 'MAINTENANCE_PENDING', 'RPC_INPUT_LIMIT', 'SUPPORTED_OPERATIONS'),
+            'fusion': ('vm_lock_path',),
         }
         for name, symbols in modules.items():
             module = importlib.import_module('cyber_agent_flow_eval.' + name)
             for symbol in symbols:
                 if not hasattr(module, symbol):
                     raise ImportError(f'cyber_agent_flow_eval.{name}.{symbol} is missing')
+        guest = importlib.import_module('cyber_agent_flow_eval.guest_agent')
+        required = {'preflight', 'start', 'stop', 'status', 'hook', 'stat', 'write', 'hint_request', 'hint_reply'}
+        if not required.issubset(guest.SUPPORTED_OPERATIONS):
+            missing = ', '.join(sorted(required - guest.SUPPORTED_OPERATIONS))
+            raise ImportError('Guest helper operations are missing: ' + missing)
     except ImportError as exc:
         raise RuntimeError(
             f'Incompatible evaluator at {location}: {exc}. '
             'This orchestrator requires the evaluator host API (0.4.2+), including integration.py, '
-            'reporting.py, Proxmox authorization, guest maintenance locking and stdin uploads. Update the evaluator checkout '
+            'reporting.py, Proxmox authorization, guest maintenance locking, preflight/reset-hook cleanup, shared VM locks and stdin uploads. Update the evaluator checkout '
             'to a revision containing those files, then rerun python3 install.py. '
             'uv sync alone cannot restore missing source files.'
         ) from exc

@@ -14,7 +14,7 @@ def test_preflight_recovers_recorded_leftovers_before_new_run(lab):
     ev.write_json(old/'workflow.json',journal)
     hook=old/'evaluation/trials/trial-000001/attempt-0001/hook-000.json'
     hook.parent.mkdir(parents=True,exist_ok=True)
-    ev.write_json(hook,dict(vmid=attempt['vmid'],unit='caf-orchestrator-abcd',stopped=False))
+    ev.write_json(hook,dict(vmid=attempt['vmid'],unit='caf-eval-hook-abcd',stopped=False))
     new=old.parent/'next-run';new.mkdir()
     current=deepcopy(journal);current.update(stages={},progress_steps={},status='running')
     wf=workflow.Workflow(new,current,agent,progress=None);wf.save()
@@ -24,7 +24,7 @@ def test_preflight_recovers_recorded_leftovers_before_new_run(lab):
     assert any(attempt['unit'] in check['units'] for check in checks)
     assert ev.read_json(old/'workflow.json')['stages']['artifact-generate']['attempts'][0]['stopped']
     assert ev.read_json(hook)['stopped']
-    assert any('caf-orchestrator-abcd' in check['units'] for check in checks)
+    assert any('caf-eval-hook-abcd' in check['units'] for check in checks)
     assert current['progress_steps']['preflight']['status']=='completed'
 
 

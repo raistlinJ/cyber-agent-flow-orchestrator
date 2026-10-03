@@ -31,3 +31,19 @@ def test_incomplete_evaluator_fails_clearly_even_if_metadata_says_040(tmp_path, 
     assert 'uv sync alone cannot restore missing source files' in result.stderr
     assert 'Traceback' not in result.stderr
     assert not (tmp_path / 'web.yaml').exists()
+
+
+def test_complete_host_api_with_outdated_guest_helper_fails_before_vm_dispatch(monkeypatch):
+    from cyber_agent_flow_eval import guest_agent
+    from cyber_agent_flow_orchestrator.compatibility import check_evaluator
+    monkeypatch.setattr(guest_agent,'SUPPORTED_OPERATIONS',guest_agent.SUPPORTED_OPERATIONS-{'preflight'})
+    with pytest.raises(RuntimeError,match='Guest helper operations are missing: preflight'):
+        check_evaluator()
+
+
+def test_old_helper_without_capability_contract_is_rejected(monkeypatch):
+    from cyber_agent_flow_eval import guest_agent
+    from cyber_agent_flow_orchestrator.compatibility import check_evaluator
+    monkeypatch.delattr(guest_agent,'SUPPORTED_OPERATIONS')
+    with pytest.raises(RuntimeError,match='SUPPORTED_OPERATIONS is missing'):
+        check_evaluator()
