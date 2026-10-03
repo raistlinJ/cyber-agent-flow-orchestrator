@@ -89,6 +89,17 @@ def main():
                     expect(page.locator('#model-participant-use')).to_have_count(0)
                     expect(page.locator('#model-participant-save')).to_have_count(0)
                     expect(page.locator('#model-participant-apply')).to_be_disabled()
+                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    # An input event/autofill with the pulled value is not an
+                    # edit and must not demand another VM save.
+                    page.locator('#model-participant-model').dispatch_event('input')
+                    expect(page.locator('#model-participant-apply')).to_be_disabled()
+                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    page.locator('#model-participant-model').fill('temporary-edit')
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    page.locator('#model-participant-model').fill('custom-model')
+                    expect(page.locator('#model-participant-apply')).to_be_disabled()
+                    expect(page.locator('#create-experiment')).to_be_enabled()
                     expect(page.locator('#model-config-scenarioforge')).to_have_count(0)
                     expect(page.locator('.model-card-heading #model-participant-read')).to_be_visible()
                     page.locator('#model-participant-model').fill('')

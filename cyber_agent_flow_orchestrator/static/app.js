@@ -208,6 +208,14 @@ function startCreationProgress(saveModel){
  if(!saveModel)creationProgress(1,'skipped','VM push · not needed');
 }
 let modelDrafts={};
+function modelFormSettings(role){
+ return {provider:$(`model-${role}-provider`).value,url:$(`model-${role}-url`).value.trim(),model:$(`model-${role}-model`).value.trim(),ssl_verify:$(`model-${role}-ssl`).checked};
+}
+function modelSettingsChanged(role){
+ const saved=modelDrafts[role]?.settings;if(!saved)return false;
+ const current=modelFormSettings(role);
+ return Object.keys(current).some(key=>current[key]!==saved[key])||Boolean($(`model-${role}-key`).value)||$(`model-${role}-clear`).checked;
+}
 function renderModelConfigs(data){
  $('model-config-panel').hidden=!data.owner;
  if(!data.owner)return;
@@ -229,7 +237,8 @@ function renderModelConfigs(data){
   const clearLabel=el('label','Clear stored API key '),clear=el('input');clear.type='checkbox';clear.id=`model-${role}-clear`;clearLabel.append(clear);form.append(clearLabel);
   const actions=el('div',null,'result-actions'),apply=el('button','Apply settings');apply.type='button';apply.id=`model-${role}-apply`;apply.addEventListener('click',()=>{if(validateExperimentFields(form))modelConfigAction(role,'save');});actions.append(apply);form.append(actions);
   const message=el('p','Pull the configuration before editing.','small');message.id=`model-${role}-message`;message.setAttribute('role','status');form.append(message);
-  form.addEventListener('input',()=>{if(modelDrafts[role])modelDrafts[role].dirty=true;syncModelControls(role);});
+  const changed=()=>{if(modelDrafts[role])modelDrafts[role].dirty=modelSettingsChanged(role);syncModelControls(role);syncCreateExperiment();};
+  form.addEventListener('input',changed);form.addEventListener('change',changed);
   form.addEventListener('submit',event=>{event.preventDefault();if(validateExperimentFields(form))modelConfigAction(role,'save');});
   if(card)card.replaceWith(form);else $('model-config-cards').append(form);syncModelControls(role);
  }
@@ -247,7 +256,7 @@ async function modelConfigAction(role,action,creating=false){
  if(action==='read'&&!confirm('Pull from VM will replace all model settings currently shown in this form. Continue?'))return;
  const body={role,action};if(action!=='read')body.token=modelDrafts[role]?.token;
  if(action==='save'){
-  body.settings={provider:$(`model-${role}-provider`).value,url:$(`model-${role}-url`).value.trim(),model:$(`model-${role}-model`).value.trim(),ssl_verify:$(`model-${role}-ssl`).checked};
+  body.settings=modelFormSettings(role);
   const key=$(`model-${role}-key`);if($(`model-${role}-clear`).checked)body.api_key='';else if(key.value)body.api_key=key.value;key.value='';
  }
  operation=action==='read'?'Reading model configuration from the VM…':role==='participant'?'Saving model settings, synchronizing the participant route and checking connectivity…':'Saving model settings to the VM and experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
@@ -257,7 +266,7 @@ async function modelConfigAction(role,action,creating=false){
    const current=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action:'read'})});
    const fresh=await dashboardJSON(current);if(!current.ok)throw Error(fresh.error||'Unable to refresh saved model settings');
    body.token=fresh.token;body.settings=fresh.settings;
-   modelDrafts[role]={token:fresh.token,vmid:fresh.vmid,dirty:false};
+   modelDrafts[role]={token:fresh.token,vmid:fresh.vmid,dirty:false,settings:fresh.settings};
   }
   if(creating){
    creationProgress(0,'running','Saving file locally on orchestrator…');
@@ -272,6 +281,7 @@ async function modelConfigAction(role,action,creating=false){
   modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:false};
   if(role==='participant'&&data.network_scope)applyModelNetworkScope(data.network_scope);
   for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=data.settings[key];$(`model-${role}-ssl`).checked=data.settings.ssl_verify;$(`model-${role}-key`).value='';$(`model-${role}-clear`).checked=false;
+  modelDrafts[role].settings=modelFormSettings(role);
   $(`model-${role}-message`).textContent=(action==='save'?'Applied. These values are saved on the VM and will be used by new experiments. ':data.exists?'Pulled from VM. Edit the values, then select Apply settings. ':'No configuration file exists yet. Enter values, then select Apply settings. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.routing?'Route: '+(data.routing.status==='updated'?`${data.routing.destination} through ${data.routing.interface}${data.routing.gateway?' via '+data.routing.gateway:''}. `:data.routing.message+'. '):'')+(data.routing?.dns?`DNS: ${data.routing.dns.domain} through ${data.routing.dns.server}. `:'')+(data.connectivity?data.connectivity.message+'. ':'')+(data.backup?'Backup: '+data.backup:'');
  }catch(error){$(`model-${role}-message`).textContent=error.message;if(creating)throw error;}
  finally{delete body.api_key;if(!creating)operation=null;syncModelControls(role);syncBusy();if(!creating)schedulePoll();}
