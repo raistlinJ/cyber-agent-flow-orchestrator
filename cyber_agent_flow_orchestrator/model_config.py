@@ -86,6 +86,8 @@ class ModelConfigs:
                             draft.get('token') != data['token'] or draft.get('vmid') != vmid or draft.get('root') != definition['root']):
                         raise ModelConfigError('VM selection or configuration draft changed. Pull the configuration again.')
                     args['revision'] = draft['revision']
+                    if role == 'participant':
+                        args['route_helper_source'] = Path(__file__).with_name('guest_llm_route.py').read_text()
                     if action == 'stage':
                         # Pending settings are not active defaults. Never persist an API key here.
                         target = workspace.path / f'model-pending-{vmid}.json'

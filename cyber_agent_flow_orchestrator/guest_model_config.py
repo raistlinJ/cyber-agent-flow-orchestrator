@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -66,40 +67,63 @@ def replace_env(text, changes):
     return '\n'.join(lines) + '\n'
 
 
-def atomic(path, content, owner):
+def atomic(path, content, owner, mode=0o600):
     fd, temporary = tempfile.mkstemp(prefix='.caf-model-', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-            os.fchmod(stream.fileno(), 0o600)
+            os.fchmod(stream.fileno(), mode)
             os.fchown(stream.fileno(), owner.st_uid, owner.st_gid)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
-def synchronize_endpoint(path, values):
+def upgrade_route_helper(source):
+    """Replace only an installed legacy utility during an authorized model save."""
+    if not isinstance(source, str) or not 1 <= len(source.encode()) <= 65536:
+        raise ValueError('Invalid bundled participant routing helper')
+    compile(source, 'bundled participant routing helper', 'exec')
+    owner = ROUTE_HELPER.lstat()
+    if not stat.S_ISREG(owner.st_mode) or owner.st_uid != os.geteuid() or owner.st_mode & 0o022:
+        raise ValueError('Unsafe participant routing helper; refusing automatic replacement')
+    backup = ROUTE_HELPER.with_name(ROUTE_HELPER.name + '.caf-model-' + uuid.uuid4().hex + '.bak')
+    atomic(backup, ROUTE_HELPER.read_bytes(), owner)
+    atomic(ROUTE_HELPER, source.encode(), owner, mode=0o755)
+    return str(backup)
+
+
+def synchronize_endpoint(path, values, helper_source=None):
     """Reuse the provisioner's route/policy transaction; never pass credentials."""
     if not ROUTE_HELPER.is_file():
         return dict(status='unmanaged', message='Provisioner route helper is not installed; routes were unchanged')
+    backup = None
+    command = [str(ROUTE_HELPER), '--url', values['url'], '--cli-config', str(path), '--json']
     try:
-        command = [str(ROUTE_HELPER), '--url', values['url'], '--cli-config', str(path), '--json']
         process = subprocess.run(command, capture_output=True, text=True, timeout=90)
+        if process.returncode and 'unrecognized arguments' in process.stderr and helper_source is not None:
+            # The old argparse command rejected the request before changing
+            # routes. Upgrade once, under the existing guest maintenance lock.
+            backup = upgrade_route_helper(helper_source)
+            process = subprocess.run(command, capture_output=True, text=True, timeout=90)
     except (OSError, subprocess.TimeoutExpired):
         raise ValueError('Participant route update failed or timed out; model settings were not saved') from None
     if process.returncode:
         message = process.stderr.strip()[-1000:]
         if 'unrecognized arguments' in message:
             raise ValueError('Update the participant routing helper from the ScenarioForge provisioner before saving model settings')
-        raise ValueError('Participant route update failed: ' + message)
+        prefix = ('Participant routing helper updated (backup: ' + backup + '); ') if backup else ''
+        raise ValueError(prefix + 'Participant route update failed: ' + message)
     try:
         result = json.loads(process.stdout)
         if result.get('status') != 'updated' or not result.get('destination'):
             raise ValueError()
     except (ValueError, AttributeError):
         raise ValueError('Participant routing helper returned an invalid result') from None
+    if backup:
+        result.update(helper_updated=True, helper_backup=backup)
     return result
 
 
@@ -208,7 +232,7 @@ def dispatch(data):
             replacement = data.get('api_key')
             if replacement is not None and (not isinstance(replacement, str) or len(replacement) > 8192 or any(ord(c) < 32 for c in replacement)):
                 raise ValueError('API key must be a single-line value')
-            route = synchronize_endpoint(path, selected)
+            route = synchronize_endpoint(path, selected, data.get('route_helper_source'))
             # The shared helper reconciles managed policy entries in cli.json.
             # Read them back rather than overwriting them with the earlier copy.
             if path.exists():

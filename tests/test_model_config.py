@@ -322,3 +322,84 @@ def test_scope_request_uses_applied_model_without_replacing_draft(pve,lab,tmp_pa
     assert result['vmid']==9403 and result['excluded_targets']==['192.0.2.8','192.0.2.1']
     assert urls==['http://applied.example:11434']
     assert (workspace.path/'model-draft-participant.json').read_bytes()==draft
+
+
+def test_legacy_route_helper_is_backed_up_and_retried_on_authorized_save(guest_root, monkeypatch, tmp_path):
+    import subprocess
+    helper=tmp_path/'update-llm-destination'
+    original=b'#!/usr/bin/python3\n# legacy utility\n'
+    helper.write_bytes(original);helper.chmod(0o755)
+    monkeypatch.setattr(guest,'ROUTE_HELPER',helper)
+    source=Path(guest.__file__).with_name('guest_llm_route.py').read_text()
+    path=guest_root/'configs/cli.json';path.parent.mkdir()
+    ev.write_json(path,dict(settings(),model='old-model'))
+    loaded=guest.dispatch(dict(role='participant',action='read',root=str(guest_root)))
+    calls=[]
+    def run(argv,**kwargs):
+        calls.append(argv)
+        if len(calls)==1:
+            return subprocess.CompletedProcess(argv,2,'','unrecognized arguments: --cli-config --json')
+        assert helper.read_text()==source
+        assert stat.S_IMODE(helper.stat().st_mode)==0o755
+        return subprocess.CompletedProcess(argv,0,json.dumps(dict(status='updated',destination='192.0.2.8',interface='eth2')),'')
+    monkeypatch.setattr(guest.subprocess,'run',run)
+    result=guest.dispatch(dict(role='participant',action='save',root=str(guest_root),revision=loaded['revision'],settings=dict(settings(),model='real-model'),route_helper_source=source))
+    assert len(calls)==2 and calls[0]==calls[1]
+    assert result['routing']['helper_updated']
+    assert Path(result['routing']['helper_backup']).read_bytes()==original
+    assert stat.S_IMODE(Path(result['routing']['helper_backup']).stat().st_mode)==0o600
+    assert ev.read_json(path)['model']=='real-model'
+
+
+@pytest.mark.parametrize('unsafe',['symlink','writable'])
+def test_legacy_route_helper_repair_rejects_unsafe_files(tmp_path, monkeypatch, unsafe):
+    helper=tmp_path/'helper'
+    if unsafe=='symlink':
+        target=tmp_path/'target';target.write_text('original');helper.symlink_to(target)
+    else:
+        helper.write_text('original');helper.chmod(0o777)
+    monkeypatch.setattr(guest,'ROUTE_HELPER',helper)
+    with pytest.raises(ValueError,match='Unsafe participant routing helper'):
+        guest.upgrade_route_helper('print("replacement")')
+    assert helper.read_text()=='original'
+    assert not list(tmp_path.glob('*.bak'))
+
+
+def test_failed_retry_does_not_save_model_settings(guest_root, monkeypatch, tmp_path):
+    import subprocess
+    helper=tmp_path/'helper';helper.write_text('# legacy');helper.chmod(0o755)
+    monkeypatch.setattr(guest,'ROUTE_HELPER',helper)
+    path=guest_root/'configs/cli.json';path.parent.mkdir()
+    ev.write_json(path,dict(settings(),model='old-model'))
+    original=path.read_bytes()
+    loaded=guest.dispatch(dict(role='participant',action='read',root=str(guest_root)))
+    responses=iter([subprocess.CompletedProcess([],2,'','unrecognized arguments: --json'),subprocess.CompletedProcess([],1,'','No dedicated LLM interface')])
+    monkeypatch.setattr(guest.subprocess,'run',lambda *a,**kw:next(responses))
+    with pytest.raises(ValueError,match='helper updated.*No dedicated LLM interface'):
+        guest.dispatch(dict(role='participant',action='save',root=str(guest_root),revision=loaded['revision'],settings=dict(settings(),model='new-model'),route_helper_source='print("new helper")'))
+    assert path.read_bytes()==original
+
+
+def test_route_helper_source_cannot_be_supplied_by_web_client(pve, lab, tmp_path, monkeypatch, guest_root):
+    manager,user,workspace,runtime,calls=fixture_manager(pve,lab,tmp_path,monkeypatch,guest_root)
+    with pytest.raises(ModelConfigError,match='Invalid model configuration request'):
+        manager.exchange(user,dict(role='participant',action='read',route_helper_source='print("client code")'))
+    assert not calls
+
+
+def test_pull_never_repairs_installed_legacy_helper(guest_root, monkeypatch, tmp_path):
+    helper=tmp_path/'helper';helper.write_text('# legacy');helper.chmod(0o755)
+    monkeypatch.setattr(guest,'ROUTE_HELPER',helper)
+    monkeypatch.setattr(guest.subprocess,'run',lambda *a,**k:pytest.fail('Pull attempted to execute routing helper'))
+    guest.dispatch(dict(role='participant',action='read',root=str(guest_root)))
+    assert helper.read_text()=='# legacy'
+    assert not list(tmp_path.glob('*.bak'))
+
+
+def test_scenarioforge_model_save_preserves_nonparticipant_exchange(pve, lab, tmp_path, monkeypatch, guest_root):
+    manager,user,workspace,runtime,calls=fixture_manager(pve,lab,tmp_path,monkeypatch,guest_root)
+    pve[0]['groups']+=',caf-maintainers'
+    loaded=manager.exchange(user,dict(role='scenarioforge',action='read'))
+    result=manager.exchange(user,dict(role='scenarioforge',action='save',token=loaded['token'],settings=settings('litellm')))
+    assert result['settings']==settings('litellm')
+    assert guest.env_values((guest_root/'.scenarioforge.env').read_text())['CORETG_AI_MODEL']=='lab-model'

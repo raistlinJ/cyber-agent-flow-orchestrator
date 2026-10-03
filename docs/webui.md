@@ -564,6 +564,18 @@ its managed endpoint/gateway exclusions, preserving custom agent policy. The
 Desktop shortcut uses this same utility. Model settings are not saved if route
 validation or application fails; the utility restores its previous files/routes.
 
+If an installed older helper rejects `--cli-config` or `--json`, an authorized
+Apply settings operation backs it up beside the original file with a
+`.caf-model-<id>.bak` suffix, installs the bundled current ScenarioForge helper,
+and retries once. The save response reports that backup. Read/Pull never
+updates the helper; Proxmox maintenance authorization and VM/guest locks still
+apply. Symlinks, writable shared helpers and files owned by another user are
+not replaced automatically. New model settings remain unsaved if the retry
+fails. This repair needs an updated orchestrator host and WebUI restart, without
+reprovisioning the participant VM. The bundled source is
+`guest_llm_route.py`, copied from ScenarioForge's
+`scripts/provision/common/update-llm-destination.py`.
+
 The save response shows the destination, interface, gateway, and a bounded TCP
 connectivity check from the participant. An unreachable endpoint is saved with
 a warning; the check does not validate credentials or model availability. Saved

@@ -237,7 +237,7 @@ function renderModelConfigs(data){
   const clearLabel=el('label','Clear stored API key '),clear=el('input');clear.type='checkbox';clear.id=`model-${role}-clear`;clearLabel.append(clear);form.append(clearLabel);
   const actions=el('div',null,'result-actions'),apply=el('button','Apply settings');apply.type='button';apply.id=`model-${role}-apply`;apply.addEventListener('click',()=>{if(validateExperimentFields(form))modelConfigAction(role,'save');});actions.append(apply);form.append(actions);
   const message=el('p','Pull the configuration before editing.','small');message.id=`model-${role}-message`;message.setAttribute('role','status');form.append(message);
-  const changed=()=>{if(modelDrafts[role])modelDrafts[role].dirty=modelSettingsChanged(role);syncModelControls(role);syncCreateExperiment();};
+  const changed=()=>{if(modelDrafts[role]){modelDrafts[role].dirty=modelSettingsChanged(role);delete modelDrafts[role].saveError;}syncModelControls(role);syncCreateExperiment();};
   form.addEventListener('input',changed);form.addEventListener('change',changed);
   form.addEventListener('submit',event=>{event.preventDefault();if(validateExperimentFields(form))modelConfigAction(role,'save');});
   if(card)card.replaceWith(form);else $('model-config-cards').append(form);syncModelControls(role);
@@ -282,8 +282,8 @@ async function modelConfigAction(role,action,creating=false){
   if(role==='participant'&&data.network_scope)applyModelNetworkScope(data.network_scope);
   for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=data.settings[key];$(`model-${role}-ssl`).checked=data.settings.ssl_verify;$(`model-${role}-key`).value='';$(`model-${role}-clear`).checked=false;
   modelDrafts[role].settings=modelFormSettings(role);
-  $(`model-${role}-message`).textContent=(action==='save'?'Applied. These values are saved on the VM and will be used by new experiments. ':data.exists?'Pulled from VM. Edit the values, then select Apply settings. ':'No configuration file exists yet. Enter values, then select Apply settings. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.routing?'Route: '+(data.routing.status==='updated'?`${data.routing.destination} through ${data.routing.interface}${data.routing.gateway?' via '+data.routing.gateway:''}. `:data.routing.message+'. '):'')+(data.routing?.dns?`DNS: ${data.routing.dns.domain} through ${data.routing.dns.server}. `:'')+(data.connectivity?data.connectivity.message+'. ':'')+(data.backup?'Backup: '+data.backup:'');
- }catch(error){$(`model-${role}-message`).textContent=error.message;if(creating)throw error;}
+  $(`model-${role}-message`).textContent=(action==='save'?'Applied. These values are saved on the VM and will be used by new experiments. ':data.exists?'Pulled from VM. Edit the values, then select Apply settings. ':'No configuration file exists yet. Enter values, then select Apply settings. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.routing?'Route: '+(data.routing.status==='updated'?`${data.routing.destination} through ${data.routing.interface}${data.routing.gateway?' via '+data.routing.gateway:''}. `:data.routing.message+'. '):'')+(data.routing?.helper_updated?`Routing helper updated; backup: ${data.routing.helper_backup}. `:'')+(data.routing?.dns?`DNS: ${data.routing.dns.domain} through ${data.routing.dns.server}. `:'')+(data.connectivity?data.connectivity.message+'. ':'')+(data.backup?'Backup: '+data.backup:'');
+ }catch(error){$(`model-${role}-message`).textContent=error.message;if(action==='save'&&modelDrafts[role])modelDrafts[role].saveError=error.message;if(creating)throw error;}
  finally{delete body.api_key;if(!creating)operation=null;syncModelControls(role);syncBusy();if(!creating)schedulePoll();}
 }
 
@@ -337,6 +337,7 @@ function experimentMissingFields(){
   // applying edits, not when creating an experiment with saved defaults.
   if(modelDrafts.participant.dirty){
    if(!(snapshot.model_config_writable??snapshot.updates?.can_update))return 'Applying changed model settings requires application maintenance access.';
+   if(modelDrafts.participant.saveError)return 'Model settings were not applied: '+modelDrafts.participant.saveError;
    return 'Apply the changed model settings on the Cyber-agent-flow tab.';
   }
  }

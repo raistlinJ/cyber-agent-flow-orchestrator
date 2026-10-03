@@ -122,6 +122,7 @@ def main():
                     page.set_viewport_size({'width':1440,'height':1080})
                     release_push.set()
                     expect(page.locator('#model-participant-message')).to_contain_text('Model configuration save failed',timeout=30000)
+                    expect(page.locator('#create-experiment-hint')).to_contain_text('Model settings were not applied: Model configuration save failed')
                     expect(page.locator('#experiment-dialog')).to_be_visible()
                     expect(page.locator('#runs tr')).to_have_count(0)
                     expect(page.locator('#create-experiment')).to_be_disabled()
