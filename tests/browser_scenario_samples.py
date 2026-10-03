@@ -29,6 +29,20 @@ def main():
                     page=context.new_page()
                     errors=[]
                     page.on('pageerror',lambda e:errors.append(str(e)))
+                    # This PVE operator has orchestration access, not maintenance
+                    # access. Pulling an unchanged model must not block creation.
+                    model_reads=[]
+                    def read_model(route):
+                        data=route.request.post_data_json
+                        assert data==dict(role='participant',action='read')
+                        model_reads.append(data)
+                        route.fulfill(json=dict(token='c'*32,vmid=9403,exists=True,
+                            settings=dict(provider='openai',url='https://models.example/v1',model='saved-model',ssl_verify=True),
+                            api_key_set=False,api_key_env='OPENAI_API_KEY'))
+                    page.route('**/api/model-config',read_model)
+                    page.route('**/api/model-network-scope',lambda route:route.fulfill(json=dict(
+                        provider_host='models.example',excluded_targets=['192.0.2.8'],warnings=[])))
+                    page.on('dialog',lambda dialog:dialog.accept())
                     page.goto(server['origin'])
                     page.get_by_label('Username').fill('operator@pve')
                     page.get_by_label('Password',exact=True).fill(PASSWORD)
@@ -48,6 +62,16 @@ def main():
                         expect(page.locator('#eval-repetitions')).to_be_disabled()
                         page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                         expect(page.locator('#caf-settings-summary')).to_have_count(0)
+                        if sample=='smoke':
+                            expect(page.locator('#create-experiment')).to_be_enabled(timeout=30000)
+                            page.locator('#model-participant-read').click()
+                            expect(page.locator('#model-participant-model')).to_have_value('saved-model',timeout=30000)
+                            expect(page.locator('#model-participant-model')).to_be_disabled()
+                            expect(page.locator('#model-participant-apply')).to_be_disabled()
+                            expect(page.locator('#model-participant-message')).to_contain_text('You can create experiments using saved settings.')
+                            expect(page.locator('#create-experiment')).to_be_enabled()
+                            expect(page.locator('#create-experiment-hint')).to_be_hidden()
+                            assert len(model_reads)==1
                         page.get_by_role('tab',name='ScenarioForge',exact=True).click()
                         page.locator('#sample-scenario-info').scroll_into_view_if_needed()
                         page.screenshot(path='/tmp/caf-fixed-'+sample+'.png')
@@ -87,6 +111,9 @@ def main():
                     page.locator('#new-experiment').click()
                     overview=page.get_by_role('tab',name='Experiment',exact=True)
                     expect(overview).to_have_attribute('aria-selected','true')
+                    # Opening New also resolves model routing asynchronously.
+                    # Wait for that operation before checking keyboard focus.
+                    expect(overview).to_be_enabled(timeout=30000)
                     overview.focus();page.keyboard.press('End')
                     expect(page.get_by_role('tab',name='Evaluation',exact=True)).to_be_focused()
                     page.keyboard.press('Home');expect(overview).to_be_focused()

@@ -239,7 +239,7 @@ function syncModelControls(role){
  for(const input of form.querySelectorAll('input,select'))input.disabled=!draft||!canWrite;
  $(`model-${role}-read`).disabled=!available;
  $(`model-${role}-apply`).disabled=!draft||!draft.dirty||!canWrite;
- if(!canWrite)$(`model-${role}-message`).textContent=`Saving model settings requires the ${snapshot?.updates?.group||'caf-maintainers'} group and enabled application maintenance.`;
+ if(!canWrite)$(`model-${role}-message`).textContent=`Model settings are read-only. You can create experiments using saved settings. Applying changes requires the ${snapshot?.updates?.group||'caf-maintainers'} group and enabled application maintenance.`;
 }
 async function modelConfigAction(role,action,creating=false){
  if(isBusy()&&!creating)return;
@@ -321,10 +321,14 @@ function experimentMissingFields(){
  const invalid=[...$('experiment-form').elements].find(input=>input.willValidate&&(!input.validity.valid||(input.required&&typeof input.value==='string'&&!input.value.trim())));
  if(invalid){const panel=invalid.closest('[role="tabpanel"]');return 'Complete the required fields on the '+(panel?$(panel.getAttribute('aria-labelledby')).textContent:'Experiment')+' tab.';}
  if(modelDrafts.participant){
-  if(!(snapshot.model_config_writable??snapshot.updates?.can_update))return 'Saving the model draft requires application maintenance access.';
   const form=$('model-config-participant');
   if(!form||[...form.elements].some(input=>input.willValidate&&(!input.validity.valid||(input.required&&!input.value.trim()))))return 'Complete the required model fields on the Cyber-agent-flow tab.';
-  if(modelDrafts.participant.dirty)return 'Apply the changed model settings on the Cyber-agent-flow tab.';
+  // Pulling settings is read-only. Maintenance access is needed only when
+  // applying edits, not when creating an experiment with saved defaults.
+  if(modelDrafts.participant.dirty){
+   if(!(snapshot.model_config_writable??snapshot.updates?.can_update))return 'Applying changed model settings requires application maintenance access.';
+   return 'Apply the changed model settings on the Cyber-agent-flow tab.';
+  }
  }
  return '';
 }
