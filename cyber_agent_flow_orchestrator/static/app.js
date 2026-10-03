@@ -236,18 +236,22 @@ function renderModelConfigs(data){
   const keyLabel=el('label','Replacement API key'),key=el('input');key.type='password';key.autocomplete='new-password';key.maxLength=8192;key.placeholder='Leave blank to preserve the guest key';key.id=`model-${role}-key`;keyLabel.append(key);form.append(keyLabel);
   const clearLabel=el('label','Clear stored API key '),clear=el('input');clear.type='checkbox';clear.id=`model-${role}-clear`;clearLabel.append(clear);form.append(clearLabel);
   const actions=el('div',null,'result-actions'),apply=el('button','Apply settings');apply.type='button';apply.id=`model-${role}-apply`;apply.addEventListener('click',()=>{if(validateExperimentFields(form))modelConfigAction(role,'save');});actions.append(apply);form.append(actions);
-  const message=el('p','Pull the configuration before editing.','small');message.id=`model-${role}-message`;message.setAttribute('role','status');form.append(message);
+  const message=el('p','Edit the saved experiment defaults, then select Apply settings. Pull from VM is optional and replaces the displayed values.','small');message.id=`model-${role}-message`;message.setAttribute('role','status');form.append(message);
   const changed=()=>{if(modelDrafts[role]){modelDrafts[role].dirty=modelSettingsChanged(role);delete modelDrafts[role].saveError;}syncModelControls(role);syncCreateExperiment();};
   form.addEventListener('input',changed);form.addEventListener('change',changed);
   form.addEventListener('submit',event=>{event.preventDefault();if(validateExperimentFields(form))modelConfigAction(role,'save');});
-  if(card)card.replaceWith(form);else $('model-config-cards').append(form);syncModelControls(role);
+  if(card)card.replaceWith(form);else $('model-config-cards').append(form);
+  const defaults=data.samples?.model_settings;
+  if(defaults){for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=defaults[key]??'';$(`model-${role}-ssl`).checked=defaults.ssl_verify!==false;}
+  modelDrafts[role]={vmid,token:null,dirty:false,settings:modelFormSettings(role)};
+  syncModelControls(role);
  }
 }
 function syncModelControls(role){
  const form=$('model-config-'+role);if(!form)return;const available=Boolean(form.dataset.vmid),draft=modelDrafts[role],canWrite=Boolean(snapshot?.model_config_writable??snapshot?.updates?.can_update);
- for(const input of form.querySelectorAll('input,select'))input.disabled=!draft||!canWrite;
+ for(const input of form.querySelectorAll('input,select'))input.disabled=!available||!canWrite;
  $(`model-${role}-read`).disabled=!available;
- $(`model-${role}-apply`).disabled=!draft||!draft.dirty||!canWrite;
+ $(`model-${role}-apply`).disabled=!available||!draft||(!draft.dirty&&!draft.saveError&&Boolean(draft.token))||!canWrite;
  if(!canWrite)$(`model-${role}-message`).textContent=`Model settings are read-only. You can create experiments using saved settings. Applying changes requires the ${snapshot?.updates?.group||'caf-maintainers'} group and enabled application maintenance.`;
 }
 async function modelConfigAction(role,action,creating=false){
@@ -262,11 +266,12 @@ async function modelConfigAction(role,action,creating=false){
  operation=action==='read'?'Reading model configuration from the VM…':role==='participant'?'Saving model settings, synchronizing the participant route and checking connectivity…':'Saving model settings to the VM and experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
  try{
   await finishDashboardRead();
-  if(action==='save'&&!modelDrafts[role]?.dirty){
+  if(action==='save'&&!modelDrafts[role]?.token){
+   // Acquire the guest revision for optimistic concurrency without replacing
+   // any form settings or API key captured before this background read.
    const current=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action:'read'})});
-   const fresh=await dashboardJSON(current);if(!current.ok)throw Error(fresh.error||'Unable to refresh saved model settings');
-   body.token=fresh.token;body.settings=fresh.settings;
-   modelDrafts[role]={token:fresh.token,vmid:fresh.vmid,dirty:false,settings:fresh.settings};
+   const fresh=await dashboardJSON(current);if(!current.ok)throw Error(fresh.error||'Unable to read the VM configuration before applying settings');
+   body.token=fresh.token;modelDrafts[role].token=fresh.token;
   }
   if(creating){
    creationProgress(0,'running','Saving file locally on orchestrator…');
@@ -335,7 +340,7 @@ function experimentMissingFields(){
   if(!form||[...form.elements].some(input=>input.willValidate&&(!input.validity.valid||(input.required&&!input.value.trim()))))return 'Complete the required model fields on the Cyber-agent-flow tab.';
   // Pulling settings is read-only. Maintenance access is needed only when
   // applying edits, not when creating an experiment with saved defaults.
-  if(modelDrafts.participant.dirty){
+  if(modelDrafts.participant.dirty||modelDrafts.participant.saveError){
    if(!(snapshot.model_config_writable??snapshot.updates?.can_update))return 'Applying changed model settings requires application maintenance access.';
    if(modelDrafts.participant.saveError)return 'Model settings were not applied: '+modelDrafts.participant.saveError;
    return 'Apply the changed model settings on the Cyber-agent-flow tab.';

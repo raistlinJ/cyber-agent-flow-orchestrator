@@ -119,7 +119,12 @@ def test_host_import_is_owned_vm_bound_and_changes_sample_runtime(pve, lab, tmp_
         assert 'guest-only-key' not in path.read_text()
     from cyber_agent_flow_orchestrator.samples import SampleManager
     samples = SampleManager(runtime, manager.root)
-    try: assert samples.catalog(workspace.roles(), workspace)['provider'] == 'openai'
+    try:
+        catalog = samples.catalog(workspace.roles(), workspace)
+        assert catalog['provider'] == 'openai'
+        assert catalog['model_settings'] == settings()
+        assert 'guest-only-key' not in json.dumps(catalog)
+        assert 'api_key' not in catalog['model_settings']
     finally: samples.close()
     workspace.save_roles(dict(participant=9402, scenarioforge=9403, core=None), user)
     with pytest.raises(ModelConfigError, match='draft changed'):

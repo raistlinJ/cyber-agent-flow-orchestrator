@@ -384,16 +384,17 @@ For a concise overview of tasks, prompts, tools, and collected metrics, see the
 
 ### Choose your model before running
 
-Open **Experiments → New → Cyber-agent-flow**, then choose **Pull from VM** for
-Cyber-agent-flow. The editor reads `configs/cli.json` from the selected participant.
-For an OpenAI-compatible endpoint, select **OpenAI / compatible**, enter the API
-base URL (usually `https://your-server/v1`) and its exact model name, then press
-**Create experiment**. This saves the edited settings to the participant VM and
-captures them in the experiment, with no separate Save action. If saving fails,
-the modal stays open and no experiment is created. Progress in the modal shows
-the local draft save, VM push (0% until the guest acknowledges, then 100%), and
-experiment save. Without pulling a configuration,
-creation uses the current experiment defaults.
+Open **Experiments → New → Cyber-agent-flow**. The model fields are editable
+immediately and start with your saved experiment defaults. **Pull from VM** is
+optional: it replaces the displayed values with `configs/cli.json` from the
+selected participant, after confirmation. For an OpenAI-compatible endpoint,
+select **OpenAI / compatible**, enter the API base URL (usually
+`https://your-server/v1`) and its exact model name, then press **Apply settings**.
+Apply saves the settings to the participant VM and updates the experiment defaults;
+it checks the VM's current configuration before saving even if you did not pull.
+If Apply fails, the modal shows the error and lets you retry. Apply edited settings
+before selecting **Create experiment**. Creation captures the saved settings
+without writing them to the VM again.
 
 **Create experiment** captures the selected participant VM and model settings.
 Rerunning that experiment reuses its captured settings and credential reference,

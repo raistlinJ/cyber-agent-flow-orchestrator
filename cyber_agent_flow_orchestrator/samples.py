@@ -138,7 +138,10 @@ class SampleManager:
         runtime = apply_model(workspace, self.runtime, roles.get('participant')) if workspace else self.runtime
         return {'items': [dict(id=name, profile=sample_profile(name), **CATALOG[name]) for name in self.enabled],
                 'participant_vmid': roles.get('participant'), 'model': runtime['model']['name'],
-                'provider': runtime['model']['provider']}
+                'provider': runtime['model']['provider'],
+                'model_settings': dict(provider=runtime['model']['provider'],
+                    url=runtime['model']['url'], model=runtime['model']['name'],
+                    ssl_verify=runtime['model'].get('ssl_verify', True))}
 
     def close(self):
         self.stopping.set()

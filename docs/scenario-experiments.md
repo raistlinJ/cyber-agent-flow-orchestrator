@@ -83,7 +83,7 @@ See [demo profile](demo-profile.md) for tasks, tools and metrics. Rebuild packag
 
 XML defines the ScenarioForge lab. CAF's checkout, Python executable, model and default execution settings come from the server runtime YAML, with saved model preferences for the selected participant VM. New experiment shows these effective settings explicitly.
 
-The **Cyber-agent-flow** tab contains the model controls. Pull from VM reads the application configuration; saving changes requires application-maintenance access. Creating an experiment saves those changes and freezes its settings.
+The **Cyber-agent-flow** tab contains model controls that are editable immediately and prefilled from saved experiment defaults. **Pull from VM** optionally replaces the displayed values with the application configuration. **Apply settings** saves changes and requires application-maintenance access. Creating an experiment captures the saved settings without another VM write.
 
 The **Evaluation** tab shows each sample’s locked task ID, prompt template, success criteria and required readiness checks. Custom scenarios can use their saved tasks or define an experiment-specific list. **Load scenario tasks** previews the selected XML’s definitions; **Edit loaded tasks** copies them into the editor. Add/remove tasks or import a JSON array (1–32 tasks, up to 64 KiB). Each task has an ID, family, prompt, success criteria and required checks. Advanced settings preserve split and discovery/fact declarations.
 

@@ -82,6 +82,11 @@ def main():
                     page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                     expect(page.locator('#experiment-dialog #model-config-panel')).to_be_visible()
                     expect(page.locator('#model-participant-read')).to_be_enabled(timeout=30000)
+                    for field in ['provider','url','model','ssl','key','clear']:
+                        expect(page.locator('#model-participant-'+field)).to_be_enabled()
+                    page.locator('#model-participant-model').fill('editable-before-pull')
+                    expect(page.locator('#model-participant-apply')).to_be_enabled()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
                     page.locator('#model-participant-read').click()
                     expect(page.locator('#model-participant-model')).to_have_value('custom-model',timeout=30000)
                     assert 'replace all model settings' in dialogs[-1]
@@ -172,6 +177,40 @@ def main():
                     page.get_by_role('button',name='Create experiment',exact=True).click()
                     expect(page.locator('#experiment-dialog')).not_to_be_visible(timeout=30000)
                     assert ev.read_json(config_path)['model'] == 'externally-updated-model'
+                    # Start with no guest revision/token and Apply a typed draft
+                    # directly. The background read must not replace that draft.
+                    page.reload()
+                    expect(page.locator('#new-experiment')).to_be_enabled(timeout=30000)
+                    page.locator('#new-experiment').click()
+                    page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
+                    expect(page.locator('#model-participant-model')).to_be_enabled()
+                    expect(page.locator('#model-participant-url')).to_have_value('https://models.example/v1')
+                    # A failed first Apply of unchanged defaults stays retryable.
+                    fail_save[0]=True
+                    page.get_by_role('button',name='Apply settings',exact=True).click()
+                    expect(page.locator('#model-participant-message')).to_contain_text('Model configuration save failed',timeout=30000)
+                    expect(page.locator('#model-participant-apply')).to_be_enabled()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    fail_save[0]=False
+                    page.get_by_role('button',name='Apply settings',exact=True).click()
+                    expect(page.locator('#model-participant-message')).to_contain_text('Applied.',timeout=30000)
+                    # Reset again so the typed draft uses the background read.
+                    page.reload()
+                    expect(page.locator('#new-experiment')).to_be_enabled(timeout=30000)
+                    page.locator('#new-experiment').click()
+                    page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
+                    page.locator('#model-participant-model').fill('entered-without-pull')
+                    page.locator('#model-participant-key').fill('direct-save-key')
+                    before_dialogs=len(dialogs)
+                    page.get_by_role('button',name='Apply settings',exact=True).click()
+                    expect(page.locator('#model-participant-message')).to_contain_text('Applied.',timeout=30000)
+                    expect(page.locator('#model-participant-model')).to_have_value('entered-without-pull')
+                    expect(page.locator('#model-participant-apply')).to_be_disabled()
+                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    assert len(dialogs)==before_dialogs
+                    assert ev.read_json(config_path)['model']=='entered-without-pull'
+                    assert ev.read_json(config_path)['api_key']=='direct-save-key'
+                    assert 'direct-save-key' not in page.locator('#console-output').inner_text()
                     assert not errors,errors
                     browser.close()
             finally:
