@@ -52,14 +52,30 @@ def main():
                         page.locator('#role-'+role).select_option(vmid)
                     page.get_by_role('button',name='Save VM roles').click()
                     page.locator('[data-route=experiments]').click()
-                    for sample,trials in [('smoke',1),('tools-vs-helper',6)]:
+                    for sample,trials in [('smoke',2),('tools-vs-helper',4)]:
                         page.locator('#new-experiment').click()
                         page.get_by_label('Experiment type',exact=True).select_option(sample)
                         page.get_by_role('tab',name='ScenarioForge',exact=True).click()
                         expect(page.locator('#sample-sf-companion')).to_be_disabled()
                         expect(page.locator('#sample-sf-companion')).to_have_value('demo-'+sample+'.xml · fixed sample XML')
                         page.get_by_role('tab',name='Evaluation',exact=True).click()
-                        expect(page.locator('#eval-repetitions')).to_be_disabled()
+                        settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096)
+                        expect(page.locator('#eval-repetitions')).to_have_value('1' if sample=='smoke' else '3')
+                        expect(page.locator('#eval-wall_seconds')).to_have_value('120')
+                        for key,value in settings.items():
+                            expect(page.locator('#eval-'+key)).to_be_enabled()
+                            page.locator('#eval-'+key).fill(str(value))
+                        page.get_by_role('tab',name='Experiment',exact=True).click()
+                        page.get_by_label('Experiment type',exact=True).select_option('tools-vs-helper' if sample=='smoke' else 'smoke')
+                        page.get_by_role('tab',name='Evaluation',exact=True).click()
+                        expect(page.locator('#eval-wall_seconds')).to_have_value('120')
+                        page.get_by_role('tab',name='Experiment',exact=True).click()
+                        page.get_by_label('Experiment type',exact=True).select_option(sample)
+                        page.get_by_role('tab',name='Evaluation',exact=True).click()
+                        expect(page.locator('#eval-wall_seconds')).to_have_value('333')
+                        page.locator('#eval-repetitions').fill('0')
+                        expect(page.locator('#create-experiment')).to_be_disabled()
+                        page.locator('#eval-repetitions').fill('2')
                         page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                         expect(page.locator('#caf-settings-summary')).to_have_count(0)
                         if sample=='smoke':
@@ -92,6 +108,8 @@ def main():
                         records=[(path,json.loads(path.read_text())) for path in (root/'runs').rglob('workflow.json')]
                         path,record=next((p,r) for p,r in records if r.get('sample_id')==sample)
                         assert record['status']=='completed'
+                        assert record['runtime']['repetitions']==2
+                        assert all(record['runtime']['execution'][key]==value for key,value in settings.items() if key!='repetitions')
                         from cyber_agent_flow_orchestrator import service
                         result=service.results(path.parent)
                         assert result['evaluation']['planned_trials']==trials

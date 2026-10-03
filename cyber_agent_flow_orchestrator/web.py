@@ -334,14 +334,14 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
                     if action == 'create' and 'selection_id' in data:
                         expected = {'selection_id', 'request_id', 'allowed_targets', 'disallowed_targets'}
-                        if 'evaluation' in data:
-                            expected.add('evaluation')
                         if 'tasks' in data:
                             expected.add('tasks')
                     if action == 'create' and 'provide_progressive_hints' in data:
                         expected.add('provide_progressive_hints')
                         if type(data['provide_progressive_hints']) is not bool:
                             raise SampleRequestError('provide_progressive_hints must be a boolean')
+                    if action == 'create' and 'evaluation' in data:
+                        expected.add('evaluation')
                     if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k not in ('evaluation', 'tasks', 'provide_progressive_hints')):
                         raise SampleRequestError('Invalid experiment request fields')
                     access = auth.access(token, revalidate=False)

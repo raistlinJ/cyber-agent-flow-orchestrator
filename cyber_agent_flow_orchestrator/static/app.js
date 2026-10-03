@@ -379,13 +379,14 @@ function validateExperimentFields(form){
  invalid.reportValidity();invalid.focus();return false;
 }
 
-let customEvaluation=null;
+let customEvaluation={};
 const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window'];
 function renderEvaluationSettings(scenario,sample){
  const defaults=snapshot?.experiment_defaults?.evaluation||{repetitions:1,max_turns:snapshot?.scenarios?.max_turns||20,wall_seconds:snapshot?.scenarios?.wall_seconds||300,tool_timeout:60,context_window:8192};
- const values=scenario?(customEvaluation||defaults):{...defaults,repetitions:sample?.profile?.repetitions||1,max_turns:sample?.max_turns||3,wall_seconds:sample?.wall_seconds||120,tool_timeout:sample?.profile?.tool_timeout||30};
+ const preset=scenario?defaults:{...defaults,repetitions:sample?.profile?.repetitions||1,max_turns:sample?.max_turns||3,wall_seconds:sample?.wall_seconds||120,tool_timeout:sample?.profile?.tool_timeout||30};
+ const values=customEvaluation[$('experiment-sample').value]||preset;
  for(const key of evaluationKeys)$('eval-'+key).value=values[key];
- $('evaluation-settings').disabled=!scenario;
+ $('evaluation-settings').disabled=false;
  configureEvaluationTasks(scenario,sample);
  $('sample-scenario-info').hidden=scenario;
  if(!scenario){
@@ -396,11 +397,15 @@ function renderEvaluationSettings(scenario,sample){
   $('sample-environment').value=sample?.profile?.environment||'Sample-defined environment';
   $('sample-prompt').value=sample?.profile?.prompt||'Sample-defined prompt';
  }
- $('eval-settings-note').textContent=scenario?'These settings are saved with this experiment. Reruns reuse them.':'Fixed by the sample to keep its prompt, tool comparison, and scoring consistent. CAF model settings remain configurable.';
+ $('eval-settings-note').textContent=scenario?'These settings are saved with this experiment. Reruns reuse them.':'Sample defaults are prefilled. Trial settings are editable and saved with this experiment; reruns reuse them. Sample tasks and tools remain fixed.';
  $('eval-tools').textContent='Tools / conditions: '+(scenario?'Baseline — nmap, curl, python3. Custom tool conditions are not editable here yet.':sample?.profile?.tools||'Sample-defined');
  $('eval-task-source').textContent=scenario?'ScenarioForge exports the selected task definitions after deployment. Prompts and private verifiers are captured in Results.':'The deployed host address and fresh token/flags are resolved at run time. Exact prompts and XML are captured in Results.';
 }
-$('evaluation-settings').addEventListener('input',()=>{if(!$('evaluation-settings').disabled)customEvaluation=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));});
+function updateEvaluationBudget(){
+ const selection=$('experiment-sample').value;
+ $('experiment-budget').textContent=selection==='scenarioforge-xml'?'Baseline tools · configure repetitions and trial limits below':`${Number($('eval-repetitions').value)*(selection==='tools-vs-helper'?2:1)} trials · up to ${$('eval-max_turns').value} turns and ${$('eval-wall_seconds').value}s per trial`;
+}
+$('evaluation-settings').addEventListener('input',()=>{if(!$('evaluation-settings').disabled){customEvaluation[$('experiment-sample').value]=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));updateEvaluationBudget();}});
 
 function describeSample(){
  const scenario=$('experiment-sample').value==='scenarioforge-xml',sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);
@@ -409,10 +414,10 @@ function describeSample(){
  $('scenario-allowed').required=scenario;
  renderEvaluationSettings(scenario,sample);
  $('experiment-description').textContent=scenario?'Deploy and evaluate an existing ScenarioForge scenario.':sample?.description||'';
- $('experiment-budget').textContent=scenario?'Baseline tools · configure repetitions and trial limits below':sample?sample.trials+' trials · up to '+sample.max_turns+' turns and '+sample.wall_seconds+'s per trial':'';
+ updateEvaluationBudget();
 }
 
-$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation=null;lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
+$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
 let scenarioChoices=[],scenarioChoiceVM=null,lastUploadedScenarioFile=null;
 let autoExcludedTargets=[];
 function applyModelNetworkScope(scope){
@@ -505,7 +510,7 @@ $('experiment-form').addEventListener('submit',async event=>{
  $('experiment-error').textContent='';
  startCreationProgress(false);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{} )}:{sample_id:$('experiment-sample').value}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed: '+error.message);$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });

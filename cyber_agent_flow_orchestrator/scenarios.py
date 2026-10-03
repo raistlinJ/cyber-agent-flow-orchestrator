@@ -253,9 +253,6 @@ class ScenarioExperiments:
             progressive_hint_settings(runtime['execution'], provide_progressive_hints)
             runtime['backend']['before_trial'] = []
             runtime['repetitions'] = 1
-            if overrides:
-                runtime['repetitions'] = overrides['repetitions']
-                runtime['execution'].update({key: value for key, value in overrides.items() if key != 'repetitions'})
             baseline = Path(__file__).with_name('sample_data') / 'baseline.json'
             runtime['conditions'] = [dict(id='baseline', catalog=str(baseline), tools=['nmap', 'curl', 'python3'], guidance_files=[])]
             cfg = dict(version=1, id='scenario-' + request_id, runtime='runtime.yaml',
@@ -268,6 +265,9 @@ class ScenarioExperiments:
                 max_readiness_age_seconds=self.cfg['max_readiness_age_seconds'])
             if _sample_id is not None:
                 self.configure_sample(_sample_id, cfg, runtime, captured, roles, request_id)
+            if overrides:
+                runtime['repetitions'] = overrides['repetitions']
+                runtime['execution'].update({key: value for key, value in overrides.items() if key != 'repetitions'})
             source = workspace.materialize(cfg, runtime, access, run_id)
             saved_runtime = yaml.safe_load((source.parent / 'runtime.yaml').read_text())
             private_file(source.parent / 'baseline.json', baseline.read_bytes())
@@ -288,8 +288,9 @@ class ScenarioExperiments:
             ev.write_json(output / 'workflow.json', self.record(cfg, runtime, identity, captured, request_id))
         return dict(run_id=run_id, status='ready')
 
-    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False, progress=lambda step, message: None):
+    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False, progress=lambda step, message: None, evaluation=None):
         progress(1, "Validating sample selection and VM access")
+        overrides = evaluation_settings(evaluation) if evaluation is not None else None
         from .samples import CATALOG
         if type(provide_progressive_hints) is not bool:
             raise SampleRequestError('provide_progressive_hints must be a boolean')
@@ -313,7 +314,7 @@ class ScenarioExperiments:
         item = imported['items'][0]
         return self.create(access, item['id'], request_id,
             ','.join(self.runtime['execution']['network_policy']['allow']),
-            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints,
+            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints, evaluation=overrides,
             progress=lambda step, message: progress(step + 4 if step > 1 else 5, message))
 
     def configure_sample(self, sample_id, cfg, runtime, captured, roles, token):

@@ -54,6 +54,7 @@ def main():
             dashboard = UserDashboard(root/'examples/01-reuse-export.yaml',root/'runs',2,lambda b,a:Probe(b,a,[]))
             original_create = dashboard.samples.create
             def create(*args, **kwargs):
+                kwargs.pop('evaluation',None)  # This fixture isolates model persistence.
                 progress=kwargs.pop('progress',None)
                 if progress:progress(3,'Saving experiment')
                 create_entered.set()

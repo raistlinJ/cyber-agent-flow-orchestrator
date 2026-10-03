@@ -16,8 +16,9 @@ from test_user_access import access, vm, Probe
 from test_workflow import lab
 
 
+@pytest.mark.parametrize('custom_limits', [False, True])
 @pytest.mark.parametrize('sample_id,trials', [('smoke',1),('tools-vs-helper',6)])
-def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch,sample_id,trials):
+def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch,sample_id,trials,custom_limits):
     pve[0]['resources']['operator@pve']=[vm(9402),vm(9403),vm(9404)]
     user=access(pve)
     dashboard=UserDashboard(lab[0],tmp_path/'runs',2,lambda b,a:Probe(b,a,[]))
@@ -43,7 +44,12 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
             return {}
     monkeypatch.setattr(scenarios,'guest',lambda backend:Remote())
     try:
-        result=dashboard.experiment(user,'create',dict(sample_id=sample_id,request_id='a'*32))
+        settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096)
+        request=dict(sample_id=sample_id,request_id='a'*32)
+        if custom_limits:
+            request['evaluation']=settings
+            trials=2 if sample_id=='smoke' else 4
+        result=dashboard.experiment(user,'create',request)
         progress=dashboard.creation_status(user,'a'*32)
         assert progress['state']=='completed' and progress['step']==progress['total']==8
         assert dashboard.creation_status(type('Other',(),{'username':'other@pve','current':lambda self:None})(),'a'*32)['state']=='pending'
@@ -52,6 +58,9 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         assert saved['workflow']['scenarioforge']['mode']=='execute'
         assert saved['workflow']['prepare'][0]['id']=='fixed-demo-xml'
         assert saved['sample_id']==sample_id
+        if custom_limits:
+            assert saved['runtime']['repetitions']==settings['repetitions']
+            assert all(saved['runtime']['execution'][key]==value for key,value in settings.items() if key!='repetitions')
         assert not agent.calls  # Import transfers only; deployment waits for Run.
         agent.marker=dict(state='complete',readiness_passed=True,archive='/exports/suite.zip',
                           package_hash=manifest['package_hash'],suite_id=saved['workflow']['scenarioforge']['suite_id'])
@@ -70,6 +79,9 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         deploy=[data for _,op,data in agent.calls if op=='hook' and 'scenarioforge.cli' in data['argv']]
         assert len(deploy)==1 and '--evaluation-export' in deploy[0]['argv']
         spec=ev.resolve(output/'study.yaml')
+        if custom_limits:
+            assert spec['repetitions']==settings['repetitions']
+            assert all(spec['execution'][key]==value for key,value in settings.items() if key!='repetitions')
         assert spec['execution']['network_policy']['allow']==['10.77.0.10/32','10.77.0.20/32']
         assert len(spec['conditions'])==(1 if sample_id=='smoke' else 2)
     finally:
