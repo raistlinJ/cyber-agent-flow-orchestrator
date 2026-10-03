@@ -24,6 +24,8 @@ def guest_root(tmp_path, monkeypatch):
     root.mkdir()
     monkeypatch.setattr(guest, 'LOCK', tmp_path / 'maintenance.lock')
     monkeypatch.setattr(guest, 'SECRETS', tmp_path / 'guest-secrets')
+    monkeypatch.setattr(guest, 'network_scope', lambda url,config:dict(provider_host='models.example',excluded_targets=['192.0.2.8','192.0.2.1'],warnings=[]))
+    monkeypatch.setattr(guest, 'check_endpoint', lambda values,route:dict(status='unreachable',message='Endpoint unavailable'))
     return root
 
 
@@ -124,6 +126,22 @@ def test_host_import_is_owned_vm_bound_and_changes_sample_runtime(pve, lab, tmp_
         manager.exchange(user, dict(role='participant', action='save', token=selected['token'], settings=settings()))
 
 
+def test_repeated_reads_preserve_draft_but_changed_guest_invalidates_it(pve, lab, tmp_path, monkeypatch, guest_root):
+    manager, user, workspace, runtime, calls = fixture_manager(pve, lab, tmp_path, monkeypatch, guest_root)
+    pve[0]['groups'] += ',caf-maintainers'
+    path = guest_root / 'configs/cli.json'
+    ev.write_json(path, settings())
+    first = manager.exchange(user, dict(role='participant', action='read'))
+    second = manager.exchange(user, dict(role='participant', action='read'))
+    assert first['token'] == second['token']
+    manager.exchange(user, dict(role='participant', action='stage', token=first['token'], settings=settings()))
+    ev.write_json(path, dict(settings(), model='externally-updated'))
+    third = manager.exchange(user, dict(role='participant', action='read'))
+    assert third['token'] != first['token']
+    with pytest.raises(ModelConfigError, match='draft changed'):
+        manager.exchange(user, dict(role='participant', action='stage', token=first['token'], settings=settings()))
+
+
 def test_model_config_http_requires_csrf_and_rejects_client_paths(pve, lab, tmp_path):
     dashboard = UserDashboard(lab[0], tmp_path / 'runs', 2, lambda b, a: Probe(b, a, []))
     try:
@@ -132,6 +150,9 @@ def test_model_config_http_requires_csrf_and_rejects_client_paths(pve, lab, tmp_
             cookie = headers['Set-Cookie'].split(';', 1)[0]
             csrf = json.loads(request(server, '/api/session', cookie=cookie)[2])['csrf']
             body = dict(role='participant', action='read')
+            assert request(server, '/api/model-network-scope', {})[0] == 401
+            assert request(server, '/api/model-network-scope', {}, cookie=cookie)[0] == 403
+            assert request(server, '/api/model-network-scope', {'url':'http://untrusted'}, cookie=cookie, headers={'X-CSRF-Token':csrf})[0] == 400
             assert request(server, '/api/model-config', body)[0] == 401
             assert request(server, '/api/model-config', body, cookie=cookie)[0] == 403
             assert request(server, '/api/model-config', dict(body, root='/etc'), cookie=cookie, headers={'X-CSRF-Token':csrf})[0] == 400
@@ -207,3 +228,97 @@ def test_local_model_stage_is_private_and_does_not_activate_or_transfer(pve, lab
     assert ev.read_json(guest_root / 'configs/cli.json')['model'] == 'lab-model'
     with pytest.raises(ModelConfigError, match='draft changed'):
         manager.exchange(user, dict(request_data, token='0' * 32))
+
+
+def test_model_save_reuses_route_helper_and_preserves_managed_policy(guest_root, monkeypatch, tmp_path):
+    import subprocess
+    path=guest_root/'configs/cli.json'
+    ev.write_json(path,dict(settings(),api_key='private-key',network_policy={'allow':['10.0.0.0/24'],'disallow':['10.0.0.10']}))
+    helper=tmp_path/'update-llm-destination';helper.touch()
+    monkeypatch.setattr(guest,'ROUTE_HELPER',helper)
+    calls=[]
+    def update(command,**kwargs):
+        calls.append(command)
+        config=ev.read_json(path)
+        config['network_policy']['disallow']+=['192.168.20.2','203.0.113.21']
+        config['llm_route_destination']='203.0.113.21'
+        ev.write_json(path,config)
+        return subprocess.CompletedProcess(command,0,json.dumps(dict(status='updated',destination='203.0.113.21',interface='eth2',gateway='192.168.20.2')),'')
+    monkeypatch.setattr(guest.subprocess,'run',update)
+    loaded=guest.dispatch(dict(role='participant',action='read',root=str(guest_root)))
+    result=guest.dispatch(dict(role='participant',action='save',root=str(guest_root),revision=loaded['revision'],settings=dict(settings(),model='updated-model')))
+    assert calls==[[str(helper),'--url','https://models.example/v1','--cli-config',str(path),'--json']]
+    assert 'private-key' not in json.dumps(calls) + json.dumps(result)
+    saved=ev.read_json(path)
+    assert saved['llm_route_destination']=='203.0.113.21'
+    assert saved['network_policy']['disallow']==['10.0.0.10','192.168.20.2','203.0.113.21']
+    assert saved['model']=='updated-model'
+    assert result['connectivity']['status']=='unreachable'
+    assert result['routing']['interface']=='eth2'
+
+
+def test_failed_route_update_does_not_save_model_settings(guest_root, monkeypatch, tmp_path):
+    import subprocess
+    path=guest_root/'configs/cli.json';ev.write_json(path,settings())
+    helper=tmp_path/'update-llm-destination';helper.touch();monkeypatch.setattr(guest,'ROUTE_HELPER',helper)
+    before=path.read_bytes()
+    loaded=guest.dispatch(dict(role='participant',action='read',root=str(guest_root)))
+    monkeypatch.setattr(guest.subprocess,'run',lambda command,**kwargs:subprocess.CompletedProcess(command,1,'','LLM update failed: route validation failed'))
+    with pytest.raises(ValueError,match='route update failed'):
+        guest.dispatch(dict(role='participant',action='save',root=str(guest_root),revision=loaded['revision'],settings=dict(settings(),model='new-model')))
+    assert path.read_bytes()==before
+
+
+def test_endpoint_check_uses_selected_destination_and_url_port(monkeypatch):
+    class Connection:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+    calls=[]
+    monkeypatch.setattr(guest.socket,'create_connection',lambda target,timeout:calls.append((target,timeout)) or Connection())
+    result=guest.check_endpoint(dict(settings(),url='https://model.example:8443/v1'),{'destination':'203.0.113.20'})
+    assert result['status']=='reachable'
+    assert calls==[(('203.0.113.20',8443),5)]
+
+
+def test_provider_scope_uses_guest_dns_and_specific_gateway(monkeypatch):
+    import socket
+    from types import SimpleNamespace
+    monkeypatch.setattr(guest.socket, 'getaddrinfo', lambda *args,**kwargs:[(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('192.0.2.8', 11434))])
+    calls=[]
+    def route(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(stdout='[{"gateway":"192.0.2.1","dev":"ens20"}]')
+    monkeypatch.setattr(guest.subprocess, 'run', route)
+    result=guest.network_scope('http://models.example:11434', dict(url='http://previous.example',llm_route_destination='192.0.2.99'))
+    assert result['excluded_targets']==['192.0.2.1','192.0.2.8']
+    assert calls==[['ip','-j','-4','route','get','192.0.2.8']]
+    assert not result['warnings']
+
+
+def test_provider_scope_fallback_never_uses_old_endpoint(monkeypatch):
+    import socket
+    def no_dns(*args,**kwargs): raise socket.gaierror('offline')
+    def no_route(*args,**kwargs): raise OSError('offline')
+    monkeypatch.setattr(guest.socket, 'getaddrinfo', no_dns)
+    monkeypatch.setattr(guest.subprocess, 'run', no_route)
+    config=dict(url='http://models.example:11434',llm_route_destination='192.0.2.8',llm_route_gateway='192.0.2.1')
+    assert guest.network_scope(config['url'],config)['excluded_targets']==['192.0.2.1','192.0.2.8']
+    result=guest.network_scope('http://new.example:11434',config)
+    assert result['excluded_targets']==[] and result['warnings']
+
+
+def test_scope_request_uses_applied_model_without_replacing_draft(pve,lab,tmp_path,monkeypatch,guest_root):
+    manager,user,workspace,runtime,calls=fixture_manager(pve,lab,tmp_path,monkeypatch,guest_root)
+    ev.write_json(guest_root/'configs/cli.json',settings())
+    manager.exchange(user,dict(role='participant',action='read'))
+    ev.write_json(workspace.path/'model-9403.json',dict(model=dict(runtime['model'],url='http://applied.example:11434'),engine_path=runtime['engine']['path']))
+    urls=[]
+    def scope(url,config):
+        urls.append(url)
+        return dict(excluded_targets=['192.0.2.8','192.0.2.1'])
+    monkeypatch.setattr(guest,'network_scope',scope)
+    draft=(workspace.path/'model-draft-participant.json').read_bytes()
+    result=manager.network_scope(user)
+    assert result['vmid']==9403 and result['excluded_targets']==['192.0.2.8','192.0.2.1']
+    assert urls==['http://applied.example:11434']
+    assert (workspace.path/'model-draft-participant.json').read_bytes()==draft

@@ -5,7 +5,7 @@ import threading
 import time
 
 from .config import load
-from .monitor import ProxmoxProbe, definitions, snapshot
+from .monitor import ProxmoxProbe, FusionProbe, definitions, snapshot
 from .workspaces import Workspace, ROLES
 from . import service
 from .observation_cache import CachedProbe, ObservationCache
@@ -19,7 +19,7 @@ class UserDashboard:
             raise ValueError('Poll interval must be between 2 and 300 seconds')
         self.cfg, self.runtime, _, _ = load(config)
         self.root, self.interval = runs_root, interval
-        self.probe_factory = probe_factory or (lambda backend, access: ProxmoxProbe(backend, access))
+        self.probe_factory = probe_factory or (lambda backend, access: (FusionProbe if backend['type']=='fusion' else ProxmoxProbe)(backend, access))
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='user-monitor')
         self.lock = threading.RLock()
         self.creation_records = {}
@@ -33,7 +33,7 @@ class UserDashboard:
         from .updates import UpdateManager
         self.updates = UpdateManager(self.cfg, self.runtime, runs_root, updates)
         from .model_config import ModelConfigs
-        self.model_configs = ModelConfigs(self.cfg, self.runtime, runs_root, (self.updates.config or {}).get('group', 'caf-maintainers'), enabled=self.updates.config is not None)
+        self.model_configs = ModelConfigs(self.cfg, self.runtime, runs_root, (self.updates.config or {}).get('group', 'caf-maintainers'), enabled=self.updates.config is not None or self.runtime['backend']['type']=='fusion')
 
     def start(self):
         pass  # Monitoring begins only with an authenticated request.
@@ -152,6 +152,7 @@ class UserDashboard:
             evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192}.get(key)) for key in
                 ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window')}))
         value['updates'] = self.updates.view(access, workspace, value['roles'])
+        value['model_config_writable'] = self.runtime['backend']['type']=='fusion' or bool((value['updates'] or {}).get('can_update'))
         access.current()
         return value
 

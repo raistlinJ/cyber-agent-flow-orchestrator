@@ -102,7 +102,7 @@ def recorded_commands(root):
 
 
 def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None, progress=None, include_runs=True):
-    probe = probe or ProxmoxProbe(runtime['backend'])
+    probe = probe or (FusionProbe if runtime['backend']['type']=='fusion' else ProxmoxProbe)(runtime['backend'])
     jobs, errors = recorded_commands(runs_root)
     def check(definition):
         row = dict(definition, present=None, power='not configured', guest_access='not checked',
@@ -160,3 +160,19 @@ def snapshot(cfg, runtime, runs_root, probe=None, *, selected=None, progress=Non
         errors.append({'error': str(exc)})
     return {'checked_at': now(), 'workflow_id': cfg['id'], 'vms': vms, 'runs': runs, 'errors': errors,
             'scope': 'This Proxmox node; read-only guest and process observations'}
+
+
+class FusionProbe(ProxmoxProbe):
+    def vm(self, vmid):
+        from cyber_agent_flow_eval.fusion import inventory, DEFAULT_VMRUN
+        self.access.require_vm(vmid) if self.access else None
+        rows = inventory(self.agent.config['inventory_file'])
+        row = rows.get(str(vmid))
+        if row is None:
+            return dict(present=False, power='missing')
+        result = subprocess.run([self.agent.config.get('vmrun', DEFAULT_VMRUN), '-T', 'fusion', 'list'],
+                                capture_output=True,text=True,timeout=10)
+        if result.returncode:
+            raise ValueError('Fusion VM inventory unavailable')
+        running = set(result.stdout.splitlines()[1:])
+        return dict(present=True,power='running' if row['vmx'] in running else 'stopped',name=row.get('name'))

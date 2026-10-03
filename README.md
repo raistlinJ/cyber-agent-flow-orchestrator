@@ -108,6 +108,10 @@ After syncing, start the WebUI with:
 ```bash
 uv run cyber-agent-flow-orchestrator
 ```
+Authentication is required by default. For single-user access without login, run
+`uv run cyber-agent-flow-orchestrator --local`. This forces localhost-only access
+for the current launch and leaves saved web settings unchanged.
+
 
 No subcommand means `serve`. First launch creates editable `workflow.yaml`,
 `runtime.yaml`, `catalogs/baseline.json`, and `web.yaml` in the current directory
@@ -123,9 +127,9 @@ the export path, guest paths, model, network scope and shared lab lock before ru
 an experiment. Their example VM IDs are not assigned to PVE users.
 
 First launch automatically creates a 365-day self-signed browser certificate at
-`/certs/cert.pem` and private key at `/certs/key.pem` when both are missing. Existing
+`./certs/cert.pem` and private key at `./certs/key.pem` when both are missing. Existing
 pairs are preserved; an incomplete pair requires correction. Run as the Proxmox
-host account that can manage `/certs` and run `qm` (normally root). `uv sync` itself
+host account that can manage `./certs` and run `qm` (normally root). `uv sync` itself
 only installs dependencies; application setup runs on first launch. The
 ScenarioForge provisioner also creates these certificates at installation time.
 
@@ -145,7 +149,7 @@ ssh -N -L 8443:127.0.0.1:8443 root@YOUR_PROXMOX_HOST
 ```
 
 Open **https://localhost:8443**. Trust the generated certificate or replace the
-`/certs` pair with a signed chain/key and restart. Keep the key mode `0600`.
+`./certs` pair with a signed chain/key and restart. Keep the key mode `0600`.
 
 This requires the updated evaluator (0.4.2+) from this workspace. Neither project
 needs to be installed as a coordinator inside a guest. ScenarioForge belongs in
@@ -277,7 +281,7 @@ For **existing Proxmox accounts**, use [PVE login setup](docs/pve-login.md) and
 PVE validates passwords/TOTP; group removal revokes access on the next protected
 request. Host commands still use the backend's Linux permissions.
 The ScenarioForge Proxmox installer creates a self-signed certificate on first
-installation at `/certs/cert.pem` and `/certs/key.pem`; the PVE/LAN web configs read
+installation at `./certs/cert.pem` and `./certs/key.pem`; the PVE/LAN web configs read
 those paths. Existing pairs are preserved. Replace them with a signed certificate
 chain and matching key later, keep the key mode `0600`, and restart the WebUI.
 
@@ -466,7 +470,7 @@ The orchestrator CLI now covers planning, execution, inspection and results expo
 | `results RUN` | Show latest attempts and summaries by condition |
 | `logs RUN --stage ID` | Read a collected preparation/deployment/artifact log |
 | `logs RUN --trial ID` | Read collected evaluator worker and hook logs |
-| `export RUN --destination DIR` | Write datasets and summaries to a new directory |
+| `export RUN --destination DIR` | Write datasets, summaries, Markdown/HTML reports and charts to a new directory |
 
 For example, after running the artifact study:
 
@@ -495,12 +499,20 @@ mean progress and execution time include recorded values from incomplete trials.
 Missing metrics are `null`; these are descriptive summaries, not statistical
 significance tests.
 
-Exports contain `summary.json`, `workflow-summary.json`, `dataset.jsonl` and
-`dataset.csv`. They require an existing evaluation manifest, a new destination
-outside the source run, and idle workflow/evaluator locks. They preserve original
-attempts and cached datasets. They do not copy the suite, prompts, private verifiers,
-or raw logs; result rows can still contain discovered flags, addresses and final
-answers, so exports are **not redacted**.
+Exports contain `summary.json`, `workflow-summary.json`, `dataset.jsonl`,
+`dataset.csv`, `experiment-summary.md`, `experiment-summary.html` and
+`experiment-charts.svg`. The formatted reports include recorded task/system
+prompts, available and observed tools, trial outcomes, timestamps, metrics,
+agent answers and charts. HTML embeds its charts and opens offline; Markdown
+uses the companion SVG. The WebUI Results window offers both report downloads,
+and the full run ZIP includes these files too.
+
+CLI exports require an existing evaluation manifest, a new destination outside
+the source run, and idle workflow/evaluator locks. They preserve original attempts
+and cached datasets. They do not copy the suite, private verifiers or raw logs.
+Reports and result rows can contain discovered flags, addresses and final answers,
+so exports are **not redacted**. WebUI reports also support runs that failed before
+evaluation started, marking missing metrics explicitly.
 
 CLI execution remains synchronous. Use Ctrl-C to interrupt the foreground
 coordinator, then `recover`/`resume` as needed. Bundled WebUI samples run in background
@@ -627,3 +639,5 @@ request was performed during implementation.
 The WebUI supports **New experiment → Saved ScenarioForge XML** to select an existing scenario on the ScenarioForge VM, freeze its XML and settings, then deploy and evaluate it. See [scenario experiments](docs/scenario-experiments.md) for search roots, scope settings, and generating XML beforehand with ScenarioForge-Eval.
 
 New experiment also accepts local XML or ScenarioForge reproduction ZIP uploads, with downloadable fixed scenario packages and Send buttons for both demos. See [scenario imports and demo packages](docs/scenario-experiments.md#upload-from-new-experiment).
+
+For local VMware Fusion experiments, see [Fusion setup and execution](docs/fusion.md).

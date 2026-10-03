@@ -90,9 +90,18 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hi
     sec=ET.SubElement(editor,'section',name='Vulnerabilities')
     ET.SubElement(sec,'item',v_path='/old/docker-compose.yml')
     node=ET.SubElement(ET.SubElement(editor,'FlagSequencing'),'FlowState')
-    node.text=json.dumps(dict(chain=[],reproduction_artifact_sources=[dict(restored_path=str(assets),target_path='/old')]))
+    template_hints=['First bundled hint.','Second bundled hint.','Third bundled hint.']
+    task_template=dict(format='caf-runtime-task-template',version=1,id=sample_id,family='http-discovery',
+        prompt_template=('Fetch http://<deployed-host>/ and return the token.' if sample_id=='smoke' else
+                         'Explore http://<deployed-host>/ and return both flags.'),
+        success_criteria=dict(type='json_equals',expected_shape=(
+            {'service_token':'<fresh token>'} if sample_id=='smoke' else {'flags':['<first>','<second>']})),
+        required_checks=['containers','services','ports'],progressive_hints=template_hints)
+    node.text=json.dumps(dict(chain=[],evaluation_task_template=task_template,
+        reproduction_artifact_sources=[dict(restored_path=str(assets),target_path='/old')]))
     ET.ElementTree(root).write(source)
     class Backend:
+        def _webui_vm_mode_defaults(self, **kwargs): return {'hitl': {'enabled': False}}
         def _core_backend_defaults(self,**kwargs): return {'host':'fixture.invalid'}
         def _build_scenarios_xml(self,data):
             tree=ET.ElementTree(ET.Element('Scenarios'))
@@ -111,6 +120,7 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hi
     demo_prepare.prepare(options,Backend())
     flow=json.loads(ET.parse(output).find('.//FlowState').text)
     task=flow['evaluation_tasks'][0]
+    assert flow['evaluation_task_template']==task_template
     assert flow['flow_enabled'] is False
     assert flow['flag_assignments'] == []
     assert task['required_checks'] == ['containers', 'services', 'ports']
@@ -118,6 +128,8 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hi
     assert 'http://10.77.0.7/' in task['prompt']
     assert ('progressive_hints' in task) is hints_enabled
     assert len(task.get('progressive_hints', [])) == (3 if hints_enabled else 0)
+    if hints_enabled:
+        assert task['progressive_hints'] == template_hints
     # Optional cross-repository contract check with ScenarioForge's own CLI.
     sf_python = os.environ.get('SCENARIOFORGE_TEST_PYTHON')
     if sf_python:
@@ -180,3 +192,20 @@ assert build_execution_package(**options)['readiness_passed'] is False
     updated=json.loads(ET.parse(output).find('.//FlowState').text)['evaluation_tasks'][0]['verifier']['expected']
     assert expected!=updated
     assert all(value not in json.dumps(task.get('progressive_hints', [])) for value in ([expected['service_token']] if sample_id=='smoke' else expected['flags']))
+
+
+def test_demo_attaches_provisioned_participant_network():
+    scene=ET.Element('Scenario')
+    ET.SubElement(scene,'ScenarioEditor')
+    class Backend:
+        def _webui_vm_mode_defaults(self, **kwargs):
+            return {'hitl': {'enabled': True, 'interfaces': [
+                {'name':'ens19','attachment':'existing_router','ipv4':['10.254.200.3/24']}]}}
+    demo_prepare.configure_participant_network(scene,Backend())
+    node=scene.find('.//HardwareInLoop')
+    assert node.get('enabled')=='true'
+    interface=node.find('Interface')
+    assert interface.attrib==dict(name='ens19',attachment='existing_router',ipv4='10.254.200.3/24')
+    demo_prepare.configure_participant_network(scene,Backend())
+    assert len(scene.findall('.//HardwareInLoop'))==1
+    assert len(scene.findall(".//section[@name='Routing']/item"))==1

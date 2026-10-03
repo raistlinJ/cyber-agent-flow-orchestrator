@@ -1,4 +1,6 @@
 """Owner-scoped model preferences and fixed VM configuration exchange."""
+from cyber_agent_flow_eval.fusion import vm_lock_path
+
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -35,6 +37,21 @@ class ModelConfigs:
         self.cfg, self.runtime, self.root, self.group = cfg, runtime, root, group
         self.enabled = enabled
 
+    def network_scope(self, access):
+        access.current()
+        workspace = Workspace(self.root, access.username)
+        vmid = workspace.roles()['participant']
+        if vmid is None:
+            raise ModelConfigError('Select and save a participant VM first')
+        access.require_vm(vmid)
+        runtime = apply_model(workspace, self.runtime, vmid)
+        agent = ev.GuestAgent(runtime['backend'], authorize=access.qm)
+        agent.script = Path(__file__).with_name('guest_model_config.py').read_text()
+        result = agent.call(vmid, 'model_config', role='participant', action='scope',
+                            root=runtime['engine']['path'], url=runtime['model']['url'])
+        access.current()
+        return dict(result, vmid=vmid)
+
     def exchange(self, access, data):
         if not isinstance(data, dict) or set(data) - {'role', 'action', 'token', 'settings', 'api_key'}:
             raise ModelConfigError('Invalid model configuration request')
@@ -56,7 +73,7 @@ class ModelConfigs:
         vmid = workspace.roles()[role]
         if vmid is None: raise ModelConfigError('Save a VM selection for this application first')
         access.require_vm(vmid)
-        if action != 'read': require_maintenance(access, self.group)
+        if action != 'read' and self.runtime['backend']['type'] != 'fusion': require_maintenance(access, self.group)
         definition = next(item for item in definitions(self.cfg, self.runtime) if item['role'] == role)
         draft_path = workspace.path / f'model-draft-{role}.json'
         if draft_path.is_symlink(): raise ModelConfigError('Invalid model draft file')
@@ -80,17 +97,22 @@ class ModelConfigs:
                         args['settings'] = data['settings']
                         if 'api_key' in data: args['api_key'] = data['api_key']
                 def authorize(argv):
-                    access.qm(argv, required_group=self.group if action != 'read' else None)
+                    access.qm(argv, required_group=self.group if action != 'read' and self.runtime['backend']['type'] != 'fusion' else None)
                 agent = ev.GuestAgent(self.runtime['backend'], authorize=authorize)
                 agent.script = Path(__file__).with_name('guest_model_config.py').read_text()
                 # write uses qm stdin, so a replacement key never enters process argv.
                 if action == 'read':
                     result = agent.call(vmid, 'model_config', **args)
                 else:
-                    with ev.lease(f'/var/lock/cyber-agent-flow-eval-vm-{vmid}.lock'):
-                        result = agent.call(vmid, 'write', **args)
+                    with ev.lease(vm_lock_path(self.runtime['backend'], vmid)):
+                        result = agent.call(vmid, 'write', timeout=120, **args)
                 access.current()
                 token = uuid.uuid4().hex
+                if action == 'read' and draft_path.is_file():
+                    previous = ev.read_json(draft_path)
+                    if (previous.get('vmid') == vmid and previous.get('root') == definition['root']
+                            and previous.get('revision') == result['revision']):
+                        token = previous['token']
                 private_file(draft_path, json.dumps(dict(token=token, vmid=vmid, root=definition['root'], revision=result['revision'])).encode(), replace=draft_path.exists())
                 if role == 'participant' and action in ('save', 'use'):
                     values = validate(role, result['settings'])

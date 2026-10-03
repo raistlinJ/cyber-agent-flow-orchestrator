@@ -30,6 +30,7 @@ def main():
         for path in roots.values(): path.mkdir()
         ev.write_json(roots[9403]/'configs/cli.json', dict(provider='openai', url='https://models.example/v1', model='custom-model', ssl_verify=True, api_key='never-show-this', network_policy={'disallow':['10.0.0.1']}))
         (roots[9402]/'.scenarioforge.env').write_text('CORETG_AI_PROVIDER=litellm\nCORETG_AI_BASE_URL=https://models.example/v1\nCORETG_AI_MODEL=scenario-model\nCORE_HOST=10.0.0.2\n')
+        patch.setattr(guest, 'network_scope', lambda url,config:dict(provider_host='models.example',excluded_targets=['192.0.2.8','192.0.2.1'],warnings=[]))
         patch.setattr(guest, 'LOCK', root/'guest-maintenance.lock')
         patch.setattr(guest, 'SECRETS', root/'guest-secrets')
         fail_save = [False]
@@ -53,6 +54,8 @@ def main():
             dashboard = UserDashboard(root/'examples/01-reuse-export.yaml',root/'runs',2,lambda b,a:Probe(b,a,[]))
             original_create = dashboard.samples.create
             def create(*args, **kwargs):
+                progress=kwargs.pop('progress',None)
+                if progress:progress(3,'Saving experiment')
                 create_entered.set()
                 assert release_create.wait(20)
                 return original_create(*args, **kwargs)
@@ -62,7 +65,8 @@ def main():
                 with secure_server(dashboard,root/'web',auth=make_auth(pve)) as server,sync_playwright() as playwright:
                     browser=playwright.chromium.launch(channel='chrome',headless=True)
                     page=browser.new_page(ignore_https_errors=True,viewport={'width':1440,'height':1080})
-                    errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+                    errors=[];dialogs=[];page.on('pageerror',lambda error:errors.append(str(error)))
+                    page.on('dialog',lambda dialog:(dialogs.append(dialog.message),dialog.accept()))
                     page.goto(server['origin'])
                     page.get_by_label('Username').fill('operator@pve');page.get_by_label('Password',exact=True).fill(PASSWORD)
                     page.get_by_role('button',name='Sign in',exact=True).click()
@@ -79,10 +83,12 @@ def main():
                     expect(page.locator('#model-participant-read')).to_be_enabled(timeout=30000)
                     page.locator('#model-participant-read').click()
                     expect(page.locator('#model-participant-model')).to_have_value('custom-model',timeout=30000)
+                    assert 'replace all model settings' in dialogs[-1]
                     expect(page.locator('#model-participant-key')).to_have_value('')
                     assert 'never-show-this' not in page.locator('body').inner_text()
                     expect(page.locator('#model-participant-use')).to_have_count(0)
                     expect(page.locator('#model-participant-save')).to_have_count(0)
+                    expect(page.locator('#model-participant-apply')).to_be_disabled()
                     expect(page.locator('#model-config-scenarioforge')).to_have_count(0)
                     expect(page.locator('.model-card-heading #model-participant-read')).to_be_visible()
                     page.locator('#model-participant-model').fill('')
@@ -91,14 +97,12 @@ def main():
                     expect(page.locator('#create-experiment')).to_be_disabled()
                     page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                     page.locator('#model-participant-model').fill('updated-model')
-                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    expect(page.locator('#model-participant-apply')).to_be_enabled()
                     page.locator('#model-participant-key').fill('replacement-key')
                     fail_save[0] = True
-                    page.get_by_role('button',name='Create experiment',exact=True).click()
+                    page.get_by_role('button',name='Apply settings',exact=True).click()
                     assert push_entered.wait(10)
-                    expect(page.locator('#experiment-save-local')).to_contain_text('File saved locally')
-                    expect(page.locator('#experiment-save-push')).to_contain_text('0% acknowledged')
-                    expect(page.locator('#experiment-save-status')).to_contain_text('33%')
                     expect(page.locator('#create-experiment')).to_be_disabled()
                     page.screenshot(path=str(destination/'saving-progress.png'))
                     page.set_viewport_size({'width':390,'height':844})
@@ -106,18 +110,20 @@ def main():
                     page.screenshot(path=str(destination/'saving-progress-mobile.png'))
                     page.set_viewport_size({'width':1440,'height':1080})
                     release_push.set()
-                    expect(page.locator('#experiment-error')).to_contain_text('Model configuration save failed',timeout=30000)
-                    expect(page.locator('#experiment-save-push')).to_have_attribute('data-state','failed')
+                    expect(page.locator('#model-participant-message')).to_contain_text('Model configuration save failed',timeout=30000)
                     expect(page.locator('#experiment-dialog')).to_be_visible()
                     expect(page.locator('#runs tr')).to_have_count(0)
-                    expect(page.locator('#create-experiment')).to_be_enabled()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
                     fail_save[0] = False
                     page.locator('#model-participant-key').fill('replacement-key')
                     page.locator('#model-config-panel').scroll_into_view_if_needed()
                     page.screenshot(path=str(destination/'model-settings.png'))
+                    page.get_by_role('button',name='Apply settings',exact=True).click()
+                    expect(page.locator('#model-participant-message')).to_contain_text('Applied.',timeout=30000)
+                    expect(page.locator('#create-experiment')).to_be_enabled()
                     page.get_by_role('button',name='Create experiment',exact=True).click()
                     assert create_entered.wait(10)
-                    expect(page.locator('#experiment-save-push')).to_contain_text('100%')
+                    expect(page.locator('#experiment-save-push')).to_contain_text('not needed')
                     expect(page.locator('#experiment-save-record')).to_contain_text('Saving experiment')
                     expect(page.locator('#experiment-save-status')).to_contain_text('67%')
                     release_create.set()
@@ -141,6 +147,18 @@ def main():
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     assert page.locator('#experiment-dialog').evaluate('(n)=>n.getBoundingClientRect().width<=innerWidth && n.getBoundingClientRect().height<=innerHeight')
                     page.screenshot(path=str(destination/'model-settings-mobile.png'),full_page=True)
+                    page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
+                    page.locator('#model-participant-read').click()
+                    expect(page.locator('#model-participant-model')).to_have_value('updated-model',timeout=30000)
+                    # An API/client update after Pull must not make an untouched
+                    # browser draft overwrite the new settings or fail creation.
+                    config_path = roots[9403]/'configs/cli.json'
+                    config = ev.read_json(config_path)
+                    config['model'] = 'externally-updated-model'
+                    ev.write_json(config_path, config)
+                    page.get_by_role('button',name='Create experiment',exact=True).click()
+                    expect(page.locator('#experiment-dialog')).not_to_be_visible(timeout=30000)
+                    assert ev.read_json(config_path)['model'] == 'externally-updated-model'
                     assert not errors,errors
                     browser.close()
             finally:

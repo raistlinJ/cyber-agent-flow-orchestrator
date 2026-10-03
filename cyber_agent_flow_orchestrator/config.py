@@ -15,7 +15,7 @@ def job(value, backend):
     # Use the evaluator's validation for the common guest job schema.
     ev.resolve_backend(dict(backend, before_trial=[{k: v for k, v in value.items() if k != 'id'}]))
     if not 100 <= value['vmid'] <= 999999999:
-        raise ValueError('Command vmid must be a Proxmox VM ID')
+        raise ValueError('Command vmid must be a valid inventory VM ID')
 
 
 def load(path):
@@ -28,8 +28,8 @@ def load(path):
     ev.identifier(cfg['id'])
     runtime = ev.read_runtime(path.parent / cfg['runtime'])
     runtime['execution'].setdefault('auto_approve_dangerous', True)
-    if runtime['backend']['type'] != 'proxmox':
-        raise ValueError('Orchestration currently requires proxmox; macos/linux/windows are placeholders')
+    if runtime['backend']['type'] not in ('proxmox', 'fusion'):
+        raise ValueError('Orchestration requires proxmox or fusion')
     backend = runtime['backend']
     if 'app_vmid' not in backend:
         raise ValueError('Runtime backend.app_vmid is required')
@@ -47,7 +47,7 @@ def load(path):
     if 'core_vmid' in monitoring:
         ev.positive(monitoring['core_vmid'], 'monitoring.core_vmid')
         if not 100 <= monitoring['core_vmid'] <= 999999999 or monitoring['core_vmid'] in (backend['app_vmid'], backend['participant_vmid']):
-            raise ValueError('monitoring.core_vmid must identify a distinct Proxmox VM')
+            raise ValueError('monitoring.core_vmid must identify a distinct inventory VM')
     if 'scenarioforge_path' in monitoring:
         guest_path(monitoring['scenarioforge_path'], 'monitoring.scenarioforge_path')
     import re

@@ -1,6 +1,30 @@
 /* Text-only rendering keeps guest command lines and journal labels inert. */
 const $ = id => document.getElementById(id);
 const el = (tag, text, cls) => {const node = document.createElement(tag); if (text != null) node.textContent = text; if (cls) node.className = cls; return node;};
+// Retain mounted cards and rows so refreshes preserve focus and scroll state.
+function patchDisplayNode(current, next){
+ if(current.nodeType!==next.nodeType||current.nodeName!==next.nodeName){current.replaceWith(next);return;}
+ if(current.nodeType===Node.TEXT_NODE){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return;}
+ for(const attr of [...current.attributes])if(!next.hasAttribute(attr.name))current.removeAttribute(attr.name);
+ for(const attr of next.attributes)if(current.getAttribute(attr.name)!==attr.value)current.setAttribute(attr.name,attr.value);
+ const children=[...next.childNodes];
+ for(let i=0;i<children.length;i++){
+  if(current.childNodes[i])patchDisplayNode(current.childNodes[i],children[i]);else current.append(children[i]);
+ }
+ while(current.childNodes.length>children.length)current.lastChild.remove();
+}
+function updateDisplayList(container, next){
+ const existing=new Map([...container.children].map(node=>[node.dataset.displayKey,node]));
+ let cursor=container.firstChild;
+ for(const node of [...next.children]){
+  const mounted=existing.get(node.dataset.displayKey);
+  if(mounted){patchDisplayNode(mounted,node);existing.delete(node.dataset.displayKey);}
+  const item=mounted||node;
+  if(item!==cursor)container.insertBefore(item,cursor);
+  cursor=item.nextSibling;
+ }
+ for(const node of existing.values())node.remove();
+}
 let snapshot = null, fetching = false, failed = false, rolesDirty = false, rolesSaving = false, sampleStarting = false;
 let initialized=false, operation=null, waitingForObservation=false, waitingForMaintenance=false, redirecting=false, maintenanceStarting=false;
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
@@ -61,14 +85,14 @@ function syncBusy(){
  else{label=maintenanceFailed?`Dashboard loaded · ${lastChange.role} ${lastChange.action} ${lastChange.status}; see Applications`:'Dashboard loaded';bar.hidden=true;}
  if(percent==null)bar.removeAttribute('value');else bar.value=percent;
  $('loading-label').textContent=!busy&&loading?`Background refresh · ${label}`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
- loadingModal.set('dashboard',loading,label,percent);
+ loadingModal.set('dashboard',loading&&busy,label,percent);
  syncUpdateControls(busy?label:null);
  syncCreateExperiment();
 }
 function sessionExpired(){redirecting=true;clearPrivateView();syncBusy();location.replace('/login');throw Error('Your session expired. Sign in again.');}
 async function loadSession(){
  if(sessionPromise)return sessionPromise;
- sessionPromise=(async()=>{const response=await apiFetch('/api/session',{cache:'no-store'});if(response.status===401)sessionExpired();if(!response.ok)throw Error('Unable to verify your session. Refresh to retry.');const session=await dashboardJSON(response);csrfToken=session.csrf;$('username-label').textContent=session.username;})();
+ sessionPromise=(async()=>{const response=await apiFetch('/api/session',{cache:'no-store'});if(response.status===401)sessionExpired();if(!response.ok)throw Error('Unable to verify your session. Refresh to retry.');const session=await dashboardJSON(response);csrfToken=session.csrf;$('username-label').textContent=session.username;$('sign-out').hidden=session.provider==='desktop';})();
  try{await sessionPromise;}finally{sessionPromise=null;}
 }
 function duration(seconds) {if (seconds == null || !Number.isFinite(Number(seconds))) return 'Unknown'; seconds=Math.max(0, Math.floor(seconds)); const h=Math.floor(seconds/3600), m=Math.floor(seconds%3600/60), s=seconds%60; return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;}
@@ -78,10 +102,11 @@ function detail(list,label,value) {const row=el('div');row.append(el('dt',label)
 function render(data) {
  snapshot=data; renderRoles(data); renderModelConfigs(data); renderSamples(data); renderSampleActivity(data); renderUpdates(data); renderConsole();$('workflow').textContent=data.workflow_id||'';
  const notice=$('notice'); const errors=(data.errors||[]).map(x=>x.error);notice.hidden=!errors.length;notice.textContent=errors.join(' · ');
- const cards=$('machines');cards.replaceChildren();
+ const cards=el('div');
  if(!data.vms.length)cards.append(el('div','Checking configured machines…','empty'));
  for(const vm of data.vms){
   const card=el('article',null,'card'), top=el('div',null,'card-top'), label=el('div');
+  card.dataset.displayKey=vm.role;
   label.append(el('h3',vm.label),el('div',vm.vmid ? `VM ${vm.vmid}${vm.name?' · '+vm.name:''}`:'No VM selected','vm-id'));
   const power=vm.qmp_status==='paused'?'paused':vm.power;
   top.append(el('span',vm.role==='core'?'◈':'▤','vm-icon'),label,badge(power,power==='running'?'good':power==='unknown'?'warn':''));card.append(top);
@@ -99,10 +124,12 @@ function render(data) {
   if(vm.processes_truncated)processes.append(el('p','Showing the first 40 matching processes.','small'));
   card.append(processes);cards.append(card);
  }
+ updateDisplayList($('machines'),cards);
  const jobs=(data.vms||[]).flatMap(vm=>(vm.jobs||[]).map(job=>({...job,observed_at:vm.observed_at||data.checked_at})));
- $('command-count').textContent=`${jobs.length} recorded job${jobs.length===1?'':'s'}`; const commands=$('commands');commands.replaceChildren();
- for(const job of jobs){const row=el('article',null,'command'),head=el('div',null,'command-head');head.append(badge(job.live_state,job.live_state==='running'?'good':job.live_state==='unconfirmed'?'warn':''),el('span',`${job.run} / ${job.stage}`,'command-title'),timer(job.live_state==='finished'?null:job.elapsed_seconds,job.observed_at,job.live_state==='running'));row.append(head,el('code',job.command),el('div',`VM ${job.vmid} · ${job.unit} · ${job.live_state==='finished'?'No longer running; journal awaits cleanup':job.elapsed_source||'Last recorded job; live state unconfirmed'}`,'small'));commands.append(row);}
+ $('command-count').textContent=`${jobs.length} recorded job${jobs.length===1?'':'s'}`; const commands=el('div');
+ for(const job of jobs){const row=el('article',null,'command'),head=el('div',null,'command-head');row.dataset.displayKey=job.unit+'|'+job.run+'|'+job.stage;head.append(badge(job.live_state,job.live_state==='running'?'good':job.live_state==='unconfirmed'?'warn':''),el('span',`${job.run} / ${job.stage}`,'command-title'),timer(job.live_state==='finished'?null:job.elapsed_seconds,job.observed_at,job.live_state==='running'));row.append(head,el('code',job.command),el('div',`VM ${job.vmid} · ${job.unit} · ${job.live_state==='finished'?'No longer running; journal awaits cleanup':job.elapsed_source||'Last recorded job; live state unconfirmed'}`,'small'));commands.append(row);}
  if(!jobs.length)commands.append(el('p','No unfinished workflow commands recorded. Applications may still be running above.','empty'));
+ updateDisplayList($('commands'),commands);
  renderExperiments(data);
  waitingForMaintenance=Boolean((data.updates?.jobs||[]).some(job=>['queued','running'].includes(job.status)));waitingForObservation=Boolean(data.refreshing&&(data.loading?data.loading.total>0:(!data.checked_at||data.vms.length>0)));if(!waitingForObservation)foregroundChecks=false;tick();syncBusy();
 }
@@ -115,16 +142,17 @@ async function refresh(force=false, background=false, fresh=false){
    if(!csrfToken){await loadSession();syncBusy();}
    const response=await apiFetch(force?'/api/status?refresh=1'+(fresh?'&fresh=1':''):'/api/status?refresh=0',{cache:'no-store'});
    if(response.status===401)sessionExpired();
+   if(response.status===403)clearPrivateView();
    if(!response.ok)throw Error(response.status===504?'The dashboard request timed out (HTTP 504)':response.status===403?'Access not granted':`HTTP ${response.status}`);
    const data=await dashboardJSON(response);failed=false;render(data);return true;
-  }catch(error){failed=true;foregroundChecks=false;waitingForObservation=false;clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();return false;}
+  }catch(error){failed=true;foregroundChecks=false;waitingForObservation=false;if(!snapshot)clearPrivateView();$('notice').hidden=false;$('notice').textContent=`Dashboard unavailable: ${error.message}. Refresh to try again.`;tick();return false;}
   finally{fetching=false;blockingRefresh=false;initialized=true;syncBusy();}
  })();
  try{return await refreshPromise;}finally{refreshPromise=null;schedulePoll();}
 }
 async function refreshView(fresh=false){
- if(isBusy())return;operation=fresh?'Rechecking selected VMs…':'Refreshing dashboard…';syncBusy();
- try{await finishDashboardRead(true);await refresh(true,false,fresh);}
+ if(isBusy())return;operation=fresh?'Rechecking selected VMs…':null;syncBusy();
+ try{await finishDashboardRead(true);await refresh(true,!fresh,fresh);}
  catch(error){if(!redirecting){$('notice').hidden=false;$('notice').textContent=error.message;}}
  finally{operation=null;syncBusy();schedulePoll();}
 }
@@ -148,11 +176,11 @@ function renderRoles(data){
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
  for(const role of ['scenarioforge','participant','core']){
   const select=$('role-'+role),wanted=rolesDirty?select.value:String(data.roles[role]??'');
-  select.replaceChildren(new Option('Not selected',''));
-  for(const vm of data.available_vms||[])select.add(new Option(`VM ${vm.vmid} · ${vm.name||'Unnamed'} · ${vm.status||'unknown'}${vm.pool?' · '+vm.pool:''}`,String(vm.vmid)));
+  const options=[new Option('Not selected',''),...(data.available_vms||[]).map(vm=>new Option(`VM ${vm.vmid} · ${vm.name||'Unnamed'} · ${vm.status||'unknown'}${vm.pool?' · '+vm.pool:''}`,String(vm.vmid)))];
+  if(JSON.stringify([...select.options].map(o=>[o.value,o.text]))!==JSON.stringify(options.map(o=>[o.value,o.text])))select.replaceChildren(...options);
   select.value=[...select.options].some(o=>o.value===wanted)?wanted:'';
  }
- if(!rolesDirty&&!rolesSaving)$('roles-message').textContent=data.available_vms.length?'Selections are private to your account. Changes apply to subsequent runs.':'No available QEMU VMs on this node. Check your PVE VM/pool permissions.';
+ if(!rolesDirty&&!rolesSaving)$('roles-message').textContent=data.available_vms.length?'Selections are private to your account. Changes apply to subsequent runs.':'No available lab VMs. Check the configured inventory and your access.';
 }
 for(const role of ['scenarioforge','participant','core'])$('role-'+role).addEventListener('change',()=>{rolesDirty=true;});
 $('role-form').addEventListener('submit',async event=>{
@@ -199,30 +227,38 @@ function renderModelConfigs(data){
   const tls=el('label','Verify TLS certificates '),checkbox=el('input');checkbox.type='checkbox';checkbox.checked=true;checkbox.id=`model-${role}-ssl`;tls.append(checkbox);form.append(tls);
   const keyLabel=el('label','Replacement API key'),key=el('input');key.type='password';key.autocomplete='new-password';key.maxLength=8192;key.placeholder='Leave blank to preserve the guest key';key.id=`model-${role}-key`;keyLabel.append(key);form.append(keyLabel);
   const clearLabel=el('label','Clear stored API key '),clear=el('input');clear.type='checkbox';clear.id=`model-${role}-clear`;clearLabel.append(clear);form.append(clearLabel);
+  const actions=el('div',null,'result-actions'),apply=el('button','Apply settings');apply.type='button';apply.id=`model-${role}-apply`;apply.addEventListener('click',()=>{if(validateExperimentFields(form))modelConfigAction(role,'save');});actions.append(apply);form.append(actions);
   const message=el('p','Pull the configuration before editing.','small');message.id=`model-${role}-message`;message.setAttribute('role','status');form.append(message);
-  form.addEventListener('input',()=>{if(modelDrafts[role])modelDrafts[role].dirty=true;syncModelControls(role);renderCAFSettings(snapshot);});
-  form.addEventListener('submit',event=>{event.preventDefault();$('experiment-form').requestSubmit();});
+  form.addEventListener('input',()=>{if(modelDrafts[role])modelDrafts[role].dirty=true;syncModelControls(role);});
+  form.addEventListener('submit',event=>{event.preventDefault();if(validateExperimentFields(form))modelConfigAction(role,'save');});
   if(card)card.replaceWith(form);else $('model-config-cards').append(form);syncModelControls(role);
  }
 }
 function syncModelControls(role){
- const form=$('model-config-'+role);if(!form)return;const available=Boolean(form.dataset.vmid),draft=modelDrafts[role],canWrite=Boolean(snapshot?.updates?.can_update);
+ const form=$('model-config-'+role);if(!form)return;const available=Boolean(form.dataset.vmid),draft=modelDrafts[role],canWrite=Boolean(snapshot?.model_config_writable??snapshot?.updates?.can_update);
  for(const input of form.querySelectorAll('input,select'))input.disabled=!draft||!canWrite;
  $(`model-${role}-read`).disabled=!available;
+ $(`model-${role}-apply`).disabled=!draft||!draft.dirty||!canWrite;
  if(!canWrite)$(`model-${role}-message`).textContent=`Saving model settings requires the ${snapshot?.updates?.group||'caf-maintainers'} group and enabled application maintenance.`;
 }
 async function modelConfigAction(role,action,creating=false){
  if(isBusy()&&!creating)return;
  if(rolesDirty){const message='Save VM role selections before changing model settings.';if(creating)throw Error(message);$(`model-${role}-message`).textContent=message;return;}
- if(action==='read'&&modelDrafts[role]?.dirty&&!confirm('Discard unsaved model settings and pull from the VM?'))return;
+ if(action==='read'&&!confirm('Pull from VM will replace all model settings currently shown in this form. Continue?'))return;
  const body={role,action};if(action!=='read')body.token=modelDrafts[role]?.token;
  if(action==='save'){
   body.settings={provider:$(`model-${role}-provider`).value,url:$(`model-${role}-url`).value.trim(),model:$(`model-${role}-model`).value.trim(),ssl_verify:$(`model-${role}-ssl`).checked};
   const key=$(`model-${role}-key`);if($(`model-${role}-clear`).checked)body.api_key='';else if(key.value)body.api_key=key.value;key.value='';
  }
- operation=action==='read'?'Reading model configuration from the VM…':'Saving model settings to the VM and experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
+ operation=action==='read'?'Reading model configuration from the VM…':role==='participant'?'Saving model settings, synchronizing the participant route and checking connectivity…':'Saving model settings to the VM and experiments…';syncBusy();$(`model-${role}-message`).textContent=operation;
  try{
   await finishDashboardRead();
+  if(action==='save'&&!modelDrafts[role]?.dirty){
+   const current=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action:'read'})});
+   const fresh=await dashboardJSON(current);if(!current.ok)throw Error(fresh.error||'Unable to refresh saved model settings');
+   body.token=fresh.token;body.settings=fresh.settings;
+   modelDrafts[role]={token:fresh.token,vmid:fresh.vmid,dirty:false};
+  }
   if(creating){
    creationProgress(0,'running','Saving file locally on orchestrator…');
    const staged=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role,action:'stage',token:body.token,settings:body.settings})});
@@ -233,9 +269,10 @@ async function modelConfigAction(role,action,creating=false){
   const response=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(body)});delete body.api_key;
   const data=await dashboardJSON(response);if(!response.ok)throw Error(data.error||'Model configuration operation failed');
   if(creating)creationProgress(1,'complete','VM push · 100% · guest save acknowledged');
-  modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:action==='read'};
+  modelDrafts[role]={token:data.token,vmid:data.vmid,dirty:false};
+  if(role==='participant'&&data.network_scope)applyModelNetworkScope(data.network_scope);
   for(const key of ['provider','url','model'])$(`model-${role}-${key}`).value=data.settings[key];$(`model-${role}-ssl`).checked=data.settings.ssl_verify;$(`model-${role}-key`).value='';$(`model-${role}-clear`).checked=false;
-  $(`model-${role}-message`).textContent=(action==='save'?'Saved. Settings copied to the VM and selected for new experiments. ':data.exists?'Configuration loaded. Create experiment will save these settings. ':'No configuration file yet; saving will create it. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.backup?'Backup: '+data.backup:'');
+  $(`model-${role}-message`).textContent=(action==='save'?'Applied. These values are saved on the VM and will be used by new experiments. ':data.exists?'Pulled from VM. Edit the values, then select Apply settings. ':'No configuration file exists yet. Enter values, then select Apply settings. ')+(data.api_key_set?'A stored API key is present; its value stays in the VM. ':`No key stored in this file. Environment key: ${data.api_key_env}. `)+(data.routing?'Route: '+(data.routing.status==='updated'?`${data.routing.destination} through ${data.routing.interface}${data.routing.gateway?' via '+data.routing.gateway:''}. `:data.routing.message+'. '):'')+(data.routing?.dns?`DNS: ${data.routing.dns.domain} through ${data.routing.dns.server}. `:'')+(data.connectivity?data.connectivity.message+'. ':'')+(data.backup?'Backup: '+data.backup:'');
  }catch(error){$(`model-${role}-message`).textContent=error.message;if(creating)throw error;}
  finally{delete body.api_key;if(!creating)operation=null;syncModelControls(role);syncBusy();if(!creating)schedulePoll();}
 }
@@ -247,17 +284,15 @@ function renderSamples(data){
  const samples=data.samples,vm=samples?.participant_vmid;
  $('new-experiment').disabled=!samples?.items?.length&&!data.scenarios?.enabled;
  if(scenarioChoiceVM!==null&&scenarioChoiceVM!==data.roles?.scenarioforge){scenarioChoices=[];scenarioChoiceVM=null;taskScenarioChanged();$('scenario-selection').replaceChildren(new Option('Reload scenarios for the selected VM',''));}
- renderCAFSettings(data);
- $('experiment-model-context').textContent=vm?`Current experiment model: ${samples.provider} / ${samples.model} · Participant VM ${vm}. Pull from VM below to read its saved application settings.`:'Select and save a participant VM on Lab setup to enable Pull from VM and run experiments.';
  $('samples-context').textContent=vm?`New experiment defaults: Participant VM ${vm} · ${samples.provider} / ${samples.model}. Saved experiments retain their own settings.`:'Save a participant VM on Lab setup before running an experiment.';
 }
 function iconAction(label,icon,disabled,callback){const button=el('button',null,'icon-action');button.type='button';button.title=label;button.setAttribute('aria-label',label);const glyph=el('span',icon);glyph.setAttribute('aria-hidden','true');button.append(glyph);button.disabled=disabled;button.addEventListener('click',callback);return button;}
 function renderExperiments(data){
- const runs=$('runs');runs.replaceChildren();$('no-runs').hidden=Boolean(data.runs.length);
+ const runs=el('tbody');$('no-runs').hidden=Boolean(data.runs.length);
  const active=data.runs.some(runActive),items=data.samples?.items||[];
  for(const run of [...data.runs].sort((a,b)=>(b.sample_progress?.started_at||'').localeCompare(a.sample_progress?.started_at||''))){
   const id=run.output?.split('/').pop()||run.workflow_id||'',sample=items.find(s=>s.id===run.sample_id),live=runActive(run),ready=run.recorded_status==='ready',p=run.sample_progress,summary=run.evaluation?.summary;
-  const row=el('tr');row.dataset.runId=id;const title=el('td');title.append(el('strong',sample?.name||run.scenario_experiment?.scenario||run.workflow_id||id),el('div',id,'small'));
+  const row=el('tr');row.dataset.runId=id;row.dataset.displayKey=id;const title=el('td');title.append(el('strong',sample?.name||run.scenario_experiment?.scenario||run.workflow_id||id),el('div',id,'small'));
   if(run.saved_settings){const settings=run.saved_settings;title.append(el('div',`VM ${settings.participant_vmid} · ${settings.provider} / ${settings.model}`,'small'));}
   const state=el('td');state.append(badge(run.recorded_status||'unavailable',run.recorded_status==='completed'?'good':['failed','cancelled','interrupted','completed_with_errors'].includes(run.recorded_status)?'warn':''));if(run.message)state.append(el('div',run.message,'small'));
   if(run.trial_failures?.length)state.append(el('div',`${run.trial_failures.length} trial error(s) · Open Progress or Results for details`,'error'));
@@ -268,6 +303,7 @@ function renderExperiments(data){
   actions.append(iconAction('Open progress','◴',!p||ready,()=>openProgress(id)));
   row.append(title,state,el('td',p?`${p.finished_trials} / ${p.planned_trials}`:run.evaluation?`${summary.trials_observed} / ${run.evaluation.planned_trials}`:'—'),el('td',p?.verified_successes??summary?.verified_successes??'—'),actions);runs.append(row);
  }
+ updateDisplayList($('runs'),runs);
 }
 function openProgress(id){return openRunWindow('progress',id);}
 function experimentMissingFields(){
@@ -279,15 +315,16 @@ function experimentMissingFields(){
  if(scenario){
   const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
   if(scenarioChoiceVM!==snapshot.roles.scenarioforge||!choice?.resolved_chain)return 'Choose a resolved scenario on the ScenarioForge tab.';
-  if(!$('scenario-allowed').value.trim())return 'Enter allowed target IPs or CIDRs on the ScenarioForge tab.';
+  if(!$('scenario-allowed').value.trim())return 'Enter allowed target IPs or CIDRs on the Cyber-agent-flow tab.';
  }
  const taskError=taskValidationMessage();if(taskError)return 'Evaluation: '+taskError;
  const invalid=[...$('experiment-form').elements].find(input=>input.willValidate&&(!input.validity.valid||(input.required&&typeof input.value==='string'&&!input.value.trim())));
  if(invalid){const panel=invalid.closest('[role="tabpanel"]');return 'Complete the required fields on the '+(panel?$(panel.getAttribute('aria-labelledby')).textContent:'Experiment')+' tab.';}
  if(modelDrafts.participant){
-  if(!snapshot.updates?.can_update)return 'Saving the model draft requires application maintenance access.';
+  if(!(snapshot.model_config_writable??snapshot.updates?.can_update))return 'Saving the model draft requires application maintenance access.';
   const form=$('model-config-participant');
   if(!form||[...form.elements].some(input=>input.willValidate&&(!input.validity.valid||(input.required&&!input.value.trim()))))return 'Complete the required model fields on the Cyber-agent-flow tab.';
+  if(modelDrafts.participant.dirty)return 'Apply the changed model settings on the Cyber-agent-flow tab.';
  }
  return '';
 }
@@ -329,15 +366,6 @@ function validateExperimentFields(form){
 
 let customEvaluation=null;
 const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window'];
-function renderCAFSettings(data){
- const defaults=data?.experiment_defaults;
- const summary=$('caf-settings-summary');summary.replaceChildren();
- const draft=modelDrafts.participant,model=draft?{provider:$('model-participant-provider')?.value,name:$('model-participant-model')?.value,url:$('model-participant-url')?.value}:defaults?.model;
- for(const [title,value] of [['Participant VM',data?.roles?.participant??'Not selected'],['Provider / model',model?[model.provider,model.name].join(' / '):'Unavailable'],['Model endpoint',model?.url||'Unavailable'],['CAF checkout',defaults?.engine?.path||'Unavailable'],['CAF Python',defaults?.engine?.python||'Unavailable']]){
-  summary.append(el('dt',title),el('dd',String(value)));
- }
- $('caf-settings-source').textContent=draft?'Pending model settings below will be saved when you create the experiment.':defaults?.source||'Settings inherited from the server runtime.';
-}
 function renderEvaluationSettings(scenario,sample){
  const defaults=snapshot?.experiment_defaults?.evaluation||{repetitions:1,max_turns:snapshot?.scenarios?.max_turns||20,wall_seconds:snapshot?.scenarios?.wall_seconds||300,tool_timeout:60,context_window:8192};
  const values=scenario?(customEvaluation||defaults):{...defaults,repetitions:sample?.profile?.repetitions||1,max_turns:sample?.max_turns||3,wall_seconds:sample?.wall_seconds||120,tool_timeout:sample?.profile?.tool_timeout||30};
@@ -356,43 +384,77 @@ function renderEvaluationSettings(scenario,sample){
  $('eval-settings-note').textContent=scenario?'These settings are saved with this experiment. Reruns reuse them.':'Fixed by the sample to keep its prompt, tool comparison, and scoring consistent. CAF model settings remain configurable.';
  $('eval-tools').textContent='Tools / conditions: '+(scenario?'Baseline — nmap, curl, python3. Custom tool conditions are not editable here yet.':sample?.profile?.tools||'Sample-defined');
  $('eval-task-source').textContent=scenario?'ScenarioForge exports the selected task definitions after deployment. Prompts and private verifiers are captured in Results.':'The deployed host address and fresh token/flags are resolved at run time. Exact prompts and XML are captured in Results.';
- renderCAFSettings(snapshot);
 }
 $('evaluation-settings').addEventListener('input',()=>{if(!$('evaluation-settings').disabled)customEvaluation=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));});
 
 function describeSample(){
  const scenario=$('experiment-sample').value==='scenarioforge-xml',sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);
  $('scenario-options').hidden=!scenario;
+ $('scenario-caf-scope').hidden=!scenario;
  $('scenario-allowed').required=scenario;
  renderEvaluationSettings(scenario,sample);
  $('experiment-description').textContent=scenario?'Deploy and evaluate an existing ScenarioForge scenario.':sample?.description||'';
  $('experiment-budget').textContent=scenario?'Baseline tools · configure repetitions and trial limits below':sample?sample.trials+' trials · up to '+sample.max_turns+' turns and '+sample.wall_seconds+'s per trial':'';
 }
 
-$('new-experiment').addEventListener('click',()=>{if(isBusy())return;customEvaluation=null;$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option(sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value=snapshot?.scenarios?.allowed_targets||'';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();syncCreateExperiment();});
-let scenarioChoices=[],scenarioChoiceVM=null;
+$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation=null;lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
+let scenarioChoices=[],scenarioChoiceVM=null,lastUploadedScenarioFile=null;
+let autoExcludedTargets=[];
+function applyModelNetworkScope(scope){
+ const input=$('scenario-disallowed');
+ const existing=input.value.split(',').map(value=>value.trim()).filter(Boolean).filter(value=>!autoExcludedTargets.includes(value));
+ autoExcludedTargets=scope.excluded_targets||[];
+ input.value=[...new Set([...existing,...autoExcludedTargets])].join(', ');
+ $('scenario-scope-info').textContent=`LLM provider: ${scope.provider_host} · excluded: ${autoExcludedTargets.join(', ')||'unresolved'}. ${(scope.warnings||[]).join(' ')}`;
+ syncCreateExperiment();
+}
+async function loadModelNetworkScope(){
+ autoExcludedTargets=[];
+ if(!snapshot?.roles?.participant)return;
+ operation='Resolving the applied LLM provider and route on the participant VM…';syncBusy();
+ try{
+  const response=await apiFetch('/api/model-network-scope',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});
+  const scope=await dashboardJSON(response);if(!response.ok)throw Error(scope.error||'Unable to resolve the LLM route');
+  applyModelNetworkScope(scope);
+ }catch(error){$('scenario-scope-info').textContent='Review exclusions: '+error.message;}
+ finally{operation=null;syncBusy();schedulePoll();}
+}
+function scenarioModifiedTime(item){const epoch=Number(item?.modified_epoch);if(Number.isFinite(epoch))return epoch*1000;const parsed=Date.parse(item?.modified_at||'');return Number.isFinite(parsed)?parsed:0;}
+function scenarioModifiedLabel(item){const value=scenarioModifiedTime(item);return value?new Date(value).toLocaleString([], {dateStyle:'short',timeStyle:'short'}):'timestamp unavailable';}
+function scenarioFileIdentity(file){return file?file.name+'\0'+file.size+'\0'+file.lastModified:'';}
+function syncScenarioUploadButton(){const file=$('scenario-file').files[0];$('upload-scenario').disabled=!file||scenarioFileIdentity(file)===lastUploadedScenarioFile;}
+for(const choice of document.querySelectorAll('input[name="scenario-source"]'))choice.addEventListener('change',()=>{
+ const upload=document.querySelector('input[name="scenario-source"]:checked').value==='upload';
+ $('scenario-upload-options').hidden=!upload;$('scenario-find-options').hidden=upload;
+ scenarioChoices=[];scenarioChoiceVM=null;taskScenarioChanged();
+ $('scenario-selection').replaceChildren(new Option(upload?'Upload a scenario to choose an XML':'Load scenarios to choose an XML',''));
+ $('scenario-allowed').value='';$('scenario-selection-info').textContent='';$('scenario-upload-info').textContent='Import saves the scenario on the selected VM; it does not deploy it. Maximum 32 MiB (128 MiB expanded).';
+ $('scenario-file').value='';syncScenarioUploadButton();syncCreateExperiment();
+});
 function describeScenarioSelection(){
  const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
- $('scenario-selection-info').textContent=choice?choice.path+' · '+choice.scenario+' · '+choice.chain_length+' Flow steps':'Select a saved scenario with a resolved Flow chain.';
+ $('scenario-allowed').value=(choice?.target_subnets||[]).join(', ');
+ syncCreateExperiment();
+ $('scenario-selection-info').textContent=choice?choice.path+' · '+choice.scenario+' · modified '+scenarioModifiedLabel(choice)+' · '+choice.chain_length+' Flow steps':'Select a saved scenario with a resolved Flow chain.';
 }
 $('scenario-selection').addEventListener('change',()=>{describeScenarioSelection();taskScenarioChanged();});
-$('scenario-query').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();$('load-scenarios').click();}});
 $('load-scenarios').addEventListener('click',async()=>{
  if(isBusy())return;
  operation='Loading saved scenarios from the ScenarioForge VM…';syncBusy();
  try{
-  const response=await apiFetch('/api/scenarios/list',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({query:$('scenario-query').value})});
+  const response=await apiFetch('/api/scenarios/list',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({query:''})});
   const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to load scenarios');
   showScenarioChoices(result);
-  $('scenario-selection-info').textContent=result.items.length?(result.truncated?'Showing a limited list. Narrow the search to find another XML.':'Choose a scenario from VM '+result.vmid+'.'):'No matching saved XML found in '+result.roots.join(', ')+'.';
+  $('scenario-selection-info').textContent=result.items.length?(result.truncated?'Showing the 50 most recently modified scenarios found on VM '+result.vmid+'.':'Choose a scenario from VM '+result.vmid+'; newest files are listed first.'):'No saved XML found in '+result.roots.join(', ')+'.';
  }catch(error){$('scenario-selection-info').textContent=error.message;}
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
 function showScenarioChoices(result){
- scenarioChoices=result.items;scenarioChoiceVM=result.vmid;taskScenarioChanged();
+ scenarioChoices=[...result.items].sort((left,right)=>scenarioModifiedTime(right)-scenarioModifiedTime(left)||String(left.scenario||'').localeCompare(String(right.scenario||''))||String(left.path||'').localeCompare(String(right.path||'')));scenarioChoiceVM=result.vmid;taskScenarioChanged();
  const select=$('scenario-selection');select.replaceChildren(new Option('Choose a saved scenario',''));
- for(const item of scenarioChoices){const option=new Option(item.scenario+' — '+item.path.split('/').pop()+(item.resolved_chain?'':' (resolve Flow chain first)'),item.id);option.disabled=!item.resolved_chain;select.add(option);}
+ $('scenario-allowed').value='';
+ for(const item of scenarioChoices){const option=new Option(scenarioModifiedLabel(item)+' — '+item.scenario+' — '+item.path.split('/').pop()+(item.resolved_chain?'':' (resolve Flow chain first)'),item.id);option.disabled=!item.resolved_chain;select.add(option);}
 }
 async function sendScenario(file){
  if(isBusy())return;
@@ -408,10 +470,12 @@ async function sendScenario(file){
   if(ready.length===1)$('scenario-selection').value=ready[0].id;
   describeScenarioSelection();
   $('scenario-upload-info').textContent='Imported to VM '+result.vmid+' · '+result.kind+' · '+result.fidelity+'. '+(ready.length?'Select the scenario below, review scope, then create the experiment.':'Open the imported XML in ScenarioForge to resolve and save its Flow chain, then reload it here.');
+  lastUploadedScenarioFile=scenarioFileIdentity(file);
   $('scenario-file').value='';
  }catch(error){$('scenario-upload-info').textContent=error.message;}
- finally{operation=null;syncBusy();schedulePoll();}
+ finally{operation=null;syncScenarioUploadButton();syncBusy();schedulePoll();}
 }
+$('scenario-file').addEventListener('change',syncScenarioUploadButton);
 $('upload-scenario').addEventListener('click',()=>sendScenario($('scenario-file').files[0]));
 
 $('experiment-sample').addEventListener('change',describeSample);
@@ -423,13 +487,10 @@ $('experiment-form').addEventListener('submit',async event=>{
  const scenario=$('experiment-sample').value==='scenarioforge-xml';
  if(!validateExperimentFields($('experiment-form')))return;
  if(scenario&&(!scenarioChoices.some(item=>item.id===$('scenario-selection').value)||rolesDirty)){selectExperimentTab('scenario');$('experiment-error').textContent=rolesDirty?'Save VM roles before creating an experiment.':'Load and choose a saved scenario first.';return;}
- const modelForm=$('model-config-participant'),saveModel=Boolean(modelDrafts.participant);
- if(saveModel&&(!snapshot?.updates?.can_update||rolesDirty)){$('experiment-error').textContent=rolesDirty?'Save VM role selections before creating an experiment.':'Model settings cannot be saved without application maintenance access.';return;}
- if(saveModel&&!validateExperimentFields(modelForm))return;
  $('experiment-error').textContent='';
- startCreationProgress(saveModel);
+ startCreationProgress(false);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{if(saveModel){await modelConfigAction('participant','save',true);operation='Creating experiment · Model settings saved; preparing scenario request…';syncBusy();}creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))}:{sample_id:$('experiment-sample').value})});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed: '+error.message);$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });

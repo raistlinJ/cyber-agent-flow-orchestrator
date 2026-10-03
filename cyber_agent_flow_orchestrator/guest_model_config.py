@@ -2,10 +2,13 @@
 import ast
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import socket
+import subprocess
 import sys
 import tempfile
 from urllib.parse import urlsplit
@@ -13,6 +16,8 @@ import uuid
 
 LOCK = Path('/run/caf-application-maintenance.lock')
 SECRETS = Path('/var/lib/caf-model-config')
+ROUTE_HELPER = Path('/usr/local/sbin/update-llm-destination')
+
 ENV_KEYS = dict(provider='CORETG_AI_PROVIDER', url='CORETG_AI_BASE_URL', model='CORETG_AI_MODEL', ssl_verify='CORETG_AI_VERIFY_SSL')
 
 
@@ -75,9 +80,86 @@ def atomic(path, content, owner):
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+def synchronize_endpoint(path, values):
+    """Reuse the provisioner's route/policy transaction; never pass credentials."""
+    if not ROUTE_HELPER.is_file():
+        return dict(status='unmanaged', message='Provisioner route helper is not installed; routes were unchanged')
+    try:
+        command = [str(ROUTE_HELPER), '--url', values['url'], '--cli-config', str(path), '--json']
+        process = subprocess.run(command, capture_output=True, text=True, timeout=90)
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError('Participant route update failed or timed out; model settings were not saved') from None
+    if process.returncode:
+        message = process.stderr.strip()[-1000:]
+        if 'unrecognized arguments' in message:
+            raise ValueError('Update the participant routing helper from the ScenarioForge provisioner before saving model settings')
+        raise ValueError('Participant route update failed: ' + message)
+    try:
+        result = json.loads(process.stdout)
+        if result.get('status') != 'updated' or not result.get('destination'):
+            raise ValueError()
+    except (ValueError, AttributeError):
+        raise ValueError('Participant routing helper returned an invalid result') from None
+    return result
+
+
+def check_endpoint(values, route):
+    endpoint = urlsplit(values['url'])
+    port = endpoint.port or (443 if endpoint.scheme == 'https' else 80)
+    host = route.get('destination') or endpoint.hostname
+    try:
+        with socket.create_connection((host, port), timeout=5):
+            pass
+        return dict(status='reachable', host=endpoint.hostname, port=port,
+                    message='Model endpoint TCP connection succeeded; authentication and model availability were not tested')
+    except OSError:
+        return dict(status='unreachable', host=endpoint.hostname, port=port,
+                    message=f'Model endpoint {endpoint.hostname}:{port} is unreachable from the participant; check the server, port and VPN')
+
+
+def network_scope(url, config):
+    """Resolve on the participant and protect only provider/next-hop hosts."""
+    endpoint = urlsplit(url)
+    if endpoint.scheme not in ('http', 'https') or not endpoint.hostname or endpoint.username or endpoint.password:
+        raise ValueError('Invalid applied model endpoint')
+    addresses, gateways, warnings = set(), set(), []
+    try:
+        addresses.add(str(ipaddress.ip_address(endpoint.hostname)))
+    except ValueError:
+        try:
+            addresses.update(str(ipaddress.ip_address(item[4][0])) for item in
+                             socket.getaddrinfo(endpoint.hostname, endpoint.port or (443 if endpoint.scheme == 'https' else 80), type=socket.SOCK_STREAM))
+        except OSError:
+            warnings.append('Provider DNS could not be resolved on the participant.')
+    # Use the installed route utility's destination when DNS is unavailable,
+    # but only for the same endpoint. Never carry a previous provider forward.
+    same_endpoint = urlsplit(config.get('url', '')).hostname == endpoint.hostname
+    if not addresses and same_endpoint and config.get('llm_route_destination'):
+        try:
+            addresses.add(str(ipaddress.ip_address(config['llm_route_destination'])))
+        except ValueError:
+            pass
+    for address in sorted(addresses):
+        try:
+            result = subprocess.run(['ip', '-j', '-6' if ':' in address else '-4', 'route', 'get', address],
+                                    capture_output=True, text=True, timeout=5, check=True)
+            for route in json.loads(result.stdout):
+                if route.get('gateway'):
+                    gateways.add(str(ipaddress.ip_address(route['gateway'])))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            warnings.append('Route lookup unavailable for ' + address + '.')
+            if same_endpoint and address == config.get('llm_route_destination') and config.get('llm_route_gateway'):
+                try:
+                    gateways.add(str(ipaddress.ip_address(config['llm_route_gateway'])))
+                except ValueError:
+                    pass
+    return dict(provider_host=endpoint.hostname, provider_ips=sorted(addresses), gateways=sorted(gateways),
+                excluded_targets=sorted(addresses | gateways), warnings=warnings)
+
+
 def dispatch(data):
     role, op = data.get('role'), data.get('action')
-    if role not in ('participant', 'scenarioforge') or op not in ('read', 'save', 'use') or (op == 'use' and role != 'participant'):
+    if role not in ('participant', 'scenarioforge') or op not in ('read', 'save', 'use', 'scope') or (op in ('use', 'scope') and role != 'participant'):
         raise ValueError('Unsupported model configuration operation')
     root = Path(data['root'])
     if not root.is_absolute() or root.resolve() != root or not root.is_dir():
@@ -94,11 +176,13 @@ def dispatch(data):
             with path.open('rb') as stream: content = stream.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024: raise ValueError('Application configuration is too large')
         identity = hashlib.sha256(content).hexdigest()
-        if op != 'read' and data.get('revision') != identity:
+        if op not in ('read', 'scope') and data.get('revision') != identity:
             raise ValueError('Configuration changed in the VM. Pull it again before saving or using it.')
         text = content.decode('utf-8')
         config = json.loads(text or '{}') if role == 'participant' else env_values(text)
         if not isinstance(config, dict): raise ValueError('Application configuration must be an object')
+        if op == 'scope':
+            return network_scope(data['url'], config)
         key_name = 'api_key' if role == 'participant' else 'CORETG_AI_API_KEY'
         secret = config.get(key_name, '')
         if not isinstance(secret, str): raise ValueError('Invalid stored API key')
@@ -117,6 +201,18 @@ def dispatch(data):
         if not isinstance(variable, str) or not re.fullmatch('[A-Za-z_][A-Za-z0-9_]*', variable):
             raise ValueError('Invalid API key environment variable name')
         backup = None
+        route = None
+        if role == 'participant' and op in ('save', 'use'):
+            selected = validate(role, data['settings'] if op == 'save' else values)
+            # Validate secret input before changing persistent network state.
+            replacement = data.get('api_key')
+            if replacement is not None and (not isinstance(replacement, str) or len(replacement) > 8192 or any(ord(c) < 32 for c in replacement)):
+                raise ValueError('API key must be a single-line value')
+            route = synchronize_endpoint(path, selected)
+            # The shared helper reconciles managed policy entries in cli.json.
+            # Read them back rather than overwriting them with the earlier copy.
+            if path.exists():
+                config = json.loads(path.read_text())
         if op == 'save':
             values = validate(role, data['settings'])
             replacement = data.get('api_key')
@@ -145,6 +241,11 @@ def dispatch(data):
                       api_key_env=variable,
                       backup=str(backup) if backup else None)
         if role == 'participant' and op in ('save', 'use'):
+            result['routing'] = route
+            result['network_scope'] = network_scope(values['url'], config)
+            result['connectivity'] = check_endpoint(values, route)
+            if op == 'use' and path.exists():
+                result['revision'] = hashlib.sha256(path.read_bytes()).hexdigest()
             validate(role, values)
             # A unique, immutable secret snapshot keeps subsequent trials reproducible.
             # Environment-only keys remain supplied by the host runtime's guest environment_file.

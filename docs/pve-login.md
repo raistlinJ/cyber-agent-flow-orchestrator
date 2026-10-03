@@ -96,8 +96,9 @@ to work around this limitation.
 
 The PVE API certificate is separate from the certificate served to your browser.
 The ScenarioForge Proxmox installer generates the browser certificate on first
-orchestrator installation at `/certs/cert.pem`, with its private key at
-`/certs/key.pem`. Both `web.pve.yaml` and `web.lan.yaml` read these absolute paths.
+orchestrator installation at `./certs/cert.pem`, with its private key at
+`./certs/key.pem`. The directory is inside the orchestrator checkout. Configs in `examples/` use
+`../certs/cert.pem` and `../certs/key.pem`, relative to the YAML file.
 The self-signed certificate lasts 365 days and covers localhost, loopback addresses,
 and the Proxmox short hostname/FQDN. Reinstalling preserves an existing pair.
 
@@ -117,8 +118,8 @@ Default settings and workspaces are relative to the launch directory; continue
 using the same directory. The generated experiment template needs your lab paths,
 model, network scope and shared target lock before starting evaluation.
 
-To switch to a CA-issued certificate, replace `/certs/cert.pem` with the PEM server
-certificate followed by its intermediate chain, and `/certs/key.pem` with the
+To switch to a CA-issued certificate, replace `./certs/cert.pem` with the PEM server
+certificate followed by its intermediate chain, and `./certs/key.pem` with the
 matching unencrypted PEM key. Keep the private key mode `0600` and readable by the
 server account, then restart `serve`. The paths in YAML stay the same. There is no
 automatic renewal or certificate reload. For LAN access, the certificate must

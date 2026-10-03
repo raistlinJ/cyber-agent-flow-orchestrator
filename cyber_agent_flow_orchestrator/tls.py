@@ -17,7 +17,7 @@ from cyber_agent_flow_eval import integration as ev
 from .auth import private_file
 
 
-def settings(path):
+def settings(path, *, local=False):
     path = Path(path).resolve()
     data = yaml.load(path.read_text(), Loader=ev.StrictLoader)
     ev.fields(data, ['version', 'listen', 'port', 'public_url', 'certificate', 'private_key', 'users_file',
@@ -43,6 +43,21 @@ def settings(path):
     # aiohttp supports IPv4 and IPv6 bind addresses; hostnames are not needed here.
     if not isinstance(data['listen'], str) or not isinstance(data['public_url'], str):
         raise ValueError('listen and public_url must be strings')
+    if 'auth' in data and not isinstance(data['auth'], dict):
+        raise ValueError('auth must be a mapping')
+    if local:
+        inventory = (data.get('auth') or {}).get('inventory_file')
+        data['auth'] = dict(provider='desktop', **({'inventory_file': inventory} if inventory else {}))
+        data.pop('users_file', None)
+        data['listen'] = '127.0.0.1'
+        data['public_url'] = f"https://localhost:{data['port']}"
+        data['updates'] = None
+    elif (data.get('auth') or {}).get('provider') == 'desktop':
+        # Older imported profiles opted into desktop access in YAML. Require
+        # the explicit launch flag now; preserve their files on disk.
+        inventory = data['auth'].get('inventory_file')
+        data['auth'] = dict(provider='fusion', inventory_file=inventory) if inventory else dict(provider='local')
+        data['users_file'] = data.get('users_file', 'users.json')
     ipaddress.ip_address(data['listen'])
     origin = urlsplit(data['public_url'])
     if (origin.scheme != 'https' or not origin.hostname or origin.username or origin.password or
@@ -62,6 +77,22 @@ def settings(path):
         ev.fields(auth, ['provider'], ['provider'], 'local auth')
         if 'users_file' not in data:
             raise ValueError('Local authentication requires users_file')
+    elif auth.get('provider') == 'desktop':
+        ev.fields(auth, ['provider', 'inventory_file'], ['provider'], 'desktop auth')
+        if not ipaddress.ip_address(data['listen']).is_loopback or origin.hostname not in ('localhost','127.0.0.1','::1'):
+            raise ValueError('Single-user desktop mode must bind to loopback with a localhost public URL')
+        if 'users_file' in data:
+            raise ValueError('Desktop mode uses the OS account; remove users_file')
+        if 'inventory_file' in auth:
+            auth['inventory_file'] = str((path.parent / auth['inventory_file']).resolve())
+        data['updates'] = None
+    elif auth.get('provider') == 'fusion':
+        ev.fields(auth, ['provider', 'inventory_file'], ['provider', 'inventory_file'], 'Fusion auth')
+        if 'users_file' not in data:
+            raise ValueError('Fusion authentication requires users_file')
+        auth['inventory_file'] = str((path.parent / auth['inventory_file']).resolve())
+        if data['updates'] is not None:
+            raise ValueError('Application maintenance is not enabled for Fusion')
     elif auth.get('provider') == 'pve':
         ev.fields(auth, ['provider', 'url', 'ca_file', 'required_group', 'realms'],
                   ['provider', 'url', 'required_group'], 'PVE auth')
@@ -85,7 +116,7 @@ def settings(path):
                 raise ValueError('ca_file must be a path')
             auth['ca_file'] = str((path.parent / auth['ca_file']).resolve())
     else:
-        raise ValueError('auth.provider must be local or pve')
+        raise ValueError('auth.provider must be local, pve, fusion, or desktop')
     for key in ('certificate', 'private_key', *(['users_file'] if 'users_file' in data else [])):
         if not isinstance(data[key], str) or not data[key]:
             raise ValueError(key + ' must be a path')

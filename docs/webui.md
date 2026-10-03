@@ -18,7 +18,7 @@ The screenshot uses simulated data for browser verification, not a live Proxmox 
 - **Experiments** (`/#experiments`): an experiment table with Run, Stop, View results
   and Open progress icons. **New** opens a sample configuration modal. Condition
   summaries and CSV downloads are available in a separate results window; full JSON is under
-  **Full result details**.
+  **Full result details**. **Download Markdown summary** and **Download HTML report + charts** provide shareable run reports with task and system prompts, configured and observed tools, trial outcomes, stage/trial timing, scores, hints, flag progress and reported usage. HTML embeds its charts and opens offline; Markdown uses the companion `experiment-charts.svg`. All three files are also included in the run ZIP and CLI result export. Reports use the latest attempt per trial for comparisons and mark unavailable metrics explicitly.
 - **Applications** (`/#applications`): version checks, Update with process-stop
   confirmation, rollback and the latest maintenance outcome. Expand **Maintenance
   history** for older jobs, transfer details and diagnostic records.
@@ -43,7 +43,7 @@ uv run cyber-agent-flow-orchestrator
 
 This defaults to `serve`, `workflow.yaml`, `web.yaml`, and `runs/` in the current
 directory. Missing default configuration files are created once; missing
-certificate pairs are generated on first launch in `/certs`. PVE login is the
+certificate pairs are generated on first launch in `./certs`. PVE login is the
 default, using the host FQDN, Proxmox CA and `caf-orchestration` group.
 Use [PVE login](pve-login.md) to enroll accounts, then choose VM roles in the page.
 For local accounts instead, follow [HTTPS and login setup](https-login.md).
@@ -556,3 +556,24 @@ Active Progress and Results windows poll their saved run data every five seconds
 independently of the dashboard Automatic refresh setting, including Never.
 These updates run silently without reopening the loading modal. With Never set,
 polling stops when the run finishes; dashboard VM observations remain unchanged.
+
+When you save or use participant model settings, the orchestrator calls the
+provisioner's `/usr/local/sbin/update-llm-destination` utility. It updates the
+persistent Netplan route or DHCP route-service destination and reconciles only
+its managed endpoint/gateway exclusions, preserving custom agent policy. The
+Desktop shortcut uses this same utility. Model settings are not saved if route
+validation or application fails; the utility restores its previous files/routes.
+
+The save response shows the destination, interface, gateway, and a bounded TCP
+connectivity check from the participant. An unreachable endpoint is saved with
+a warning; the check does not validate credentials or model availability. Saved
+experiments retain their original model settings. Create a new experiment to
+use the new endpoint. Automatic route updates currently require a literal IPv4
+address or a hostname resolving to one IPv4 address; multi-address and IPv6-only
+endpoints are rejected before changing routes. Guests without the provisioner
+helper explicitly report that their routes were unchanged.
+
+If the endpoint hostname cannot resolve after the bootstrap NIC is removed,
+the shared utility configures DNS for just that provider domain on the dedicated
+LLM NIC, using its on-link configured/DHCP resolver or gateway. This setting is
+persistent. DNS and route files are restored if route setup fails.

@@ -119,10 +119,10 @@ class ScenarioExperiments:
         content, identity = '', None
         with authorized_operations(access.qm):
             remote = guest(self.runtime['backend'])
-            for _ in range(17):
+            for _ in range(25):
                 result = remote.call(vmid, 'tasks', roots=catalogue['roots'], path=item['path'],
                                      selection_id=selection_id, offset=len(content), timeout=40)
-                if not isinstance(result.get('chunk'), str) or not 0 <= result.get('total', -1) <= 65536:
+                if not isinstance(result.get('chunk'), str) or not 0 <= result.get('total', -1) <= 96 * 1024:
                     raise SampleRequestError('Invalid scenario task response')
                 if identity is not None and identity != result['sha256']:
                     raise SampleRequestError('Scenario tasks changed while loading')
@@ -135,12 +135,27 @@ class ScenarioExperiments:
         if hashlib.sha256(content.encode()).hexdigest() != identity:
             raise SampleRequestError('Scenario task checksum mismatch')
         access.current()
-        tasks = json.loads(content)
+        details = json.loads(content)
+        # Accept the prior guest format while an already-running orchestrator
+        # process finishes an in-flight request during upgrades.
+        if not isinstance(details, dict):
+            details = {'tasks': details, 'suggested_tasks': [], 'context': {}}
+        tasks = details.get('tasks')
+        suggested = details.get('suggested_tasks', [])
+        context = details.get('context', {})
         if tasks is not None:
             from .evaluation_tasks import validate_tasks
             tasks = validate_tasks(tasks)
+        if suggested:
+            from .evaluation_tasks import validate_tasks
+            suggested = validate_tasks(suggested)
+        elif not isinstance(suggested, list):
+            raise SampleRequestError('Invalid suggested scenario tasks')
+        if not isinstance(context, dict):
+            raise SampleRequestError('Invalid scenario task context')
         return dict(selection_id=selection_id, tasks=tasks,
-                    source='scenario' if tasks is not None else 'scenario-default')
+                    suggested_tasks=suggested, context=context,
+                    source='scenario' if tasks is not None else ('scenario-derived' if suggested else 'scenario-default'))
 
     def upload(self, access, content, progress=lambda step, message: None):
         import hashlib

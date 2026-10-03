@@ -77,6 +77,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
             pass
 
         def respond(self, status, value=b'', mime='application/json', **headers):
+            if getattr(self, '_desktop_cookie', None):
+                headers.setdefault('Set-Cookie', session_cookie(self._desktop_cookie, auth.absolute))
             body = json.dumps(value, allow_nan=False).encode() if not isinstance(value, bytes) else value
             self.send_response(status)
             self.send_header('Content-Type', mime + '; charset=utf-8')
@@ -120,7 +122,12 @@ def handler(dashboard, *, auth, proxy_key, origin):
 
         def current(self, *, revalidate=True):
             token = token_from_cookie(self.headers.get('Cookie'))
-            return token, auth.session(token, revalidate=revalidate)
+            session = auth.session(token, revalidate=revalidate)
+            if not session and auth.provider.name == 'desktop' and self.command == 'GET':
+                token = auth.desktop_session()
+                self._desktop_cookie = token
+                session = auth.session(token)
+            return token, session
 
         def asset(self, entry):
             name, mime = entry
@@ -149,11 +156,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     return
                 if path == '/api/session':
                     self.respond(200, session)
-                elif path in ('/api/experiments/creation-status', '/api/experiments/start-status') and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                elif path in ('/api/experiments/creation-status', '/api/experiments/start-status') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     request_id = parse_qs(urlsplit(self.path).query).get('request_id', [''])[0]
                     self.respond(200, dashboard.creation_status(auth.access(token, revalidate=False), request_id, starting=path.endswith('/start-status')))
                 elif path == '/api/status':
-                    if auth.provider.name == 'pve':
+                    if auth.provider.name in ('pve', 'fusion', 'desktop') and getattr(dashboard, 'scoped', False):
                         if not getattr(dashboard, 'scoped', False):
                             raise AccessDenied('A per-user dashboard is required for PVE login')
                         refresh = parse_qs(urlsplit(self.path).query).get('refresh')
@@ -210,7 +217,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 if not secrets.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), session['csrf'].encode()):
                     self.respond(403, {'error': 'Invalid CSRF token'})
                     return
-                if not getattr(dashboard, 'scoped', False) or auth.provider.name != 'pve':
+                if not getattr(dashboard, 'scoped', False) or auth.provider.name not in ('pve', 'fusion', 'desktop'):
                     self.respond(404, {'error': 'Scenario upload is not enabled'})
                     return
                 if self.headers.get('Content-Type', '').split(';')[0] != 'application/octet-stream':
@@ -274,7 +281,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     token = auth.login(username, password, self.headers.get('X-Forwarded-For', 'unknown'),
                                        otp=otp, challenge_id=challenge_id)
                     if not token:
-                        self.respond(401, {'error': 'Login failed or orchestrator access not granted' if auth.provider.name == 'pve'
+                        self.respond(401, {'error': 'Login failed or orchestrator access not granted' if auth.provider.name in ('pve', 'fusion', 'desktop')
                                                   else 'Invalid username or password'})
                         return
                     if isinstance(token, dict):
@@ -308,21 +315,21 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(400, {'error': str(exc)})
                         return
                     self.respond(200, dashboard.select(auth.access(token, revalidate=False), data))
-                elif path == '/api/samples/run' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                elif path == '/api/samples/run' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     if (set(data) != {'sample_id', 'request_id'} or not isinstance(data['sample_id'], str)
                             or not isinstance(data['request_id'], str)):
                         self.respond(400, {'error': 'Supply a sample ID and request ID only'})
                         return
                     self.respond(202, dashboard.run_sample(auth.access(token, revalidate=False), data['sample_id'], data['request_id']))
-                elif path == '/api/scenarios/list' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                elif path == '/api/scenarios/list' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     if set(data) != {'query'} or not isinstance(data['query'], str):
                         raise SampleRequestError('Supply scenario search text only')
                     self.respond(200, dashboard.scenarios.catalogue(auth.access(token, revalidate=False), data['query']))
-                elif path == '/api/scenarios/tasks' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                elif path == '/api/scenarios/tasks' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     if set(data) != {'selection_id'}:
                         raise SampleRequestError('Supply a scenario selection ID only')
                     self.respond(200, dashboard.scenarios.tasks(auth.access(token, revalidate=False), data['selection_id']))
-                elif path in ('/api/experiments/create', '/api/experiments/run', '/api/experiments/stop') and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                elif path in ('/api/experiments/create', '/api/experiments/run', '/api/experiments/stop') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     action = path.rsplit('/', 1)[1]
                     expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
                     if action == 'create' and 'selection_id' in data:
@@ -339,9 +346,13 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         raise SampleRequestError('Invalid experiment request fields')
                     access = auth.access(token, revalidate=False)
                     self.respond(202, dashboard.experiment(access, action, data))
-                elif path == '/api/model-config' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                elif path == '/api/model-network-scope' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
+                    if data:
+                        raise ModelConfigError('Supply no network scope parameters')
+                    self.respond(200, dashboard.model_configs.network_scope(auth.access(token, revalidate=False)))
+                elif path == '/api/model-config' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     self.respond(200, dashboard.model_configs.exchange(auth.access(token, revalidate=False), data))
-                elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name == 'pve':
+                elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     if (set(data) - {'process_confirmation'} != {'role', 'action', 'ref', 'request_id'}
                             or any(not isinstance(v, str) for v in data.values())):
                         raise UpdateError('Supply role, action, ref, request_id and optional process_confirmation only')
@@ -379,6 +390,6 @@ def handler(dashboard, *, auth, proxy_key, origin):
     return Handler
 
 
-def serve(config, runs_root, *, web_config, interval=10):
+def serve(config, runs_root, *, web_config, interval=10, local=False):
     from .proxy import run_https
-    return run_https(config, runs_root, web_config, interval=interval)
+    return run_https(config, runs_root, web_config, interval=interval, local=local)

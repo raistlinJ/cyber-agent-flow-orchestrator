@@ -106,17 +106,32 @@ def application(upstream_port, proxy_key, config):
 CLIENT = web.AppKey('client', ClientSession)
 
 
-def run_https(config_path, runs_root, web_config, interval=10):
-    config = settings(web_config)
+def run_https(config_path, runs_root, web_config, interval=10, local=False):
+    config = settings(web_config, local=local)
     ensure_certificate(config)
     ssl_context = context(config)
     provider = None
     if config['auth']['provider'] == 'pve':
         from .pve_auth import PVEProvider
         provider = PVEProvider(config['auth'])
+    if config['auth']['provider'] == 'fusion':
+        from .auth import FusionProvider
+        from .config import load
+        _, runtime, _, _ = load(config_path)
+        if runtime['backend']['type'] != 'fusion' or runtime['backend']['inventory_file'] != config['auth']['inventory_file']:
+            raise ValueError('Fusion auth and workflow must use the same inventory')
+        provider = FusionProvider(config['users_file'], config['auth']['inventory_file'])
+    if config['auth']['provider'] == 'desktop':
+        from .auth import DesktopProvider
+        from .config import load
+        _, runtime, _, _ = load(config_path)
+        configured = config['auth'].get('inventory_file')
+        if runtime['backend']['type'] == 'fusion' and configured != runtime['backend']['inventory_file']:
+            raise ValueError('Desktop auth and workflow must use the same Fusion inventory')
+        provider = DesktopProvider(configured)
     auth = Auth(config.get('users_file'), provider=provider, idle_seconds=config['session_idle_seconds'],
                 absolute_seconds=config['session_max_seconds'])
-    if provider is not None:
+    if provider is not None and (provider.name != 'desktop' or provider.inventory_file):
         from .user_dashboard import UserDashboard
         dashboard = UserDashboard(config_path, runs_root, interval, samples=config['samples'], updates=config['updates'] if config['updates'] is not None else False)
     else:
@@ -127,7 +142,8 @@ def run_https(config_path, runs_root, web_config, interval=10):
         thread.start()
         dashboard.start()
         try:
-            print(f"Orchestrator: {config['public_url']} (HTTPS + login; Ctrl-C to stop)", flush=True)
+            mode = "single-user desktop session" if config["auth"]["provider"] == "desktop" else "login"
+            print(f"Orchestrator: {config['public_url']} (HTTPS + {mode}; Ctrl-C to stop)", flush=True)
             web.run_app(application(backend.server_port, key, config), host=config['listen'], port=config['port'],
                         ssl_context=ssl_context, access_log=None, print=None, shutdown_timeout=5)
         finally:

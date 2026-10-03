@@ -4,6 +4,7 @@ import os
 import pwd
 from pathlib import Path
 import xml.etree.ElementTree as ET
+import zipfile
 import pytest
 from cyber_agent_flow_eval import integration as ev
 from cyber_agent_flow_orchestrator import scenario_guest, scenarios, samples, service
@@ -76,10 +77,61 @@ def test_task_preview_is_bounded_and_detects_stale_selection(tmp_path):
         encoded+=result['chunk']
         if len(encoded)==result['total']:break
     assert hashlib.sha256(encoded.encode()).hexdigest()==result['sha256']
-    assert json.loads(encoded)==flow['evaluation_tasks']
+    details=json.loads(encoded)
+    assert details['tasks']==flow['evaluation_tasks']
+    assert details['context']['chain'][0]['ipv4']=='10.77.0.10'
+    assert details['context']['sources']['tasks']=='FlowState.evaluation_tasks'
     path.write_bytes(path.read_bytes()+b' ')
     with pytest.raises(ValueError,match='changed'):
         scenario_guest.dispatch(dict(args,op='tasks'))
+
+
+def test_task_preview_builds_safe_editable_flow_draft(tmp_path):
+    path=tmp_path/'generated.xml'
+    root=ET.Element('Scenarios')
+    scenario=ET.SubElement(root,'Scenario',name='Generated Flow')
+    node=ET.SubElement(scenario,'FlowState')
+    node.text=json.dumps({
+        'chain':[{'id':'7','name':'web-target','ipv4':'10.77.0.10','is_vuln':True}],
+        'flag_assignments':[{'id':'web-flag','node_id':'7','flag_value':'FLAG{private}',
+            'hints':['Inspect the web root.','The answer is FLAG{private}'],
+            'hint_levels':{'medium':['Try curl against port 80.']},
+            'resolved_outputs':{'Flag(flag_id)':'FLAG{private}','File(path)':'/tmp/proof.txt'}}]
+    })
+    ET.ElementTree(root).write(path)
+    args=snapshot_args(tmp_path,path)
+    result=scenario_guest.dispatch(dict(args,op='tasks'))
+    details=json.loads(result['chunk'])
+    assert details['tasks'] is None
+    assert details['suggested_tasks'][0]['flag_nodes']==['7']
+    assert details['suggested_tasks'][0]['required_checks']==['containers','services','ports']
+    assert details['suggested_tasks'][0]['progressive_hints']==['Inspect the web root.','Try curl against port 80.']
+    assert 'FLAG{private}' not in json.dumps(details['context'])
+    assert details['context']['chain'][0]=={
+        'position':1,'id':'7','name':'web-target','ipv4':'10.77.0.10','is_vuln':True,
+        'generator':'web-flag','has_flag':True,'hint_count':2}
+
+
+def test_task_preview_uses_separate_uploaded_bundle_tasks_as_draft(tmp_path):
+    upload=tmp_path/('caf-upload-'+'a'*32)
+    upload.mkdir()
+    path=upload/'scenario.xml'
+    root=ET.Element('Scenarios')
+    scenario=ET.SubElement(root,'Scenario',name='Bundled Flow')
+    node=ET.SubElement(scenario,'FlowState')
+    node.text=json.dumps({'chain':[{'id':'7','name':'web-target','ipv4':'10.77.0.10'}]})
+    ET.ElementTree(root).write(path)
+    with zipfile.ZipFile(upload/'source','w') as archive:
+        archive.writestr('evaluation-tasks.json',json.dumps([TASKS[1]]))
+        archive.writestr('participant-guide.md','# Participant')
+        archive.writestr('facilitator-guide.md','# Facilitator')
+    args=snapshot_args(tmp_path,path)
+    result=scenario_guest.dispatch(dict(args,op='tasks'))
+    details=json.loads(result['chunk'])
+    assert details['tasks'] is None
+    assert details['suggested_tasks']==[TASKS[1]]
+    assert details['context']['sources']['tasks']=='bundled evaluation-tasks.json'
+    assert details['context']['bundle_files']==['evaluation tasks','participant guide','facilitator guide']
 
 
 @pytest.mark.parametrize('tasks', [
@@ -121,7 +173,9 @@ def test_tasks_create_preview_and_rerun_preserve_definitions(pve,lab,tmp_path,mo
     monkeypatch.setattr(service,'run',execute)
     try:
         selection=next(i for i in controller.catalogue(user)['items'] if i['path']==str(path) and i['scenario']=='Selected')
-        assert controller.tasks(user,selection['id'])['tasks']==[TASKS[0]]
+        preview=controller.tasks(user,selection['id'])
+        assert preview['tasks']==[TASKS[0]]
+        assert preview['context']['chain'][0]['id']=='7'
         result=controller.create(user,selection['id'],'b'*32,'10.77.0.0/24','',tasks=TASKS,provide_progressive_hints=True)
         output=workspace.run_path(result['run_id'])
         assert ev.read_json(output/'workflow.json')['runtime']['execution']['provide_progressive_hints'] is True

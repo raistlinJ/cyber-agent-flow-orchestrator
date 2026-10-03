@@ -1,5 +1,6 @@
 import hashlib
 import os
+from pathlib import Path
 import pwd
 import pytest
 
@@ -37,6 +38,20 @@ def test_listing_snapshot_and_stale_selection(tmp_path):
         stream.write(b'changed')
     with pytest.raises(ValueError, match='changed'):
         guest.dispatch(dict(op='check', token='a'*32, repo=str(tmp_path), sha256=rows[0]['sha256']))
+
+
+def test_catalogue_orders_xml_by_newest_timestamp(tmp_path):
+    old=tmp_path/'old.xml'
+    new=tmp_path/'new.xml'
+    old.write_bytes(XML.replace(b'Saved lab',b'Older lab'))
+    new.write_bytes(XML.replace(b'Saved lab',b'Newest lab'))
+    os.utime(old,(1000,1000))
+    os.utime(new,(2000,2000))
+    rows=guest.catalogue(dict(roots=[str(tmp_path)]))['items']
+    assert [Path(row['path']).name for row in rows]==['new.xml','new.xml','old.xml','old.xml']
+    assert rows[0]['modified_epoch']==2000
+    assert rows[-1]['modified_epoch']==1000
+    assert rows[0]['modified_at'].endswith('+00:00')
 
 
 def test_unresolved_scenario_cannot_snapshot(tmp_path):
@@ -123,3 +138,19 @@ def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, m
 def test_invalid_evaluation_settings(value):
     with pytest.raises(samples.SampleRequestError):
         scenarios.evaluation_settings(value)
+
+
+def test_scope_uses_saved_topology_and_ignores_access_networks(tmp_path):
+    import json
+    import xml.etree.ElementTree as ET
+    scenario = ET.Element('Scenario', name='Scope')
+    preview = dict(full_preview=dict(lan_subnets=['10.77.0.2/24', '10.77.0.0/24', '0.0.0.0/0', 'invalid'],
+                                    ptp_subnets=['10.78.0.0/30'], hosts=[dict(ip4='10.77.0.5/24')]))
+    ET.SubElement(scenario, 'PlanPreview').text = json.dumps(preview)
+    ET.SubElement(scenario, 'HardwareInLoop', address='10.254.200.3/24')
+    path = tmp_path / 'scope.xml'
+    ET.ElementTree(scenario).write(path)
+    assert guest.inspect(path)[0]['target_subnets'] == ['10.77.0.0/24', '10.78.0.0/30']
+    scenario.remove(scenario.find('PlanPreview'))
+    ET.SubElement(scenario, 'FlowState').text = json.dumps(dict(chain=[dict(ipv4='10.77.0.5')]))
+    assert guest.target_subnets(scenario) == ['10.77.0.5/32']

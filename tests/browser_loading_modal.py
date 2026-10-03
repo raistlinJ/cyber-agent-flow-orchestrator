@@ -32,20 +32,22 @@ def main():
                 pending = []
                 page.route('**/api/status?refresh=1', lambda route: pending.append(route))
                 page.locator('#refresh').click()
-                expect(page.locator('#loading-modal')).to_be_visible()
+                expect(page.locator('#loading-modal')).not_to_be_visible()
                 page.keyboard.press('Escape')
-                expect(page.locator('#loading-modal')).to_be_visible()
+                expect(page.locator('#loading-modal')).not_to_be_visible()
                 pending.pop().fulfill(status=503, json={'error': 'Unavailable'})
                 expect(page.locator('#loading-modal')).not_to_be_visible()
                 expect(page.locator('#notice')).to_contain_text('503')
                 page.locator('#refresh').click()
-                expect(page.locator('#loading-modal')).to_be_visible()
+                expect(page.locator('#loading-modal')).not_to_be_visible()
                 pending.pop().fulfill(json=dashboard.value)
                 expect(page.locator('#loading-modal')).not_to_be_visible()
 
-                # Automatic refresh uses the same modal, including asynchronous VM checks.
-                page.evaluate('void refresh(true, true)')
-                expect(page.locator('#loading-modal')).to_be_visible()
+                expect(page.locator('#loading-label')).to_have_text('Dashboard loaded')
+                # Automatic dashboard refresh stays unobtrusive.
+                with page.expect_request('**/api/status?refresh=1'):
+                    page.evaluate('void refresh(true, true)')
+                expect(page.locator('#loading-modal')).not_to_be_visible()
                 pending.pop().fulfill(json=dashboard.value)
                 expect(page.locator('#loading-modal')).not_to_be_visible()
 
@@ -62,6 +64,11 @@ def main():
                     expect(popup.locator('#loading-modal')).to_be_visible()
                     held.pop().fulfill(json={'workflow': workflow, 'evaluation': None} if view == 'results' else workflow)
                     expect(popup.locator('#loading-modal')).not_to_be_visible()
+                    if view == 'results':
+                        expect(popup.locator('#download-report-md')).to_be_visible()
+                        expect(popup.locator('#download-report-md')).to_have_attribute('href','/api/runs/demo/artifact?id=report-markdown')
+                        expect(popup.locator('#download-report-html')).to_be_visible()
+                        expect(popup.locator('#download-report-html')).to_have_attribute('href','/api/runs/demo/artifact?id=report-html')
                     if view == 'progress':
                         expect(popup.get_by_role('button', name='Open results')).to_have_count(0)
                     popup.locator('#refresh-run').click()

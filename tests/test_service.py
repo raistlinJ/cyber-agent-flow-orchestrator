@@ -27,6 +27,9 @@ def test_manage_run_from_service_and_cli(lab, tmp_path, capsys):
     assert main(['export', str(output), '--destination', str(tmp_path / 'exported')]) == 0
     assert json.loads(capsys.readouterr().out)['attempts'] == 2
     assert (tmp_path / 'exported/workflow-summary.json').is_file()
+    assert (tmp_path / 'exported/experiment-summary.md').is_file()
+    assert '<svg' in (tmp_path / 'exported/experiment-summary.html').read_text()
+    assert (tmp_path / 'exported/experiment-charts.svg').is_file()
     assert len(agent.calls) == calls  # Inspection and export never contact guests.
 
 
@@ -154,3 +157,16 @@ def test_interaction_diagnostics_identify_timeout_without_exposing_args(tmp_path
     assert item['interactions'][0]['timeout_seconds'] == 30
     assert 'interactive decision' in item['errors'][0]
     assert 'PRIVATE' not in json.dumps(item)
+
+
+def test_snapshot_handoff_remains_pollable_then_expires(lab, monkeypatch):
+    from datetime import datetime, timezone, timedelta
+    _,output,agent,_=lab
+    service.run(lab[0],output,agent=agent,progress=None)
+    record=ev.read_json(output/'workflow.json')
+    record.update(sample_id='smoke',status='preparing',phase='verifying',updated_at=datetime.now(timezone.utc).isoformat())
+    ev.write_json(output/'workflow.json',record)
+    assert service.status(output)['recorded_status']=='queued'
+    record['updated_at']=(datetime.now(timezone.utc)-timedelta(seconds=20)).isoformat()
+    ev.write_json(output/'workflow.json',record)
+    assert service.status(output)['recorded_status']=='interrupted'

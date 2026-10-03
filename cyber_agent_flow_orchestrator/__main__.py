@@ -2,11 +2,12 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0].split('=', 1)[0] in ('--runs-root', '--web-config', '--poll-seconds', '--provision-config'):
+    if not argv or argv[0].split('=', 1)[0] in ('--runs-root', '--web-config', '--poll-seconds', '--provision-config', '--local'):
         argv.insert(0, 'serve')
     parser = argparse.ArgumentParser(prog='cyber-agent-flow-orchestrator', description='Manage ScenarioForge and CAF evaluation workflows. With no arguments, start serve using editable defaults.')
     commands = parser.add_subparsers(dest='command', required=True)
@@ -54,6 +55,7 @@ def main(argv=None):
     web.add_argument('config', nargs='?', help='Workflow YAML (default: workflow.yaml; created on first launch)')
     web.add_argument('--runs-root', default='runs')
     web.add_argument('--web-config', help='Web settings (default: web.yaml; created on first launch)')
+    web.add_argument('--local', action='store_true', help='Open without login; bind only to localhost')
     web.add_argument('--poll-seconds', type=int, default=10)
     web.add_argument('--provision-config', help='ScenarioForge Proxmox key=value config; import VM IDs and model into a separate profile')
     provision = commands.add_parser('import-provision', help='Create an editable workflow profile from a ScenarioForge Proxmox provision config')
@@ -68,6 +70,9 @@ def main(argv=None):
     maintenance.add_argument('--web-config', default='web.yaml')
     maintenance.add_argument('--runs-root', default='runs')
     maintenance.add_argument('--username', required=True)
+    fusion = commands.add_parser('import-fusion', help='Create local workflow/WebUI settings from a provisioned Fusion lab')
+    fusion.add_argument('--state-dir', default=str(Path.home()/'Library/Application Support/ScenarioForge/fusion-lab'))
+    fusion.add_argument('--output', required=True, help='New directory for private local settings')
     user = commands.add_parser('create-user', help='Create a local login account using an interactive password prompt')
     user.add_argument('--file', required=True, help='Private JSON account file')
     user.add_argument('--username', required=True)
@@ -86,11 +91,16 @@ def main(argv=None):
             from .bootstrap import prepare
             from .web import serve
             config, web_config = prepare(args.config, args.web_config)
+            if args.runs_root == 'runs' and not any(arg == '--runs-root' or arg.startswith('--runs-root=') for arg in argv):
+                from .config import load
+                _, runtime, _, _ = load(config)
+                if runtime['backend']['type'] == 'fusion':
+                    args.runs_root = str(Path(config).parent/'runs')
             if args.provision_config:
                 from .provision import import_profile
                 config = import_profile(args.provision_config, config)
             print(f'Workflow: {config}\nWeb settings: {web_config}\nRuns: {args.runs_root}', flush=True)
-            return serve(config, args.runs_root, web_config=web_config, interval=args.poll_seconds)
+            return serve(config, args.runs_root, web_config=web_config, interval=args.poll_seconds, **({"local": True} if args.local else {}))
         if args.command in ('user-run', 'user-resume', 'user-recover'):
             from . import user_execution
             access = user_execution.login(args.web_config, args.username)
@@ -129,6 +139,9 @@ def main(argv=None):
             from .provision import import_profile
             config, _ = prepare(args.workflow)
             result = {'workflow': import_profile(args.provision_config, config, output=args.output)}
+        elif args.command == 'import-fusion':
+            from .fusion_setup import prepare as prepare_fusion
+            result = prepare_fusion(args.state_dir, args.output)
         elif args.command == 'create-user':
             import getpass
             from .auth import create_user

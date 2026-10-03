@@ -7,11 +7,13 @@ import pwd
 import runpy
 import shutil
 import zipfile
+import xml.etree.ElementTree as ET
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 from cyber_agent_flow_orchestrator import scenario_guest, scenarios
+from cyber_agent_flow_orchestrator.evaluation_tasks import validate_tasks
 from cyber_agent_flow_orchestrator.scenario_upload import validate, MAX_UPLOAD
 from cyber_agent_flow_orchestrator.user_dashboard import UserDashboard
 from cyber_agent_flow_eval import integration as ev
@@ -47,6 +49,14 @@ def test_bundle_validation_and_demo_import(tmp_path):
         profile = json.loads(next((tmp_path / key).rglob('demo-profile.json')).read_text())
         assert profile['sample_id'] == key
         with zipfile.ZipFile(path) as source:
+            required={'README.md','demo-profile.json','evaluation-task-template.json','participant-guide.md','facilitator-guide.md'}
+            assert required <= set(source.namelist())
+            template=json.loads(source.read('evaluation-task-template.json'))
+            assert template==profile['task_template']
+            assert template['required_checks']==['containers','services','ports']
+            assert len(template['progressive_hints'])==3
+            flow=json.loads(ET.fromstring(source.read('scenario.xml')).find('.//FlowState').text)
+            assert flow['evaluation_task_template']==template
             bad = io.BytesIO()
             with zipfile.ZipFile(bad, 'w') as target:
                 for info in source.infolist():
@@ -54,6 +64,20 @@ def test_bundle_validation_and_demo_import(tmp_path):
                 target.writestr('../escape', b'bad')
             with pytest.raises(ValueError, match='unsafe'):
                 validate(bad.getvalue())
+
+
+def test_shareable_scenarioforge_bundles_include_editable_tasks_and_guides():
+    bundles=sorted((ROOT/'ScenarioForge-Bundles').glob('*.zip'))
+    assert len(bundles)==5
+    for path in bundles:
+        assert validate(path.read_bytes())=='reproduction-bundle'
+        with zipfile.ZipFile(path) as archive:
+            names=set(archive.namelist())
+            assert {'scenario.xml','evaluation-tasks.json','participant-guide.md','facilitator-guide.md'} <= names
+            tasks=validate_tasks(json.loads(archive.read('evaluation-tasks.json')))
+            state=json.loads(ET.fromstring(archive.read('scenario.xml')).find('.//FlowState').text)
+            assert state['evaluation_tasks']==tasks
+            assert all(task['prompt'] and task['verifier'] and task['required_checks'] and task['progressive_hints'] for task in tasks)
 
 
 def test_guest_import_plain_xml_and_bundle(tmp_path):

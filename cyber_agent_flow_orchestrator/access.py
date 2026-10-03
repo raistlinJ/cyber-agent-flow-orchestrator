@@ -86,3 +86,20 @@ class PVEAccess:
         if not value.isascii() or not value.isdecimal():
             raise AccessDenied('Invalid VM identity')
         self.require_vms([int(value)], required_group=required_group)
+
+
+class FusionAccess(PVEAccess):
+    """Local operator access restricted to the configured Fusion inventory."""
+    def _inventory(self, record):
+        from cyber_agent_flow_eval.fusion import inventory
+        rows = inventory(self.provider.inventory_file)
+        return [dict(vmid=int(key),name=row.get('name', 'Fusion VM '+key),node='fusion',status='unknown') for key,row in rows.items()]
+
+    def require_vms(self, vmids, *, required_group=None):
+        self.current()
+        allowed = {row['vmid'] for row in self._inventory(self.record)}
+        if any(type(vmid) is not int or vmid not in allowed for vmid in vmids):
+            raise AccessDenied('VM is not in the configured Fusion inventory')
+        if required_group:
+            raise AccessDenied('Application maintenance groups are only configured for Proxmox')
+        self.current()

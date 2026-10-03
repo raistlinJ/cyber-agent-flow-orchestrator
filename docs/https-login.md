@@ -96,7 +96,7 @@ Every server launch creates a self-signed certificate/key when both configured
 files are absent, valid for 365 days and including the public URL hostname,
 localhost, loopback addresses and the machine hostname/FQDN. An existing pair is
 preserved; an incomplete pair stops startup. With no web config override, the
-paths are `/certs/cert.pem` and `/certs/key.pem`. The local example uses `.local/tls/`.
+paths are `./certs/cert.pem` and `./certs/key.pem`. The local example uses `.local/tls/`.
 `create-cert` remains available for explicit SAN/lifetime choices.
 
 `uv sync` installs dependencies only. Certificate creation occurs on first launch,
@@ -105,9 +105,9 @@ starts with PVE defaults; see [PVE setup](pve-login.md).
 
 ## Direct LAN access
 
-The Proxmox provisioner creates a self-signed pair in `/certs` on first install
+The Proxmox provisioner creates a self-signed pair in `./certs` on first install
 and preserves it on later installs. The PVE and LAN examples read
-`/certs/cert.pem` and `/certs/key.pem`. Replace those files with a CA-issued PEM
+`./certs/cert.pem` and `./certs/key.pem`. Replace those files with a CA-issued PEM
 chain and matching private key, keep the key mode `0600`, and restart `serve` to
 switch certificates. See [PVE setup](pve-login.md) for manual installation.
 The local development example continues to use `.local/tls/`.
@@ -120,8 +120,8 @@ version: 1
 listen: 0.0.0.0
 port: 8443
 public_url: https://orchestrator.lab:8443
-certificate: /certs/cert.pem
-private_key: /certs/key.pem
+certificate: ./certs/cert.pem
+private_key: ./certs/key.pem
 users_file: /etc/caf-orchestrator/users.json
 session_idle_seconds: 1800
 session_max_seconds: 28800

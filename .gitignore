@@ -13,3 +13,7 @@ runs/
 /workflow.yaml
 /runtime.yaml
 /catalogs/
+
+/fusion-local/
+
+/certs/

@@ -88,7 +88,7 @@ def main():
                     pending.pop().fulfill(json=dashboard.value)
                     expect(page.locator('#loading-label')).to_have_text('Dashboard loaded')
 
-                # A background VM probe displays the modal while progress is read.
+                # A background VM probe updates inline status while progress is read.
                 choose_period('1')
                 page.clock.fast_forward(60000)
                 expect(page.locator('#loading-label')).to_contain_text('Background refresh')
@@ -111,8 +111,8 @@ def main():
                 inspect = page.locator('[data-update-role="participant"][data-update-action="inspect"]')
                 expect(inspect).to_be_enabled()
                 page.screenshot(path=str(destination / 'background-refresh.png'), full_page=True)
-                # Exercise queued action serialization; normal clicks are blocked by the modal.
-                expect(page.locator('#loading-modal')).to_be_visible()
+                # Exercise action serialization while an unobtrusive read is in flight.
+                expect(page.locator('#loading-modal')).not_to_be_visible()
                 inspect.dispatch_event('click')
                 expect(inspect).to_be_disabled()
                 inspect.dispatch_event('click')
@@ -140,7 +140,7 @@ def main():
                 choose_period('1')
                 page.clock.fast_forward(60000)
                 expect(page.locator('#loading-label')).to_contain_text('Background refresh')
-                expect(page.locator('#loading-modal')).to_be_visible()
+                expect(page.locator('#loading-modal')).not_to_be_visible()
                 inspect.dispatch_event('click')
                 assert not applications
                 pending.pop().fulfill(status=503, json={'error': 'Temporary outage'})

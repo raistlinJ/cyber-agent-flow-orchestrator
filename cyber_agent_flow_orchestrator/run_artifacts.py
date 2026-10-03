@@ -178,7 +178,13 @@ def configuration(root):
             continue
     inventory = files(root)
     downloads = [{'id': 'run-bundle', 'name': 'Run inputs and evidence ZIP',
-                  'description': 'All saved inputs, configuration, results and collected evidence; excludes lock/control files.'}]
+                  'description': 'All saved inputs, configuration, results, formatted reports and collected evidence; excludes lock/control files.'},
+                 {'id': 'report-markdown', 'name': 'Experiment summary · Markdown',
+                  'description': 'Formatted prompts, tool usage, trial outcomes, timings and metrics. The chart SVG is included in the run ZIP.'},
+                 {'id': 'report-html', 'name': 'Experiment summary · HTML with charts',
+                  'description': 'Standalone report with embedded charts; opens offline and supports browser Print / Save as PDF.'},
+                 {'id': 'report-charts', 'name': 'Experiment charts · SVG',
+                  'description': 'Companion image for the Markdown report; outcomes, worker runtime and observed tool result events.'}]
     scenario = scenario_info(root, journal, spec)
     if scenario.get('xml_available'):
         downloads.extend([
@@ -223,6 +229,18 @@ def make_reproduction(root, destination):
 def download(root, artifact_id):
     root = Path(root)
     saved_json(root, 'workflow.json')
+    reports = {'report-markdown': ('experiment-summary.md', 'text/markdown; charset=utf-8'),
+               'report-html': ('experiment-summary.html', 'text/html; charset=utf-8'),
+               'report-charts': ('experiment-charts.svg', 'image/svg+xml; charset=utf-8')}
+    if artifact_id in reports:
+        from .service import summary_documents
+        name, mime = reports[artifact_id]
+        content = summary_documents(root)[name]
+        with tempfile.TemporaryFile() as stream:
+            stream.write(content.encode('utf-8'))
+            stream.seek(0)
+            yield stream, mime, name
+        return
     inventory = files(root)
     if artifact_id == 'scenario-xml':
         path, mime, name = 'suite/evaluator/scenario.xml', 'application/xml', 'scenario.xml'
@@ -262,7 +280,10 @@ def download(root, artifact_id):
                         else:
                             write_file(archive, root, item['path'])
                     if artifact_id == 'run-bundle':
-                        archive.writestr('README.txt', 'Captured orchestration run inputs and evidence.\nStudy paths refer to the original host/guest; rebase them before replay.\nScenarioForge re-import: use scenarioforge-reproduction.zip.\nExternal tools, images and credentials must be supplied in the destination environment.\n')
+                        from .service import summary_documents
+                        for filename, content in summary_documents(root).items():
+                            archive.writestr(filename, content)
+                        archive.writestr('README.txt', 'Captured orchestration run inputs and evidence.\nStart with experiment-summary.html for the offline report and charts, or experiment-summary.md with experiment-charts.svg.\nStudy paths refer to the original host/guest; rebase them before replay.\nScenarioForge re-import: use scenarioforge-reproduction.zip.\nExternal tools, images and credentials must be supplied in the destination environment.\n')
                         if any(item['path'] == 'suite/evaluator/scenario.xml' for item in inventory):
                             with tempfile.TemporaryFile() as reproduction:
                                 make_reproduction(root, reproduction)

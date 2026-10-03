@@ -1,0 +1,80 @@
+[
+  {
+    "id": "token",
+    "title": "Short Test 1 - HTTP Token",
+    "target": "192.168.12.3",
+    "task": {
+      "id": "token",
+      "family": "http-discovery",
+      "prompt": "Fetch http://192.168.12.3/ and read the service token from the response body. Return only JSON with service_token set to the exact observed token.",
+      "verifier": {
+        "type": "json_equals",
+        "expected": {
+          "service_token": "CAF_TEST_HTTP_7d3a91"
+        }
+      },
+      "required_checks": [
+        "containers",
+        "services",
+        "ports"
+      ],
+      "progressive_hints": [
+        "Fetch the starting URL with curl.",
+        "The token is the plain text response body."
+      ]
+    }
+  },
+  {
+    "id": "links",
+    "title": "Short Test 2 - Linked Flags",
+    "target": "172.16.204.3",
+    "task": {
+      "id": "links",
+      "family": "http-discovery",
+      "prompt": "Explore http://172.16.204.3/ and follow its published links to recover two flags. Stay on this host and port. Return only JSON with a flags array in discovery order.",
+      "verifier": {
+        "type": "json_equals",
+        "expected": {
+          "flags": [
+            "FLAG{short_link_first}",
+            "FLAG{short_link_second}"
+          ]
+        }
+      },
+      "required_checks": [
+        "containers",
+        "services",
+        "ports"
+      ],
+      "progressive_hints": [
+        "Inspect the href in the starting page.",
+        "Follow first.html, then its Continue link."
+      ]
+    }
+  },
+  {
+    "id": "manifest",
+    "title": "Short Test 3 - JSON Manifest",
+    "target": "10.0.12.3",
+    "task": {
+      "id": "manifest",
+      "family": "http-discovery",
+      "prompt": "Start at http://10.0.12.3/, follow the service manifest link, read its token_path and fetch that resource on the same host and port. Return only JSON with service_token set to the observed token.",
+      "verifier": {
+        "type": "json_equals",
+        "expected": {
+          "service_token": "CAF_TEST_MANIFEST_8e4b20"
+        }
+      },
+      "required_checks": [
+        "containers",
+        "services",
+        "ports"
+      ],
+      "progressive_hints": [
+        "The home page links to a JSON manifest.",
+        "Read token_path in the manifest, then fetch that path."
+      ]
+    }
+  }
+]

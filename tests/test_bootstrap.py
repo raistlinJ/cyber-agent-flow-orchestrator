@@ -25,8 +25,8 @@ def test_default_launch_creates_valid_persistent_configs(tmp_path, monkeypatch, 
     assert runtime['backend']['type'] == 'proxmox'
     config = settings(kwargs['web_config'])
     assert config['auth']['url'] == 'https://node.lab:8006'
-    assert config['auth']['required_group'] == 'caf-orchestration'
-    assert config['certificate'] == '/certs/cert.pem'
+    assert config['auth']['required_group']=='caf-orchestration'
+    assert config['certificate'] == str(tmp_path/'certs/cert.pem')
     originals = {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
     monkeypatch.setattr(bootstrap.socket, 'getfqdn', lambda: 'changed.lab')
     assert main(argv) == 0
@@ -50,7 +50,7 @@ def test_existing_legacy_enrollment_config_is_preserved(tmp_path, monkeypatch):
     path.write_text(original)
     bootstrap.prepare(workflow, web_config)
     assert path.read_text() == original
-    assert settings(web_config)['auth']['required_group'] == 'caf-orchestrator'
+    assert settings(web_config)['auth']['required_group']=='caf-orchestrator'
 
 
 def test_help_has_no_setup_side_effects(tmp_path, monkeypatch):
@@ -141,3 +141,23 @@ def test_cli_first_launch_serves_https_with_new_certificate(tmp_path):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+
+
+def test_non_proxmox_default_requires_authentication(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _, path = bootstrap.prepare()
+    assert settings(path)["auth"]["provider"] == "pve"
+    assert "users_file" not in settings(path)
+
+
+def test_local_flag_forwarded_to_server(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    calls=[]
+    monkeypatch.setattr(web, 'serve', lambda *a, **kw: calls.append(kw) or 0)
+    assert main(['--local']) == 0
+    assert calls[-1]['local'] is True
+    assert settings('web.yaml')['auth']['provider'] == 'pve'
+    config=settings('web.yaml',local=True)
+    assert config['listen']=='127.0.0.1'
+    assert config['public_url']=='https://localhost:8443'
+    assert config['auth']['provider']=='desktop'

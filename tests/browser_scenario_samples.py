@@ -47,7 +47,7 @@ def main():
                         page.get_by_role('tab',name='Evaluation',exact=True).click()
                         expect(page.locator('#eval-repetitions')).to_be_disabled()
                         page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
-                        expect(page.locator('#caf-settings-summary')).to_contain_text('fixture')
+                        expect(page.locator('#caf-settings-summary')).to_have_count(0)
                         page.get_by_role('tab',name='ScenarioForge',exact=True).click()
                         page.locator('#sample-scenario-info').scroll_into_view_if_needed()
                         page.screenshot(path='/tmp/caf-fixed-'+sample+'.png')
@@ -55,7 +55,16 @@ def main():
                         expect(page.locator('#experiment-dialog')).to_be_hidden(timeout=30000)
                         row=page.locator('#runs tr').filter(has_text='ready').first
                         row.get_by_role('button',name='Deploy and run',exact=True).click()
-                        expect(page.locator('#runs tr').filter(has_text='completed')).to_have_count(1 if sample=='smoke' else 2,timeout=30000)
+                        try:
+                            expect(page.locator('#runs tr').filter(has_text='completed')).to_have_count(1 if sample=='smoke' else 2,timeout=30000)
+                        except AssertionError:
+                            print('Browser errors:',errors)
+                            print('Rows:',page.locator('#runs').inner_text())
+                            print('Console:',page.locator('#console-output').inner_text()[-2000:])
+                            for record in (root/'runs').rglob('workflow.json'):
+                                value=json.loads(record.read_text())
+                                print('Recorded status:',value.get('status'),value.get('error'))
+                            raise
                         records=[(path,json.loads(path.read_text())) for path in (root/'runs').rglob('workflow.json')]
                         path,record=next((p,r) for p,r in records if r.get('sample_id')==sample)
                         assert record['status']=='completed'
@@ -67,8 +76,8 @@ def main():
                     progress_page.on('pageerror',lambda e:errors.append(str(e)))
                     progress_page.goto(server['origin']+'/run?view=progress&run='+path.parent.name)
                     expect(progress_page.get_by_text('Workflow across VMs',exact=True)).to_be_visible()
-                    expect(progress_page.locator('.workflow-step')).to_have_count(9)
-                    expect(progress_page.locator('.workflow-step.completed')).to_have_count(9)
+                    expect(progress_page.locator('.workflow-step')).to_have_count(10)
+                    expect(progress_page.locator('.workflow-step.completed')).to_have_count(10)
                     expect(progress_page.locator('.workflow-vms')).to_contain_text('VM 9404')
                     expect(progress_page.locator('.workflow-readiness')).to_contain_text('containers: pass')
                     progress_page.screenshot(path='/tmp/caf-detailed-progress.png',full_page=True)

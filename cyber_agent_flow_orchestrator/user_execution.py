@@ -15,6 +15,14 @@ from . import service
 
 def login(web_config, username):
     config = settings(web_config)
+    if config['auth']['provider'] == 'fusion':
+        from .auth import FusionProvider
+        from .access import FusionAccess
+        provider = FusionProvider(config['users_file'], config['auth']['inventory_file'])
+        record = provider.authenticate(username, getpass.getpass('Local operator password: '))
+        if not record:
+            raise AccessDenied('Login failed')
+        return FusionAccess(provider, record)
     if config['auth']['provider'] != 'pve':
         raise ValueError('User workflows require PVE authentication')
     provider = PVEProvider(config['auth'])

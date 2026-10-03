@@ -182,7 +182,7 @@ class Auth:
 
     def pve_record(self, token, *, revalidate=True):
         """Server-only ticket access; never include this record in an HTTP response."""
-        if self.provider.name != 'pve' or not self.session(token, revalidate=revalidate):
+        if self.provider.name not in ('pve', 'fusion', 'desktop') or not self.session(token, revalidate=revalidate):
             return None
         with self.lock:
             self._prune(self.clock())
@@ -197,7 +197,25 @@ class Auth:
         record = self.pve_record(token, revalidate=revalidate)
         if not record:
             raise AccessDenied('Login required')
+        if self.provider.name in ('fusion', 'desktop'):
+            from .access import FusionAccess
+            return FusionAccess(self.provider, record, session_check=lambda: self.pve_record(token))
         return PVEAccess(self.provider, record, session_check=lambda: self.pve_record(token))
+
+    def desktop_session(self):
+        if self.provider.name != 'desktop':
+            raise ValueError('Desktop session is not enabled')
+        with self.lock:
+            now = self.clock()
+            self._prune(now)
+            token = getattr(self, '_desktop_token', None)
+            if token and self._key(token) in self.sessions:
+                return token
+            token = secrets.token_urlsafe(32)
+            self.sessions[self._key(token)] = dict(username=self.provider.username,
+                credential=self.provider.identity, created=now, seen=now, csrf=secrets.token_urlsafe(32))
+            self._desktop_token = token
+            return token
 
     def info(self):
         return {'provider': self.provider.name, 'totp': self.provider.name == 'pve'}
@@ -228,3 +246,35 @@ def session_cookie(token, max_age):
     jar[COOKIE]['samesite'] = 'Strict'
     jar[COOKIE]['max-age'] = str(max_age)
     return jar.output(header='').strip()
+
+
+class FusionProvider(LocalProvider):
+    name = 'fusion'
+
+    def __init__(self, path, inventory_file):
+        if not Path(path).is_file():
+            raise ValueError(f'Create a local operator account first: cyber-agent-flow-orchestrator create-user --file {path} --username operator')
+        super().__init__(path)
+        self.inventory_file = inventory_file
+        from cyber_agent_flow_eval.fusion import inventory
+        inventory(inventory_file)
+
+
+class DesktopProvider:
+    """One OS user; browser session credentials never prompt for a password."""
+    name = 'desktop'
+
+    def __init__(self, inventory_file=None):
+        import getpass
+        self.username = getpass.getuser()
+        self.identity = secrets.token_urlsafe(32)
+        self.inventory_file = inventory_file
+        if inventory_file:
+            from cyber_agent_flow_eval.fusion import inventory
+            inventory(inventory_file)
+
+    def authenticate(self, *args, **kwargs):
+        return None
+
+    def validate(self, record):
+        return record.get('username') == self.username and record.get('credential') == self.identity

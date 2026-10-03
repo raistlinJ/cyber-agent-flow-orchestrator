@@ -14,6 +14,11 @@ def _missing(path):
 
 
 def prepare(workflow=None, web_config=None):
+    # An imported local Fusion profile takes precedence over generated host
+    # defaults only when the operator has not supplied explicit config paths.
+    local = Path('fusion-local')
+    if workflow is None and web_config is None and (local/'workflow.yaml').is_file() and (local/'web.yaml').is_file():
+        return str((local/'workflow.yaml').absolute()), str((local/'web.yaml').absolute())
     workflow_path = Path(workflow or 'workflow.yaml').absolute()
     web_path = Path(web_config or 'web.yaml').absolute()
     # A typo in an explicitly supplied filename must not create a new config.
@@ -30,7 +35,7 @@ def prepare(workflow=None, web_config=None):
         hostname = socket.getfqdn()
         data = dict(version=1, listen='127.0.0.1', port=8443,
                     public_url='https://localhost:8443',
-                    certificate='/certs/cert.pem', private_key='/certs/key.pem',
+                    certificate='certs/cert.pem', private_key='certs/key.pem',
                     session_idle_seconds=1800, session_max_seconds=7200,
                     samples=['smoke', 'tools-vs-helper'],
                     auth=dict(provider='pve', url=f'https://{hostname}:8006',

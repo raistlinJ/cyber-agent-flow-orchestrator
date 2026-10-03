@@ -64,6 +64,9 @@ def test_download_bundle_includes_exact_inputs_evidence_and_reimport(lab):
                 assert archive.read('study.yaml') == (output / 'study.yaml').read_bytes()
                 assert 'evaluation/manifest.json' in archive.namelist()
                 assert 'scenarioforge-reproduction.zip' in archive.namelist()
+                assert 'experiment-summary.md' in archive.namelist()
+                assert '<svg' in archive.read('experiment-summary.html').decode()
+                assert 'experiment-charts.svg' in archive.namelist()
                 assert not any(name.endswith('.lock') for name in archive.namelist())
 
 
@@ -164,6 +167,13 @@ def test_https_downloads_are_owner_scoped_and_streamed(pve, lab, tmp_path):
             code, headers, body = request(server, endpoint, cookie=alice)
             assert code == 200 and headers['Content-Type'] == 'application/zip'
             assert zipfile.is_zipfile(io.BytesIO(body))
+            for report_id in ('report-markdown','report-html','report-charts'):
+                url='/api/runs/private-run/artifact?id='+report_id
+                code, headers, body=request(server,url,cookie=alice)
+                assert code==200 and headers['Content-Disposition'].startswith('attachment;')
+                assert 'Experiment' in body.decode() or 'experiment' in body.decode()
+                assert request(server,url,cookie=bob)[0]==404
+                assert request(server,url)[0]==401
             assert request(server, endpoint, cookie=bob)[0] == 404
             assert request(server, endpoint)[0] == 401
             assert request(server, '/api/runs/private-run/artifact?id=../../etc/passwd', cookie=alice)[0] == 404

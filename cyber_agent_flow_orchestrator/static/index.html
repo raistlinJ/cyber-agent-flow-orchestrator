@@ -19,7 +19,7 @@
 <div id="notice" class="notice" role="status" hidden></div>
 <div data-page="overview">
 <div class="page-links"><a href="#setup">Configure lab VMs →</a><a href="#experiments">Run an experiment →</a><a href="#applications">Manage applications →</a></div>
-<section aria-labelledby="machines-title"><div class="section-title"><h2 id="machines-title">Lab machines</h2><span>Proxmox host · QEMU guest agent</span></div><div id="machines" class="machines"><div class="empty">Checking configured machines…</div></div></section>
+<section aria-labelledby="machines-title"><div class="section-title"><h2 id="machines-title">Lab machines</h2><span>Host · guest agent</span></div><div id="machines" class="machines"><div class="empty">Checking configured machines…</div></div></section>
 <section aria-labelledby="commands-title"><div class="section-title"><h2 id="commands-title">Workflow commands</h2><span id="command-count">0 recorded jobs</span></div><div class="panel"><div id="commands" class="command-list"><p class="empty">Waiting for the first observation.</p></div></div></section>
 </div>
 <div data-page="experiments" hidden>
@@ -37,7 +37,7 @@
 </section>
 </div>
 <div data-page="setup" hidden><p id="roles-unavailable" class="empty" hidden>VM roles are managed by this server’s workflow configuration.</p><section id="role-panel" aria-labelledby="roles-title" hidden>
-<div class="section-title"><h2 id="roles-title">Choose your lab VMs</h2><span>Your available VMs on this Proxmox node</span></div>
+<div class="section-title"><h2 id="roles-title">Choose your lab VMs</h2><span>Your available lab VMs</span></div>
 <form id="role-form" class="panel role-form">
 <label>ScenarioForge<select id="role-scenarioforge" name="scenarioforge"></select></label>
 <label>Cyber-agent-flow<select id="role-participant" name="participant"></select></label>
@@ -76,22 +76,25 @@
 <p class="small">The sample imports this fixed XML/bundle, prepares the topology and task, deploys on CORE, then runs CAF evaluation. Select all three VM roles in Lab setup.</p>
 </section>
 <section id="scenario-options" hidden>
-<p class="small">Load saved XML from your ScenarioForge VM. Run deploys the selected scenario using the CORE connection saved in its XML, then evaluates it with nmap, curl and python3. Resolve and save the Flow chain in ScenarioForge first.</p>
-<label for="scenario-file">Upload scenario XML or reproduction ZIP</label><input form="experiment-form" id="scenario-file" type="file" accept=".xml,.zip,application/xml,text/xml,application/zip"><button id="upload-scenario" type="button">Send to ScenarioForge</button><p id="scenario-upload-info" class="small" role="status">Import saves the scenario on the selected VM; it does not deploy it. Maximum 32 MiB (128 MiB expanded).</p>
-<div class="scenario-search"><label for="scenario-query">Find scenario or XML file</label><input form="experiment-form" id="scenario-query" type="search" maxlength="160" placeholder="Scenario name or filename"><button id="load-scenarios" type="button">Load from ScenarioForge VM</button></div>
+<p class="small">Choose an XML/bundle to upload, or find saved XML on your ScenarioForge VM. Run deploys the selected scenario using the CORE connection saved in its XML, then evaluates it with nmap, curl and python3. Resolve and save the Flow chain in ScenarioForge first.</p>
+<fieldset class="scenario-source-choice"><legend>Choose a scenario source</legend>
+<label><input form="experiment-form" type="radio" name="scenario-source" value="find" checked> Find on ScenarioForge VM</label>
+<label><input form="experiment-form" type="radio" name="scenario-source" value="upload"> Upload XML or bundle</label>
+</fieldset>
+<div id="scenario-upload-options" hidden><label for="scenario-file">Upload scenario XML or reproduction ZIP</label><input form="experiment-form" id="scenario-file" type="file" accept=".xml,.zip,application/xml,text/xml,application/zip"><button id="upload-scenario" type="button" disabled>Send to ScenarioForge</button><p id="scenario-upload-info" class="small" role="status">Import saves the scenario on the selected VM; it does not deploy it. Maximum 32 MiB (128 MiB expanded).</p></div>
+<div id="scenario-find-options"><button id="load-scenarios" type="button">Load from ScenarioForge VM</button></div>
 <label for="scenario-selection">Saved scenario</label><select form="experiment-form" id="scenario-selection"><option value="">Load scenarios to choose an XML</option></select>
 <p id="scenario-selection-info" class="small" role="status"></p>
+<p class="small">The Evaluation tab controls repetitions and trial budgets. Baseline tools are fixed. Scenario reset hooks are not applied.</p>
+</section>
+</section><section role="tabpanel" tabindex="0" id="experiment-panel-caf" aria-labelledby="experiment-tab-caf" hidden>
+<section id="scenario-caf-scope" class="experiment-settings" aria-labelledby="scenario-scope-title" hidden>
+<h3 id="scenario-scope-title">Agent network scope</h3>
 <label for="scenario-allowed">Allowed target IPs or CIDRs</label><input form="experiment-form" id="scenario-allowed" type="text" maxlength="4096" placeholder="10.77.0.0/24">
 <label for="scenario-disallowed">Excluded target IPs or CIDRs</label><input form="experiment-form" id="scenario-disallowed" type="text" maxlength="4096" placeholder="Optional; separate entries with commas">
-<p class="small">Review the target scope for this scenario. The Evaluation tab controls repetitions and trial budgets. Baseline tools are fixed. Scenario reset hooks are not applied.</p>
+<p class="small">Allowed targets start with the selected scenario’s saved topology subnets. Exclusions include the applied LLM provider and its route gateway. Review or edit these comma-separated limits before creating the experiment.</p><p id="scenario-scope-info" class="small" role="status"></p>
 </section>
-</section><section role="tabpanel" tabindex="0" id="experiment-panel-caf" aria-labelledby="experiment-tab-caf" hidden><section class="experiment-settings" aria-labelledby="caf-settings-title">
-<h3 id="caf-settings-title">Cyber-agent-flow configuration</h3>
-<p id="caf-settings-source" class="small"></p><dl id="caf-settings-summary"></dl>
-<p class="small">Model settings apply to the agent on the participant VM. The scenario XML supplies the lab definition, not the agent configuration.</p>
-</section>
-<p id="experiment-model-context" class="small"></p>
-<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">CAF model settings on participant VM</h2><span>Read and save through the guest agent</span></div><p class="small">Pull the current Cyber-agent-flow configuration and edit the model settings. Create experiment saves them to the VM and the experiment for future reruns. Without pulling, the current experiment defaults are used.</p><div id="model-config-cards" class="sample-cards"></div></section>
+<section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">CAF model settings on participant VM</h2><span>Read and save through the guest agent</span></div><p class="small">Pull replaces the values shown below with the current VM configuration. Edit those values, then Apply settings to update the VM, its model route, and the defaults used by new experiments.</p><div id="model-config-cards" class="sample-cards"></div></section>
 </section><section role="tabpanel" tabindex="0" id="experiment-panel-evaluation" aria-labelledby="experiment-tab-evaluation" hidden><section class="experiment-settings" aria-labelledby="eval-settings-title">
 <section class="experiment-settings" aria-labelledby="evaluation-tasks-title">
 <h3 id="evaluation-tasks-title">Tasks and prompts</h3>
@@ -103,9 +106,10 @@
 <p class="small">Fixed by this sample. The deployed address and fresh expected token or flags are resolved at run time; exact values are captured in Results.</p>
 </fieldset>
 <div id="custom-task-info" hidden>
-<label for="task-source">Task source</label><select id="task-source"><option value="scenario">Use tasks from the selected scenario</option><option value="custom">Define tasks for this experiment</option></select>
-<div class="result-actions"><button id="load-scenario-tasks" type="button">Load scenario tasks</button><button id="edit-scenario-tasks" type="button" hidden>Edit loaded tasks</button></div>
-<p id="task-source-note" class="small" role="status">Select a scenario, then load its tasks to review them. Without overrides, ScenarioForge uses its saved task definitions or its default flag-collection task.</p>
+<label for="task-source">Task source</label><select id="task-source"><option value="scenario">Use ScenarioForge’s saved or default task</option><option value="custom">Use editable tasks for this experiment</option></select>
+<div class="result-actions"><button id="load-scenario-tasks" type="button">Load task draft from scenario</button><button id="edit-scenario-tasks" type="button" hidden>Edit loaded tasks</button></div>
+<p id="task-source-note" class="small" role="status">Select a scenario, then load its task draft. Saved evaluation tasks are used first; otherwise the Flow chain, generated flags, public hints and topology seed an editable draft.</p>
+<section id="task-scenario-context" class="task-scenario-context" hidden aria-live="polite"></section>
 <div id="task-edit-actions" hidden><label for="task-import">Import task definitions (JSON array, up to 64 KiB)</label><input id="task-import" type="file" accept=".json,application/json"><button id="add-task" type="button">Add task</button><p class="small">These tasks replace the selected scenario’s tasks in this experiment’s saved XML. Prompts must use actual scenario targets. ScenarioForge validates node references and discovery facts when it exports the deployed scenario.</p></div>
 <div id="task-editor"></div>
 <p id="task-editor-error" class="error" role="status"></p>

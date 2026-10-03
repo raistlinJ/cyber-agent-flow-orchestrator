@@ -1,4 +1,6 @@
 """Durable host workflow; private suite data never goes to guest workers."""
+from cyber_agent_flow_eval.fusion import vm_lock_path
+
 from copy import deepcopy
 from pathlib import Path
 from datetime import datetime, timezone
@@ -76,7 +78,7 @@ class Workflow:
         for stage in self.journal['stages'].values():
             for attempt in stage.get('attempts', []):
                 if not attempt.get('stopped'):
-                    with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{attempt['vmid']}.lock"):
+                    with ev.lease(vm_lock_path(self.journal['runtime']['backend'], attempt['vmid'])):
                         self.agent.call(attempt['vmid'], 'stop', unit=attempt['unit'])
                     attempt['stopped'] = True
                     self.save()
@@ -106,7 +108,7 @@ class Workflow:
         self.save()
         self.notify(f'Running {key} on VM {command["vmid"]}')
         try:
-            with step(self, key), observe_command(self, command['vmid'], attempt), ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{command['vmid']}.lock"):
+            with step(self, key), observe_command(self, command['vmid'], attempt), ev.lease(vm_lock_path(self.journal['runtime']['backend'], command['vmid'])):
                 try:
                     result = self.agent.call(command['vmid'], 'hook', unit=attempt['unit'], log_path=attempt['log_path'],
                                              seconds=command['timeout_seconds'], timeout=command['timeout_seconds'] + 30,
@@ -253,7 +255,7 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
             with step(wf, "freeze"), observe_transfers(wf):
                 checkpoint(wf, 'Capturing catalogs, guidance and exact runtime settings')
                 if 'freeze' not in journal['stages']:
-                    with ev.lease(f"/var/lock/cyber-agent-flow-eval-vm-{runtime['backend']['participant_vmid']}.lock"):
+                    with ev.lease(vm_lock_path(runtime['backend'], runtime['backend']['participant_vmid'])):
                         wf.freeze_runtime(runtime, files, cfg, identity)
             wf.notify('Preparing the agent evaluation settings')
             study = output / 'study.yaml'

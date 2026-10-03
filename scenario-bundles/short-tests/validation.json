@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "orchestrator upload validation",
+    "ScenarioForge round-trip import",
+    "evaluation task schema",
+    "served HTTP solution matches verifier"
+  ],
+  "passed": [
+    "token",
+    "links",
+    "manifest"
+  ],
+  "full_vm_trials_run": false
+}

@@ -11,7 +11,7 @@ function scheduleRunRefresh(){clearTimeout(poll);const delay=refreshDelay();if(!
 window.addEventListener('storage',event=>{if(event.key==='caf-refresh-minutes'){scheduleRunRefresh();showRefreshStatus();}});
 function log(kind,message){logs.push({at:new Date().toISOString(),kind,message});logs=logs.slice(-100);renderConsole();}
 function renderConsole(){const entries=[...logs,...(workflow?.sample_progress?.events||[])].sort((a,b)=>a.at.localeCompare(b.at));$('console-output').textContent=entries.slice(-300).map(e=>`${e.at} [${e.kind||'sample'}] ${e.message}`).join('\n')||'Waiting for activity…';}
-function clearRun(){$('window-notice').hidden=true;$('window-notice').replaceChildren();workflow=null;renderedConfiguration=null;scenarioPreviews.clear();$('run-configuration').replaceChildren();$('sample-activity').replaceChildren();$('result-summary').replaceChildren();$('result-content').textContent='';$('download-dataset').hidden=true;logs=[];renderConsole();}
+function clearRun(){$('window-notice').hidden=true;$('window-notice').replaceChildren();workflow=null;renderedConfiguration=null;scenarioPreviews.clear();$('run-configuration').replaceChildren();$('sample-activity').replaceChildren();$('result-summary').replaceChildren();$('result-content').textContent='';$('download-dataset').hidden=true;$('download-report-md').hidden=true;$('download-report-html').hidden=true;logs=[];renderConsole();}
 async function refreshRun({silent=false}={}){
  if(loading)return;if(!silent)loadingModal.set('run',true,view==='results'?'Loading experiment results…':'Loading experiment progress…');clearTimeout(poll);loading=true;$('refresh-run').disabled=true;$('run-status').textContent='Loading saved run data…';
  const endpoint=`/api/runs/${encodeURIComponent(runId)}/${view==='results'?'results':'status'}`;
@@ -20,7 +20,7 @@ async function refreshRun({silent=false}={}){
   log('request',`GET ${endpoint}`);const response=await fetch(endpoint,{cache:'no-store'});log('response',`HTTP ${response.status}`);
   if(!response.ok){if([401,403,404].includes(response.status)){clearRun();retry=false;}throw Error(response.status===401?'Session expired. Sign in through the main dashboard, then Refresh.':response.status===403?'Access not granted.':response.status===404?'Run not found or results unavailable.':`Unable to load run: HTTP ${response.status}`);}
   const data=await dashboardJSON(response);workflow=view==='results'?data.workflow:data;
-  if(view==='results'){renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);$('download-dataset').hidden=!data.evaluation;if(data.evaluation)$('download-dataset').href=`/api/runs/${encodeURIComponent(runId)}/dataset.csv`;}
+  if(view==='results'){for(const [id,artifact] of [['download-report-md','report-markdown'],['download-report-html','report-html']]){$(id).hidden=false;$(id).href=artifactURL(artifact);}renderResultSummary(data);$('result-content').textContent=JSON.stringify(data,null,2);$('download-dataset').hidden=!data.evaluation;if(data.evaluation)$('download-dataset').href=`/api/runs/${encodeURIComponent(runId)}/dataset.csv`;}
   else renderProgress(workflow);
   $('run-error').hidden=true;updatedAt=new Date().toLocaleTimeString();renderConsole();
  }catch(error){$('run-error').hidden=false;$('run-error').textContent=error.message;$('run-status').textContent='Run view unavailable. Refresh to retry.';}

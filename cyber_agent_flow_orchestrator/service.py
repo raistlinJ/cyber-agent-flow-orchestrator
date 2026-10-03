@@ -43,8 +43,17 @@ def status(output):
     state = data['status']
     coordinator_active = reporting.active(root / '.workflow.lock')
     if browser_experiment and not coordinator_active and state in ('preparing', 'evaluating'):
-        state = 'interrupted'
-    if browser_experiment and not coordinator_active and state == 'queued':
+        # The worker may have finished since the journal read, or be handing
+        # off from snapshot verification to the workflow coordinator.
+        root, data = journal(output)
+        state = data['status']
+        coordinator_active = reporting.active(root / '.workflow.lock')
+        if not coordinator_active and state in ('preparing', 'evaluating'):
+            handoff = (state == 'preparing' and data.get('phase') == 'verifying'
+                       and (datetime.now(timezone.utc) - datetime.fromisoformat(
+                           data.get('updated_at') or data.get('created_at') or '1970-01-01T00:00:00+00:00')).total_seconds() < 15)
+            state = 'queued' if handoff else 'interrupted'
+    if browser_experiment and not coordinator_active and data['status'] == 'queued':
         if (datetime.now(timezone.utc) - datetime.fromisoformat(data.get('queued_at', data['created_at']))).total_seconds() > 15:
             state = 'interrupted'
     stopping = state in ('queued', 'preparing', 'evaluating') and (root / 'stop-request.json').is_file()
@@ -143,6 +152,19 @@ def results(output, *, all_attempts=False):
             'failure_diagnostics': collected_failures(root / 'evaluation', report['attempts'])}
 
 
+def summary_documents(output, *, report=None):
+    """Render current saved results, including failed pre-evaluation workflows."""
+    root, _ = journal(output)
+    if report is None:
+        if (root / 'evaluation/manifest.json').is_file():
+            report = results(root, all_attempts=True)
+        else:
+            from .run_artifacts import configuration
+            report = dict(workflow=status(root), evaluation=None, run_configuration=configuration(root))
+    from .run_report import render
+    return render(report, root=root)
+
+
 def logs(output, *, stage=None, trial=None, attempt=None, lines=100):
     root, data = journal(output)
     if (stage is None) == (trial is None):
@@ -178,6 +200,8 @@ def export_results(output, destination, *, all_attempts=False):
         try:
             reporting.write_export(destination, report['evaluation'])
             ev.write_json(destination / 'workflow-summary.json', report['workflow'])
+            for filename, content in summary_documents(root, report=report).items():
+                (destination / filename).write_text(content, encoding='utf-8')
         except BaseException:
             import shutil
             shutil.rmtree(destination)
