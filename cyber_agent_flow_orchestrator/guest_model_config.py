@@ -95,6 +95,23 @@ def upgrade_route_helper(source):
     return str(backup)
 
 
+def route_service_failure_details():
+    """Read bounded route-service diagnostics without retrying or changing routes."""
+    try:
+        result = subprocess.run(
+            ['journalctl', '-u', 'scenarioforge-llm-route.service', '-n', '20',
+             '--no-pager', '-o', 'cat'], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    if result.returncode or not result.stdout.strip():
+        return ''
+    # This service logs route/lease failures, never dump model configuration.
+    text = re.sub(r'(?i)((?:api[_-]?key|password|token|secret)\s*[=:]\s*)[^\s,;]+',
+                  r'\1[REDACTED]', result.stdout)
+    text = re.sub(r'(https?://)[^/\s@]+@', r'\1[REDACTED]@', text)
+    return '\nRoute service journal: ' + text.strip()[-1600:]
+
+
 def synchronize_endpoint(path, values, helper_source=None):
     """Reuse the provisioner's route/policy transaction; never pass credentials."""
     if not ROUTE_HELPER.is_file():
@@ -114,6 +131,8 @@ def synchronize_endpoint(path, values, helper_source=None):
         message = process.stderr.strip()[-1000:]
         if 'unrecognized arguments' in message:
             raise ValueError('Update the participant routing helper from the ScenarioForge provisioner before saving model settings')
+        if 'scenarioforge-llm-route.service' in message:
+            message += route_service_failure_details()
         prefix = ('Participant routing helper updated (backup: ' + backup + '); ') if backup else ''
         raise ValueError(prefix + 'Participant route update failed: ' + message)
     try:

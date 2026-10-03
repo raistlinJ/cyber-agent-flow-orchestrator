@@ -403,3 +403,34 @@ def test_scenarioforge_model_save_preserves_nonparticipant_exchange(pve, lab, tm
     result=manager.exchange(user,dict(role='scenarioforge',action='save',token=loaded['token'],settings=settings('litellm')))
     assert result['settings']==settings('litellm')
     assert guest.env_values((guest_root/'.scenarioforge.env').read_text())['CORETG_AI_MODEL']=='lab-model'
+
+
+def test_route_service_failure_exposes_cause_without_saving_model(guest_root, monkeypatch, tmp_path):
+    import subprocess
+    helper=tmp_path/'helper';helper.write_text('# installed');helper.chmod(0o755)
+    monkeypatch.setattr(guest,'ROUTE_HELPER',helper)
+    path=guest_root/'configs/cli.json';path.parent.mkdir()
+    ev.write_json(path,dict(settings(),model='old-model'))
+    original=path.read_bytes()
+    loaded=guest.dispatch(dict(role='participant',action='read',root=str(guest_root)))
+    calls=[]
+    def run(argv,**kwargs):
+        calls.append(argv)
+        if argv[0]=='journalctl':
+            return subprocess.CompletedProcess(argv,0,'FileNotFoundError: /run/systemd/netif/leases/4\napi_key=private-value','')
+        return subprocess.CompletedProcess(argv,1,'',"systemctl start scenarioforge-llm-route.service returned non-zero exit status 1")
+    monkeypatch.setattr(guest.subprocess,'run',run)
+    with pytest.raises(ValueError) as error:
+        guest.dispatch(dict(role='participant',action='save',root=str(guest_root),revision=loaded['revision'],settings=dict(settings(),model='new-model')))
+    assert 'FileNotFoundError: /run/systemd/netif/leases/4' in str(error.value)
+    assert 'private-value' not in str(error.value)
+    assert path.read_bytes()==original
+    assert len(calls)==2
+
+
+def test_route_service_diagnostics_timeout_does_not_hide_original_failure(monkeypatch):
+    import subprocess
+    def run(*args,**kwargs):
+        raise subprocess.TimeoutExpired('journalctl',5)
+    monkeypatch.setattr(guest.subprocess,'run',run)
+    assert guest.route_service_failure_details()==''
