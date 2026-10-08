@@ -1,0 +1,85 @@
+"""Reference popups through authenticated HTTPS and simulated VM exports."""
+from pathlib import Path
+import base64
+import gzip
+import hashlib
+import json
+import shutil
+import sys
+import tempfile
+import pytest
+from playwright.sync_api import sync_playwright, expect
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from cyber_agent_flow_eval import integration as ev
+from cyber_agent_flow_orchestrator.user_dashboard import UserDashboard
+from https_fixture import secure_server, PASSWORD
+from test_pve_auth import pve_server, make_auth
+from test_user_access import Probe, vm
+
+
+def main():
+    with tempfile.TemporaryDirectory() as temp, pytest.MonkeyPatch.context() as patch:
+        root=Path(temp)
+        shutil.copytree(Path(__file__).resolve().parents[1]/'examples',root/'examples')
+        item=dict(id='a'*64, scenario='Reference lab',path='/opt/scenarioforge/uploads/reference.xml',sha256='b'*64,
+                  bytes=1024,resolved_chain=True,chain_length=2,target_subnets=['10.77.0.0/24'],modified_epoch=1000,modified_at='2026-10-08T10:00:00+00:00')
+        calls=[]
+        class Guest:
+            def call(self,vmid,op,**data):
+                calls.append((vmid,op))
+                if op=='list':return dict(items=[item],truncated=False)
+                assert op=='references'
+                payload=dict(kind=data['kind'],scenario=item['scenario'],source=item['path'],xml_sha256=item['sha256'])
+                if data['kind']=='attack-graph':payload.update(graph=dict(nodes=[dict(id='1',name='Start'),dict(id='2',name='Target')],edges=[dict(source='1',target='2')]),dot='digraph {1->2}')
+                else:payload['html']='<!doctype html><html><head><style>h1{color:rgb(0, 128, 0)}</style></head><body><h1>ScenarioForge exported guide</h1><p>Inspect the target service.</p><script>window.UNSAFE_GUIDE=true</script></body></html>'
+                encoded=base64.b64encode(gzip.compress(json.dumps(payload).encode())).decode()
+                return dict(chunk=encoded[data['offset']:data['offset']+16384],total=len(encoded),sha256=hashlib.sha256(encoded.encode()).hexdigest())
+        patch.setattr(ev,'GuestAgent',lambda backend:Guest())
+        with pve_server(root) as pve:
+            pve[0]['resources']['operator@pve']=[vm(9402),vm(9403)]
+            dashboard=UserDashboard(root/'examples/01-reuse-export.yaml',root/'runs',2,lambda b,a:Probe(b,a,[]))
+            try:
+                with secure_server(dashboard,root/'web',auth=make_auth(pve)) as server,sync_playwright() as playwright:
+                    browser=playwright.chromium.launch(channel='chrome',headless=True)
+                    page=browser.new_page(ignore_https_errors=True,viewport=dict(width=1440,height=1080))
+                    errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+                    page.route('**/api/model-network-scope',lambda route:route.fulfill(json=dict(provider_host='models.example',excluded_targets=['192.0.2.8'],warnings=[])))
+                    page.goto(server['origin']);page.get_by_label('Username').fill('operator@pve');page.get_by_label('Password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Sign in',exact=True).click()
+                    page.locator('[data-route=setup]').click();page.locator('#role-scenarioforge').select_option('9402');page.locator('#role-participant').select_option('9403');page.get_by_role('button',name='Save VM roles').click()
+                    page.locator('[data-route=experiments]').click();page.locator('#new-experiment').click();page.locator('#experiment-sample').select_option('scenarioforge-xml');page.get_by_role('tab',name='ScenarioForge',exact=True).click()
+                    expect(page.locator('#scenario-options [data-scenario-reference="attack-graph"]')).to_be_disabled()
+                    page.locator('#load-scenarios').click();expect(page.locator('#scenario-selection option')).to_have_count(2,timeout=30000);page.locator('#scenario-selection').select_option(item['id'])
+                    with page.expect_popup() as popup:
+                        page.locator('#scenario-options [data-scenario-reference="attack-graph"]').click()
+                    graph=popup.value;graph.on('pageerror',lambda error:errors.append(str(error)))
+                    expect(graph.locator('#reference-title')).to_have_text('Attack graph · Reference lab',timeout=30000);expect(graph.locator('svg[role="img"]')).to_be_visible();expect(graph.locator('#reference-downloads a')).to_have_count(2);expect(graph.locator('#loading-modal')).not_to_be_visible();graph.screenshot(path='/tmp/caf-scenario-attack-graph.png');graph.close()
+                    page.get_by_role('tab',name='Evaluation',exact=True).click();page.locator('#task-source').select_option('custom');page.locator('#task-0-prompt').fill('My experiment prompt stays here.')
+                    for kind in ['participant-guide','facilitator-guide']:
+                        with page.expect_popup() as popup:page.locator('#experiment-panel-evaluation [data-scenario-reference="'+kind+'"]').click()
+                        guide=popup.value;guide.on('pageerror',lambda error:errors.append(str(error)))
+                        expect(guide.locator('iframe')).to_be_visible(timeout=30000);frame=guide.frame_locator('iframe');expect(frame.locator('h1')).to_have_text('ScenarioForge exported guide');expect(frame.locator('h1')).to_have_css('color','rgb(0, 128, 0)')
+                        assert guide.frames[1].evaluate('typeof window.UNSAFE_GUIDE')=='undefined'
+                        guide.screenshot(path='/tmp/caf-scenario-'+kind+'.png');guide.close()
+                        expect(page.locator('#task-0-prompt')).to_have_value('My experiment prompt stays here.')
+                    page.context.route('**/api/scenarios/references',lambda route:route.fulfill(status=400,json=dict(error='Scenario XML changed; reload the scenario list.')))
+                    with page.expect_popup() as popup:page.locator('#experiment-panel-evaluation [data-scenario-reference="attack-graph"]').click()
+                    failed=popup.value
+                    expect(failed.locator('#reference-error')).to_contain_text('Scenario XML changed',timeout=30000)
+                    expect(failed.locator('#loading-modal')).not_to_be_visible()
+                    expect(failed.locator('#reload-reference')).to_be_enabled()
+                    failed.close()
+                    page.context.unroute('**/api/scenarios/references')
+                    page.evaluate('window.originalOpen=window.open;window.open=()=>null;')
+                    page.locator('#experiment-panel-evaluation [data-scenario-reference="attack-graph"]').click()
+                    expect(page.locator('#scenario-reference-notice')).to_be_visible()
+                    expect(page.locator('#scenario-reference-notice a')).to_have_attribute('href','/scenario-reference?selection='+item['id']+'&kind=attack-graph')
+                    page.evaluate('window.open=window.originalOpen;')
+                    expect(page.locator('#experiment-dialog')).to_be_visible();assert not errors,errors
+                    page.set_viewport_size(dict(width=390,height=844));assert page.evaluate('document.documentElement.scrollWidth<=innerWidth');page.screenshot(path='/tmp/caf-scenario-references-mobile.png')
+                    assert all(op in ('list','references') for _,op in calls),calls
+                    browser.close()
+            finally:dashboard.close()
+    print('PASS: reference popups, graph, formatted sandboxed guides, author draft preserved, mobile layout')
+
+
+if __name__=='__main__':main()

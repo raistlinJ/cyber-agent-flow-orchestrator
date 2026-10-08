@@ -157,6 +157,57 @@ class ScenarioExperiments:
                     suggested_tasks=suggested, context=context,
                     source='scenario' if tasks is not None else ('scenario-derived' if suggested else 'scenario-default'))
 
+    def references(self, access, selection_id, kind):
+        import hashlib
+        import gzip
+        import base64
+        if not isinstance(selection_id, str) or not re.fullmatch('[0-9a-f]{64}', selection_id):
+            raise SampleRequestError('Choose a listed scenario first')
+        if kind not in ('attack-graph', 'participant-guide', 'facilitator-guide'):
+            raise SampleRequestError('Choose an attack graph or guide')
+        workspace = Workspace(self.root, access.username)
+        vmid = workspace.roles()['scenarioforge']
+        access.require_vm(vmid)
+        try:
+            catalogue = ev.read_json(workspace.path / 'scenario-catalogue.json')
+        except FileNotFoundError:
+            raise SampleRequestError('Load scenarios from the VM first') from None
+        if catalogue['vmid'] != vmid:
+            raise SampleRequestError('ScenarioForge VM changed; reload its scenarios')
+        item = next((row for row in catalogue['items'] if row['id'] == selection_id), None)
+        if not item:
+            raise SampleRequestError('Reload the scenario list')
+        content, identity = '', None
+        with authorized_operations(access.qm):
+            remote = guest(self.runtime['backend'])
+            for _ in range(24):
+                result = remote.call(vmid, 'references', roots=catalogue['roots'], path=item['path'],
+                    selection_id=selection_id, repo=catalogue['repo'],
+                    python=self.cfg['scenarioforge'].get('python', catalogue['repo']+'/.venv/bin/python'),
+                    kind=kind, offset=len(content), timeout=220)
+                if not isinstance(result.get('chunk'), str) or not 0 <= result.get('total', -1) <= 350000:
+                    raise SampleRequestError('Invalid scenario reference response')
+                if identity is not None and identity != result['sha256']:
+                    raise SampleRequestError('Scenario reference changed while loading')
+                identity = result['sha256']
+                content += result['chunk']
+                if len(content) == result['total']:
+                    break
+            else:
+                raise SampleRequestError('Scenario reference response is incomplete')
+        if hashlib.sha256(content.encode()).hexdigest() != identity:
+            raise SampleRequestError('Scenario reference checksum mismatch')
+        import io
+        with gzip.GzipFile(fileobj=io.BytesIO(base64.b64decode(content, validate=True))) as stream:
+            decoded = stream.read(2 * 1024 * 1024 + 1)
+        if len(decoded) > 2 * 1024 * 1024:
+            raise SampleRequestError('Scenario reference exceeds the viewer limit')
+        details = json.loads(decoded)
+        if details.get('kind') != kind or details.get('xml_sha256') != item['sha256']:
+            raise SampleRequestError('Scenario reference does not match the selected XML')
+        access.current()
+        return details
+
     def upload(self, access, content, progress=lambda step, message: None):
         import hashlib
         import uuid

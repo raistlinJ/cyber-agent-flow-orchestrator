@@ -348,7 +348,17 @@ function experimentMissingFields(){
  }
  return '';
 }
+function syncScenarioReferences(){
+ for(const button of document.querySelectorAll('[data-scenario-reference]'))button.disabled=!(scenarioChoiceVM===snapshot?.roles?.scenarioforge&&$('scenario-selection').value&&$('experiment-sample').value==='scenarioforge-xml');
+}
+for(const button of document.querySelectorAll('[data-scenario-reference]'))button.addEventListener('click',()=>{
+ const selection=$('scenario-selection').value,kind=button.dataset.scenarioReference;
+ const url='/scenario-reference?selection='+encodeURIComponent(selection)+'&kind='+encodeURIComponent(kind);
+ const opened=window.open(url,'caf_reference_'+kind,'popup,width=1100,height=850,resizable=yes,scrollbars=yes');
+ if(opened){opened.focus();$('scenario-reference-notice').hidden=true;}else{const notice=$('scenario-reference-notice');notice.hidden=false;notice.replaceChildren(el('span','Allow popups for this site, or '));const link=el('a','open the scenario reference');link.href=url;link.target='_blank';link.rel='noopener';notice.append(link);}
+});
 function syncCreateExperiment(){
+ syncScenarioReferences();
  const busy=isBusy()||experimentCreating;
  const reason=busy?'Wait for the current operation to finish.':experimentMissingFields();
  $('create-experiment').disabled=Boolean(reason);

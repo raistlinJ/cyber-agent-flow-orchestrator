@@ -312,7 +312,7 @@ def catalogue(data):
             for folder, dirs, files in os.walk(root, followlinks=False):
                 dirs[:] = sorted(name for name in dirs if not name.startswith('.') and name != 'caf-orchestrator'
                                   and not (Path(folder) / name).is_symlink())
-                candidates.extend(Path(folder) / name for name in sorted(files) if name.lower().endswith('.xml'))
+                candidates.extend(Path(folder) / name for name in sorted(files) if not name.startswith('.') and name.lower().endswith('.xml'))
                 if len(candidates) >= 1000 or time.monotonic() > deadline:
                     truncated = True
                     break
@@ -423,7 +423,79 @@ def task_details(data):
     return dict(chunk=encoded[offset:offset+4096], total=len(encoded),
                 sha256=hashlib.sha256(encoded.encode()).hexdigest())
 
+def reference_details(data):
+    """Export the selected XML with ScenarioForge's own read-only CLI phases."""
+    import subprocess
+    import tempfile
+    import gzip
+    import base64
+    selected, original = selected_source(data)
+    kind = data.get('kind')
+    if kind not in ('attack-graph', 'participant-guide', 'facilitator-guide'):
+        raise ValueError('Unknown scenario reference')
+    repo = Path(data['repo'])
+    parent = repo / 'outputs' / 'caf-reference-previews'
+    cache = parent / (selected['id'] + '-' + kind + '.json.gz')
+    if parent.is_symlink() or (repo / 'outputs').is_symlink() or cache.is_symlink():
+        raise ValueError('Invalid scenario reference cache path')
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not cache.exists():
+        python = data.get('python') or str(repo / '.venv/bin/python')
+        with tempfile.TemporaryDirectory(dir=parent) as folder:
+            output = Path(folder)
+            # Export a private copy beside the XML so relative artifact paths
+            # keep their base and even an exporter write cannot change the source.
+            command = [python, '-m', 'scenarioforge.cli', '--phase',
+                       'attack-graph' if kind == 'attack-graph' else 'guides',
+                       '--xml', selected['path'], '--scenario', selected['scenario'],
+                       '--output-dir', folder, '--output-prefix', 'reference']
+            if kind == 'attack-graph':
+                command += ['--format', 'json', '--format', 'dot']
+            else:
+                command += ['--guide-audience', kind.split('-')[0], '--guide-format', 'html']
+            with tempfile.NamedTemporaryFile(dir=Path(selected['path']).parent,
+                    prefix='.caf-reference-', suffix='.xml') as snapshot:
+                snapshot.write(original)
+                snapshot.flush()
+                command[command.index('--xml') + 1] = snapshot.name
+                result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=180)
+            if result.returncode:
+                if 'requires Node.js' in result.stderr:
+                    raise ValueError('ScenarioForge guide export requires Node.js on the ScenarioForge APP VM. Update its provisioning/runtime, then retry.')
+                raise ValueError('ScenarioForge could not export this reference. Check that the saved Flow is resolved and valid, and that ScenarioForge supports the guides and attack-graph CLI phases.')
+            if Path(selected['path']).read_bytes() != original:
+                raise ValueError('Scenario XML changed while exporting; reload its scenarios')
+            details = dict(kind=kind, scenario=selected['scenario'], source=selected['path'],
+                           xml_sha256=selected['sha256'])
+            if kind == 'attack-graph':
+                details['graph'] = json.loads((output / 'reference.attack-graph.json').read_text())
+                details['dot'] = (output / 'reference.attack-graph.dot').read_text()
+            else:
+                details['html'] = (output / ('reference.' + kind + '.html')).read_text()
+            encoded = json.dumps(details, ensure_ascii=False, allow_nan=False).encode()
+            if len(encoded) > 2 * 1024 * 1024:
+                raise ValueError('Scenario reference exceeds the 2 MiB viewer limit')
+            packed = gzip.compress(encoded)
+            if len(packed) > 256 * 1024:
+                raise ValueError('Compressed scenario reference exceeds the transfer limit')
+            temporary = output / 'payload'
+            temporary.write_bytes(packed)
+            temporary.chmod(0o600)
+            os.replace(temporary, cache)
+    packed = cache.read_bytes()
+    if len(packed) > 256 * 1024:
+        raise ValueError('Invalid scenario reference cache size')
+    encoded = base64.b64encode(packed).decode()
+    offset = data.get('offset', 0)
+    if type(offset) is not int or not 0 <= offset <= len(encoded):
+        raise ValueError('Invalid reference offset')
+    return dict(chunk=encoded[offset:offset+16384], total=len(encoded),
+                sha256=hashlib.sha256(encoded.encode()).hexdigest())
+
+
 def dispatch(data):
+    if data.get('op') == 'references':
+        return reference_details(data)
     if data['op'].startswith('upload-'):
         return upload(data)
     if data['op'] == 'list':

@@ -66,6 +66,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
     public_assets = {'/task_editor.js': ('task_editor.js', 'text/javascript'), '/http.js': ('http.js', 'text/javascript'), '/loading.js': ('loading.js', 'text/javascript'), '/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
                      '/style.css': ('style.css', 'text/css')}
     protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
+                        '/scenario-reference': ('scenario_reference.html', 'text/html'), '/scenario_reference.js': ('scenario_reference.js', 'text/javascript'),
                         '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),
                         '/run_config.js': ('run_config.js', 'text/javascript'), '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
     class Handler(BaseHTTPRequestHandler):
@@ -86,7 +87,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            styles = "'self' 'unsafe-inline'" if urlsplit(self.path).path == '/scenario-reference' else "'self'"
+            self.send_header('Content-Security-Policy', f"default-src 'self'; script-src 'self'; style-src {styles}; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             for key, value in headers.items():
                 self.send_header(key, value)
             self.end_headers()
@@ -303,7 +305,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 stage = {'/api/experiments/create': 'create experiment',
                          '/api/experiments/run': 'run experiment', '/api/experiments/stop': 'stop experiment',
                          '/api/model-config': 'model settings', '/api/scenarios/list': 'list scenarios',
-                         '/api/scenarios/tasks': 'load scenario tasks', '/api/samples/run': 'run sample',
+                         '/api/scenarios/references': 'load scenario reference', '/api/scenarios/tasks': 'load scenario tasks', '/api/samples/run': 'run sample',
                          '/api/roles': 'save VM roles', '/api/applications': 'application maintenance'}.get(path, 'request')
                 if path == '/api/logout':
                     auth.logout(token)
@@ -325,6 +327,10 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     if set(data) != {'query'} or not isinstance(data['query'], str):
                         raise SampleRequestError('Supply scenario search text only')
                     self.respond(200, dashboard.scenarios.catalogue(auth.access(token, revalidate=False), data['query']))
+                elif path == '/api/scenarios/references' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
+                    if set(data) != {'selection_id', 'kind'}:
+                        raise SampleRequestError('Supply a scenario selection ID and reference kind only')
+                    self.respond(200, dashboard.scenarios.references(auth.access(token, revalidate=False), data['selection_id'], data['kind']))
                 elif path == '/api/scenarios/tasks' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     if set(data) != {'selection_id'}:
                         raise SampleRequestError('Supply a scenario selection ID only')

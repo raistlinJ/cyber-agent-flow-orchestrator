@@ -108,3 +108,23 @@ Both demos prepare three ordered hints in the saved scenario XML. Custom task de
 The participant receives only released hints, never the private plan or verifier. Results show unassisted/assisted successes, hints released and facts revealed; Progress includes timestamped hint events. Each trial's `assistance.json` records policy version, text, source, trigger, turn, elapsed time, and observed/revealed fact IDs. JSON results and the full run ZIP retain this audit. “Unassisted success” means success without a released hint; it is not a counterfactual estimate of what an assisted trial would have achieved alone.
 
 Deploy the matching orchestrator, evaluator, ScenarioForge, and participant CAF changes before enabling this setting. An older CAF engine remains usable with hints off; enabled execution checks for the between-turn callback and reports an actionable update error if missing.
+
+
+### Reference documents while writing a prompt
+
+Select a saved scenario in **New → ScenarioForge**. **Open attack graph**, **Open
+participant guide** and **Open facilitator guide** open separate popup windows;
+the same buttons are available on **Evaluation** beside the task editor. Allow
+popups for the orchestrator site, or use the fallback link if a popup is blocked.
+
+References use ScenarioForge's `attack-graph` and `guides` CLI exports from the
+selected saved XML. The graph is visual and offers JSON/DOT downloads; guides
+are formatted and offer HTML downloads. Exports do not deploy the scenario or
+change your experiment draft. The participant guide helps define the task, while
+the facilitator guide includes solutions. Opening a reference does not include
+it in the agent's prompt or hints.
+
+Reference exports are cached by the selected XML's content and path. Changing the
+XML requires reloading the scenario list and selecting its new revision. Guide
+export requires Node.js in the ScenarioForge APP VM and a ScenarioForge version
+with these CLI phases. Popup loading/errors are independent of dashboard refresh.
