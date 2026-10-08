@@ -31,6 +31,24 @@ def _flow_state(scenario):
     return state
 
 
+def _flow_chain(state):
+    """Read both FlowState representations emitted by ScenarioForge Save XML."""
+    if state.get('flow_enabled') is False or state.get('topology_dirty'):
+        return []
+    entries = state.get('chain') if isinstance(state.get('chain'), list) else []
+    nodes = {}
+    for entry in entries:
+        node = dict(entry) if isinstance(entry, dict) else {'id': _text(entry)}
+        node_id = _text(node.get('id') or node.get('node_id'))
+        if node_id:
+            nodes[node_id] = dict(node, id=node_id)
+    ids = state.get('chain_ids') if isinstance(state.get('chain_ids'), list) else []
+    ids = [_text(value) for value in ids if _text(value)]
+    if not ids:
+        ids = list(nodes)
+    return [nodes.get(node_id, {'id': node_id, 'name': node_id}) for node_id in ids]
+
+
 def _flag_value(assignment):
     value = assignment.get('flag_value') if isinstance(assignment, dict) else None
     return _text(value)
@@ -121,7 +139,7 @@ def _uploaded_bundle_details(xml_path):
 
 
 def _scenario_task_details(scenario, state, bundle_tasks=None, bundle_files=None):
-    chain = [node for node in state.get('chain', []) if isinstance(node, dict)]
+    chain = _flow_chain(state)
     assignments = [item for item in state.get('flag_assignments', []) if isinstance(item, dict)]
     assignments_by_node = {_text(item.get('node_id')): item for item in assignments if _text(item.get('node_id'))}
     nodes, hints, flag_nodes = [], [], []
@@ -268,14 +286,7 @@ def inspect(path):
         name = scenario.get('name', '').strip()
         if not name or len(name) > 500 or len(str(path)) > 4096:
             continue
-        chain = []
-        for node in scenario.iter('FlowState'):
-            try:
-                flow = json.loads(node.text or '{}')
-                if isinstance(flow, dict) and isinstance(flow.get('chain'), list):
-                    chain = flow['chain']
-            except ValueError:
-                pass
+        chain = _flow_chain(_flow_state(scenario))
         identity = hashlib.sha256((str(path) + '\0' + name + '\0' + digest).encode()).hexdigest()
         rows.append(dict(id=identity, path=str(path), scenario=name, sha256=digest,
                          bytes=len(content), resolved_chain=bool(chain), chain_length=len(chain),

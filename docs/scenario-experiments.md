@@ -4,7 +4,7 @@ Both bundled sample presets deploy their fixed ScenarioForge XML and evaluate th
 
 1. In **Lab setup**, select and save the ScenarioForge and participant VM roles.
 2. Load scenarios from the ScenarioForge VM. Search by file path or scenario name.
-3. Select a named scenario with a saved, resolved Flow chain. Unresolved XML is listed but cannot be selected for evaluation.
+3. Select a named scenario with a saved, resolved Flow chain. Unresolved XML is listed but cannot be selected for evaluation. Saved sequences are recognized from either `FlowState.chain` or `FlowState.chain_ids`, including XML saved by older Preview clients.
 4. Review the allowed and excluded target IP addresses/CIDRs, model settings, and trial limits.
 5. Create the experiment. This saves a separate copy of the selected XML and freezes the run settings; it does not deploy yet.
 6. Choose **Deploy and run**. The existing ScenarioForge CLI workflow deploys the saved XML, exports tasks and verifiers, checks readiness, and runs CAF evaluation.
