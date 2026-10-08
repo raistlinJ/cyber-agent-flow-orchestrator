@@ -116,8 +116,8 @@
 </div>
 </section>
 <h3 id="eval-settings-title">Trial settings</h3>
-<label><input id="provide-progressive-hints" type="checkbox"> Provide progressive hints</label>
-<p class="small">Optional, off by default. After two turns without observed progress, or an incorrect final answer, release up to three hints within the existing trial budget. Both conditions use the same policy. Samples include hints; other scenarios need progressive_hints or discoverable_facts in their task definitions. Released hints, facts and assisted success are recorded in Results.</p>
+<label><input id="provide-progressive-hints" type="checkbox"> Provide progressive hints</label><p class="small">Uses task hints, eligible saved Flow hints, or discoverable facts. Tasks without usable guidance run unassisted and report that hints were unavailable. Edit task hints above when using custom tasks.</p>
+<p class="small">Optional, off by default. After two turns without observed progress, or an incorrect final answer, release up to three hints within the existing trial budget. Both conditions use the same policy. Samples include hints. Scenario flag tasks can inherit saved Flow hints; custom tasks can supply authored hints or discoverable facts. Released hints, facts and assisted success are recorded in Results.</p>
 <p id="eval-settings-note" class="small"></p>
 <fieldset id="evaluation-settings" class="evaluation-grid">
 <label>Repetitions per task and condition<input form="experiment-form" id="eval-repetitions" type="number" min="1" max="100" required></label>

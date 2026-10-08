@@ -7,6 +7,7 @@ const readinessChecks=[
  ['reachability','Configured traffic reaches its target'],['flow_pivot','Flow pivot path works'],
  ['pivot_access','Participant can reach pivot providers']
 ];
+function taskAnswerStrings(value){if(typeof value==='string')return [value];if(Array.isArray(value))return value.flatMap(taskAnswerStrings);if(value&&typeof value==='object')return Object.values(value).flatMap(taskAnswerStrings);return value==null?[]:[JSON.stringify(value)];}
 function validateTaskList(tasks){
  if(!Array.isArray(tasks)||!tasks.length||tasks.length>32)throw Error('Supply 1–32 tasks.');
  if(new TextEncoder().encode(JSON.stringify(tasks)).length>65536)throw Error('Task definitions exceed 64 KiB.');
@@ -29,16 +30,17 @@ function validateTaskList(tasks){
    if(v.type==='contains_all'&&(!Array.isArray(v.expected)||!v.expected.length||v.expected.some(x=>typeof x!=='string'||!x)))fail('contains_all expects a nonempty array of strings.');
   }
   if('progressive_hints' in task&&(!Array.isArray(task.progressive_hints)||task.progressive_hints.length>16||task.progressive_hints.some(h=>typeof h!=='string'||!h.trim()||h.length>1500)))fail('Progressive hints must be up to 16 nonempty strings of at most 1500 characters.');
+  if(taskAnswerStrings(task.verifier?.expected).some(answer=>answer&&(task.progressive_hints||[]).some(h=>h.includes(answer))))fail('A progressive hint contains a verifier answer; use guidance instead of the solution.');
   if('discovery' in task&&typeof task.discovery!=='boolean')fail('Discovery must be true or false.');
   if(!task.discovery&&['starting_facts','discoverable_facts','objective_requires'].some(k=>k in task))fail('Fact declarations require discovery: true.');
  });
  return tasks;
 }
 function taskRow(task){
- const {id='',family='custom',prompt='',required_checks=['containers','services','ports'],verifier,flag_nodes,...extra}=task;
- return {id,family,prompt,checks:required_checks.join(', '),criteria:JSON.stringify(flag_nodes?{flag_nodes}:verifier||{type:'json_equals',expected:{}},null,2),extra:JSON.stringify(extra,null,2)};
+ const {id='',family='custom',prompt='',required_checks=['containers','services','ports'],verifier,flag_nodes,progressive_hints,...extra}=task;
+ return {id,family,prompt,hints:(progressive_hints||[]).join('\n'),hintsDeclared:progressive_hints!==undefined,checks:required_checks.join(', '),criteria:JSON.stringify(flag_nodes?{flag_nodes}:verifier||{type:'json_equals',expected:{}},null,2),extra:JSON.stringify(extra,null,2)};
 }
-function readTaskRows(){return [...$('task-editor').querySelectorAll('[data-task-row]')].map(row=>Object.fromEntries(['id','family','prompt','checks','criteria','extra'].map(key=>[key,row.querySelector('[data-task-field="'+key+'"]').value])));}
+function readTaskRows(){return [...$('task-editor').querySelectorAll('[data-task-row]')].map(row=>({...Object.fromEntries(['id','family','prompt','hints','checks','criteria','extra'].map(key=>[key,row.querySelector('[data-task-field="'+key+'"]').value])),hintsDeclared:row.dataset.hintsDeclared==='true'}));}
 function parseTaskRows(rows){
  return validateTaskList(rows.map((row,index)=>{
   let criteria,extra;try{criteria=JSON.parse(row.criteria);extra=JSON.parse(row.extra||'{}');}catch{throw Error('Task '+(index+1)+': success criteria and advanced settings must be valid JSON.');}
@@ -46,7 +48,9 @@ function parseTaskRows(rows){
   if(Object.keys(extra).some(k=>!['split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints'].includes(k)))throw Error('Task '+(index+1)+': unsupported advanced field.');
   const scoring='flag_nodes' in criteria?criteria:{verifier:criteria};
   if('flag_nodes' in criteria&&Object.keys(criteria).length!==1)throw Error('Task '+(index+1)+': flag_nodes criteria cannot contain other fields.');
-  return {...extra,id:row.id.trim(),family:row.family.trim(),...(row.prompt.trim()?{prompt:row.prompt}:{}),required_checks:row.checks.split(',').map(s=>s.trim()).filter(Boolean),...scoring};
+  const hints=(row.hints||'').split('\n').map(h=>h.trim()).filter(Boolean);
+  const hintFields=hints.length||row.hintsDeclared?{progressive_hints:hints}:{};
+  return {...extra,...hintFields,id:row.id.trim(),family:row.family.trim(),...(row.prompt.trim()?{prompt:row.prompt}:{}),required_checks:row.checks.split(',').map(s=>s.trim()).filter(Boolean),...scoring};
  }));
 }
 function taskValidationMessage(){
@@ -88,11 +92,12 @@ function appendReadinessEditor(fieldset,row,index){
 function renderTaskRows(rows,editable){
  const target=$('task-editor');target.replaceChildren();
  rows.forEach((row,index)=>{
-  const fieldset=el('fieldset',null,'task-card');fieldset.dataset.taskRow=String(index);fieldset.disabled=!editable;
+  const fieldset=el('fieldset',null,'task-card');fieldset.dataset.taskRow=String(index);fieldset.dataset.hintsDeclared=String(Boolean(row.hintsDeclared));fieldset.disabled=!editable;
   fieldset.append(el('legend','Task '+(index+1)));
-  for(const [key,label,multiline] of [['id','Task ID',false],['family','Task family',false],['prompt','Task prompt',true],['criteria','Success verification',true],['extra','Advanced settings (JSON)',true]]){
+  for(const [key,label,multiline] of [['id','Task ID',false],['family','Task family',false],['prompt','Task prompt',true],['hints','Progressive hints (one per line)',true],['criteria','Success verification',true],['extra','Advanced settings (JSON)',true]]){
    const input=el(multiline?'textarea':'input');input.id='task-'+index+'-'+key;input.dataset.taskField=key;input.value=row[key];if(multiline)input.rows=key==='prompt'?5:3;
    const caption=el('label',label);caption.htmlFor=input.id;fieldset.append(caption,input);
+   if(key==='hints'){input.addEventListener('input',()=>{fieldset.dataset.hintsDeclared='true';});fieldset.append(el('p','Optional guidance released when the agent stalls. Use one hint per line; exclude flags, solutions and verifier answers.','small'));}
    if(key==='prompt')fieldset.append(el('p','Participant-facing instructions. A scenario draft starts with the resolved Flow targets and expected response shape; edit it to describe the intended objective.','small'));
    if(key==='criteria'){
     const help=el('p',criteriaDescription(row.criteria),'small criteria-description');

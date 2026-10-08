@@ -9,6 +9,19 @@ FIELDS = {'id', 'family', 'split', 'prompt', 'flag_nodes', 'verifier', 'required
           'discovery', 'starting_facts', 'discoverable_facts', 'objective_requires', 'progressive_hints'}
 
 
+def _answer_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _answer_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _answer_strings(item)
+    elif value is not None:
+        yield json.dumps(value)
+
+
 def validate_tasks(value):
     try:
         size = len(json.dumps(value, allow_nan=False).encode())
@@ -55,6 +68,9 @@ def validate_tasks(value):
                 expected = verifier['expected']
                 if not isinstance(expected, list) or not expected or any(not isinstance(v, str) or not v for v in expected):
                     fail('contains_all expects a nonempty JSON array of strings')
+        answers = list(_answer_strings(task.get('verifier', {}).get('expected')))
+        if any(answer and answer in hint for answer in answers for hint in hints):
+            fail('a progressive hint contains a verifier answer; provide guidance instead of the solution')
         if type(task.get('discovery', False)) is not bool:
             fail('discovery must be true or false')
         if not task.get('discovery') and set(task) & {'starting_facts','discoverable_facts','objective_requires'}:

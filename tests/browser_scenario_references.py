@@ -54,6 +54,12 @@ def main():
                     graph=popup.value;graph.on('pageerror',lambda error:errors.append(str(error)))
                     expect(graph.locator('#reference-title')).to_have_text('Attack graph · Reference lab',timeout=30000);expect(graph.locator('svg[role="img"]')).to_be_visible();expect(graph.locator('#reference-downloads a')).to_have_count(2);expect(graph.locator('#loading-modal')).not_to_be_visible();graph.screenshot(path='/tmp/caf-scenario-attack-graph.png');graph.close()
                     page.get_by_role('tab',name='Evaluation',exact=True).click();page.locator('#task-source').select_option('custom');page.locator('#task-0-prompt').fill('My experiment prompt stays here.')
+                    page.locator('#task-0-hints').fill('Inspect the target service.\nCheck the response headers.')
+                    assert page.evaluate('parseTaskRows(customTaskRows)[0].progressive_hints')==['Inspect the target service.','Check the response headers.']
+                    page.locator('#task-0-criteria').fill('{"type":"json_equals","expected":{"token":"SECRET"}}')
+                    page.locator('#task-0-hints').fill('The answer is SECRET.')
+                    expect(page.locator('#task-editor-error')).to_contain_text('contains a verifier answer')
+                    page.locator('#task-0-hints').fill('Inspect the target service.\nCheck the response headers.')
                     for kind in ['participant-guide','facilitator-guide']:
                         with page.expect_popup() as popup:page.locator('#experiment-panel-evaluation [data-scenario-reference="'+kind+'"]').click()
                         guide=popup.value;guide.on('pageerror',lambda error:errors.append(str(error)))
@@ -61,6 +67,7 @@ def main():
                         assert guide.frames[1].evaluate('typeof window.UNSAFE_GUIDE')=='undefined'
                         guide.screenshot(path='/tmp/caf-scenario-'+kind+'.png');guide.close()
                         expect(page.locator('#task-0-prompt')).to_have_value('My experiment prompt stays here.')
+                        expect(page.locator('#task-0-hints')).to_have_value('Inspect the target service.\nCheck the response headers.')
                     page.context.route('**/api/scenarios/references',lambda route:route.fulfill(status=400,json=dict(error='Scenario XML changed; reload the scenario list.')))
                     with page.expect_popup() as popup:page.locator('#experiment-panel-evaluation [data-scenario-reference="attack-graph"]').click()
                     failed=popup.value

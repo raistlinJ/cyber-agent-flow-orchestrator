@@ -6,6 +6,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 import zipfile
 import pytest
+from cyber_agent_flow_orchestrator.samples import SampleRequestError
 from cyber_agent_flow_eval import integration as ev
 from cyber_agent_flow_orchestrator import scenario_guest, scenarios, samples, service
 from cyber_agent_flow_orchestrator.evaluation_tasks import validate_tasks
@@ -204,3 +205,13 @@ def test_hints_off_compatible_with_older_evaluator(monkeypatch):
     with pytest.raises(samples.SampleRequestError, match='updated cyber-agent-flow-eval'):
         scenarios.progressive_hint_settings(execution, True)
     assert execution == {'max_turns': 6}
+
+
+def test_authored_hint_cannot_include_an_explicit_verifier_answer():
+    import copy
+    task=copy.deepcopy(TASKS[0])
+    task['progressive_hints']=['The token is test-token.']
+    with pytest.raises(SampleRequestError,match='contains a verifier answer'):
+        validate_tasks([task])
+    task['progressive_hints']=['Inspect the service with curl.']
+    assert validate_tasks([task])[0]['progressive_hints']==task['progressive_hints']

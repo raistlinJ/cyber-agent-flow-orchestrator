@@ -128,3 +128,22 @@ Reference exports are cached by the selected XML's content and path. Changing th
 XML requires reloading the scenario list and selecting its new revision. Guide
 export requires Node.js in the ScenarioForge APP VM and a ScenarioForge version
 with these CLI phases. Popup loading/errors are independent of dashboard refresh.
+
+
+### Progressive hints
+
+**Provide progressive hints** enables assistance when a task supplies authored
+`progressive_hints`, eligible saved Flow hints, or `discoverable_facts`. It does
+not invent hints or convert facilitator solutions into hints. ScenarioForge can
+inherit public saved Flow hints for flag-collection tasks without an explicit
+hint plan. Answer-bearing hints and unresolved templates are excluded.
+
+For custom tasks, use **Progressive hints (one per line)** on Evaluation. Imported
+hint plans remain editable. Clearing an existing plan explicitly leaves it empty;
+facts remain separate in Advanced settings. Hints containing a known explicit
+verifier answer are rejected before creation.
+
+With assistance enabled but no usable guidance, a trial runs unassisted rather
+than failing. Results record `progressive_hints_available`, the unavailable
+reason, released hints/facts, and assisted versus unassisted success. Existing
+hints and facts still use the same release policy and verifier-answer protection.

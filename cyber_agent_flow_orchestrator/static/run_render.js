@@ -117,6 +117,7 @@ function renderResultSummary(data){
  if(workflow.error)target.append(el('p',workflow.error,'error'));
  if(!data.evaluation){target.append(el('p','Trial results will appear here once evaluation starts.','small'));return;}
  for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
+ for(const trial of data.evaluation.attempts||[])if(trial.provide_progressive_hints&&trial.progressive_hints_available===false)target.append(el('p',`${trial.trial_id} · Progressive hints unavailable: ${trial.progressive_hints_reason||'No usable guidance was supplied; ran unassisted.'}`,'notice'));
  renderTrialFailures(workflow,target,data.failure_diagnostics);
 
  const groups=Object.entries(data.evaluation.conditions||{});
