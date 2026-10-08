@@ -59,9 +59,10 @@ def main():
                         expect(page.locator('#sample-sf-companion')).to_be_disabled()
                         expect(page.locator('#sample-sf-companion')).to_have_value('demo-'+sample+'.xml · fixed sample XML')
                         page.get_by_role('tab',name='Evaluation',exact=True).click()
-                        settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096)
+                        settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096,max_tries_before_solution=4)
                         expect(page.locator('#eval-repetitions')).to_have_value('1' if sample=='smoke' else '3')
                         expect(page.locator('#eval-wall_seconds')).to_have_value('120')
+                        expect(page.locator('#eval-max_tries_before_solution')).to_have_value('6')
                         for key,value in settings.items():
                             expect(page.locator('#eval-'+key)).to_be_enabled()
                             page.locator('#eval-'+key).fill(str(value))
@@ -73,9 +74,15 @@ def main():
                         page.get_by_label('Experiment type',exact=True).select_option(sample)
                         page.get_by_role('tab',name='Evaluation',exact=True).click()
                         expect(page.locator('#eval-wall_seconds')).to_have_value('333')
+                        page.locator('#eval-max_tries_before_solution').fill('0')
+                        expect(page.locator('#create-experiment')).to_be_disabled()
+                        page.locator('#eval-max_tries_before_solution').fill('4')
                         page.locator('#eval-repetitions').fill('0')
                         expect(page.locator('#create-experiment')).to_be_disabled()
                         page.locator('#eval-repetitions').fill('2')
+                        if sample=='smoke':
+                            page.locator('#eval-max_tries_before_solution').scroll_into_view_if_needed()
+                            page.screenshot(path='/tmp/caf-solution-tries.png')
                         page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                         expect(page.locator('#caf-settings-summary')).to_have_count(0)
                         if sample=='smoke':

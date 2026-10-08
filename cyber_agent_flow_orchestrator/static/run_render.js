@@ -121,8 +121,8 @@ function renderResultSummary(data){
  renderTrialFailures(workflow,target,data.failure_diagnostics);
 
  const groups=Object.entries(data.evaluation.conditions||{});
- const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Unassisted successes','Assisted successes','Hints released','Facts revealed','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
- for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',summary.unassisted_successes??'—'),el('td',summary.assisted_successes??'—'),el('td',summary.hints_released??0),el('td',summary.facts_revealed??0),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);
+ const table=el('table'),head=el('tr');for(const text of ['Condition','Verified successes','Unassisted successes','Hint-assisted successes','Solution-assisted successes','Hints released','Solutions provided','Facts revealed','Mean runtime','First flag'])head.append(el('th',text));const heading=el('thead');heading.append(head);table.append(heading);const body=el('tbody');
+ for(const [name,summary] of groups){const row=el('tr');row.append(el('td',name),el('td',`${summary.verified_successes??0} / ${summary.verified_trials??0}`),el('td',summary.unassisted_successes??'—'),el('td',summary.hints_assisted_successes??summary.assisted_successes??'—'),el('td',summary.solution_assisted_successes??0),el('td',summary.hints_released??0),el('td',summary.solutions_released??0),el('td',summary.facts_revealed??0),el('td',duration(summary.mean_execution_seconds)),el('td',duration(summary.mean_time_to_first_flag_seconds)));body.append(row);}table.append(body);const wrapper=el('div',null,'scroll');wrapper.append(table);target.append(wrapper);
 }
 
 function renderTrialFailures(run,target,providedDiagnostics){

@@ -253,11 +253,11 @@ def render(report, *, root=None, recorded_at=None):
         comparisons.append([name, results['PASS'], results['FAIL'], results['ERROR'], results['UNVERIFIED'], results['RUNNING'], results['PENDING'],
                             f'{100 * results["PASS"] / verified:.1f}%' if verified else 'Not verified'])
         condition_metrics.append([name, summary.get('mean_score'), seconds(summary.get('mean_execution_seconds')),
-                                  summary.get('unassisted_successes'), summary.get('assisted_successes'),
-                                  summary.get('hints_released'), summary.get('facts_revealed'),
+                                  summary.get('unassisted_successes'), summary.get('hints_assisted_successes', summary.get('assisted_successes')), summary.get('solution_assisted_successes', 0),
+                                  summary.get('hints_released'), summary.get('solutions_released', 0), summary.get('facts_revealed'),
                                   summary.get('mean_progress_score'), seconds(summary.get('mean_time_to_first_flag_seconds'))])
     doc.table(['Condition','Pass','Fail','Error','Unverified','Running','Pending','Verified success rate'], comparisons)
-    doc.table(['Condition','Mean score','Mean worker time','Unassisted passes','Assisted passes','Hints','Facts revealed','Mean progress','Mean first flag'], condition_metrics)
+    doc.table(['Condition','Mean score','Mean worker time','Unassisted passes','Hint-assisted passes','Solution-assisted passes','Hints','Solutions provided','Facts revealed','Mean progress','Mean first flag'], condition_metrics)
     doc.heading('Trial runs')
     doc.table(['Trial','Task','Condition','Repeat','Attempt','Outcome','Worker status','Worker time','Total trial time'], [
         [r['trial_id'],r.get('task_id'),r.get('condition_id'),r.get('repetition'),r.get('attempt'),outcome(r),r.get('status'),
@@ -321,7 +321,7 @@ def render(report, *, root=None, recorded_at=None):
     doc.table(['Stage','VM','Status','Started','Ended','Elapsed','Error'],[[s.get('label') or s.get('id'),s.get('vmid'),s.get('status'),s.get('started_at'),s.get('ended_at'),seconds(s.get('elapsed_seconds')),s.get('error') or ''] for s in steps])
     doc.heading('Recorded limits and provenance')
     execution = config.get('execution') or {}
-    doc.table(['Setting','Value'],[[key,execution.get(key)] for key in ('max_turns','wall_seconds','tool_timeout','context_window','provide_progressive_hints')] +
+    doc.table(['Setting','Value'],[[key,execution.get(key)] for key in ('max_turns','wall_seconds','tool_timeout','context_window','provide_progressive_hints','max_tries_before_solution')] +
               [['Allowed targets',', '.join((execution.get('network_policy') or {}).get('allow') or [])],
                ['Excluded targets',', '.join((execution.get('network_policy') or {}).get('disallow') or [])],
                ['Spec hash',evaluation.get('spec_hash')],['Scenario package hash',scenario.get('package_hash')]])

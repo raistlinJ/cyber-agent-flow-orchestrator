@@ -149,8 +149,8 @@ class UserDashboard:
             source='Server runtime YAML plus saved model settings for the selected participant VM',
             engine=dict(path=runtime['engine']['path'], python=runtime['engine']['python']),
             model={key: runtime['model'].get(key) for key in ('provider', 'name', 'url', 'ssl_verify')},
-            evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192}.get(key)) for key in
-                ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window')}))
+            evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192,'max_tries_before_solution':6}.get(key)) for key in
+                ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window', 'max_tries_before_solution')}))
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         value['model_config_writable'] = self.runtime['backend']['type']=='fusion' or bool((value['updates'] or {}).get('can_update'))
         access.current()

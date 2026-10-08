@@ -23,6 +23,8 @@ execution:
   wall_seconds: 300
   max_turns: 20
   tool_timeout: 30
+  # Final safe assistance after this many agent turns without observed progress.
+  max_tries_before_solution: 6
   progress_seconds: [30, 60, 120, 300]
   reveal_network_policy: false
   network_policy:

@@ -106,7 +106,7 @@ def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, m
     monkeypatch.setattr(service, 'run', run)
     try:
         controller.catalogue(user)
-        settings = dict(repetitions=2, max_turns=7, wall_seconds=45, tool_timeout=15, context_window=4096)
+        settings = dict(repetitions=2, max_turns=7, wall_seconds=45, tool_timeout=15, context_window=4096,max_tries_before_solution=4)
         reply = controller.create(user, 'a'*64, 'b'*32, '10.77.0.0/24', '', evaluation=settings)
         output = workspace.run_path(reply['run_id'])
         assert reply['status'] == 'ready' and not launched
@@ -183,3 +183,18 @@ def test_disabled_or_dirty_sequence_is_not_listed_as_resolved(tmp_path, flag):
     source = tmp_path / 'disabled.xml'
     source.write_text('<Scenario name="Disabled"><FlowState>' + json.dumps(state) + '</FlowState></Scenario>')
     assert guest.inspect(source)[0]['resolved_chain'] is False
+
+
+@pytest.mark.parametrize('limit',[0,1001,True,'6'])
+def test_invalid_max_tries_before_solution(limit):
+    settings = dict(repetitions=1,max_turns=9,wall_seconds=300,tool_timeout=30,context_window=8192,
+                    max_tries_before_solution=limit)
+    with pytest.raises(samples.SampleRequestError,match='max_tries_before_solution'):
+        scenarios.evaluation_settings(settings)
+
+
+def test_evaluation_settings_accept_legacy_clients_and_custom_solution_limit():
+    settings = dict(repetitions=1,max_turns=9,wall_seconds=300,tool_timeout=30,context_window=8192)
+    assert scenarios.evaluation_settings(settings) == settings
+    settings['max_tries_before_solution'] = 7
+    assert scenarios.evaluation_settings(settings)['max_tries_before_solution'] == 7

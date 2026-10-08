@@ -147,3 +147,26 @@ With assistance enabled but no usable guidance, a trial runs unassisted rather
 than failing. Results record `progressive_hints_available`, the unavailable
 reason, released hints/facts, and assisted versus unassisted success. Existing
 hints and facts still use the same release policy and verifier-answer protection.
+
+
+
+The Evaluation tab includes **Max tries before solution**, editable for samples
+and custom scenarios (default 6, range 1–1,000). With progressive hints enabled,
+a try is an agent turn without new observed progress; observing new evidence or
+new successful tool output resets the count. At the limit, the evaluator provides
+the **current challenge's facilitator walkthrough and exact answer/flag**.
+ScenarioForge exports each challenge's guide section separately into private
+`challenge_solutions` metadata; unreleased solutions are never uploaded to CAF.
+Observed flags advance to the next unsolved challenge and reset its try count.
+For older task packages without guide sections, the fallback uses the reviewed
+task procedure/hints and exact verifier answer.
+
+There are up to three ordinary hints per trial and at most one full solution per
+challenge. The same policy applies to every condition and is saved for reruns
+and in the run summary. Turn and time budgets still apply; a smaller trial budget
+may end before the limit is reached. Results distinguish **unassisted**,
+**hint-assisted**, and **solution-assisted** passes, and record `solution_provided`,
+`solutions_released`, the configured limit and the per-challenge release audit
+in `assistance.json`. Incorrect final answers before the limit receive neutral
+retry feedback when no intermediate hint is due; this feedback is audited
+separately and counts as assistance.

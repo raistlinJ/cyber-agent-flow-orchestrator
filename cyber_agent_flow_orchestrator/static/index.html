@@ -116,8 +116,8 @@
 </div>
 </section>
 <h3 id="eval-settings-title">Trial settings</h3>
-<label><input id="provide-progressive-hints" type="checkbox"> Provide progressive hints</label><p class="small">Uses task hints, eligible saved Flow hints, or discoverable facts. Tasks without usable guidance run unassisted and report that hints were unavailable. Edit task hints above when using custom tasks.</p>
-<p class="small">Optional, off by default. After two turns without observed progress, or an incorrect final answer, release up to three hints within the existing trial budget. Both conditions use the same policy. Samples include hints. Scenario flag tasks can inherit saved Flow hints; custom tasks can supply authored hints or discoverable facts. Released hints, facts and assisted success are recorded in Results.</p>
+<label><input id="provide-progressive-hints" type="checkbox"> Provide progressive hints</label><p class="small">Uses rendered participant-guide hints, authored task hints, or discoverable facts. Tasks without usable guidance run unassisted and report that hints were unavailable. Edit task hints above when using custom tasks.</p>
+<p class="small">Optional, off by default. Intermediate hints are released after two turns without observed progress or an incorrect final answer. At the configured maximum tries, provide the current challenge’s facilitator walkthrough and exact answer/flag. A try is an agent turn without new observed progress; new progress resets the count. Other challenge answers remain withheld. Both conditions use the same policy, with up to three ordinary hints per trial and one solution per challenge. Results separate unassisted, hint-assisted and solution-assisted success.</p>
 <p id="eval-settings-note" class="small"></p>
 <fieldset id="evaluation-settings" class="evaluation-grid">
 <label>Repetitions per task and condition<input form="experiment-form" id="eval-repetitions" type="number" min="1" max="100" required></label>
@@ -125,7 +125,9 @@
 <label>Trial time limit (seconds)<input form="experiment-form" id="eval-wall_seconds" type="number" min="1" max="86400" required></label>
 <label>Tool timeout (seconds)<input form="experiment-form" id="eval-tool_timeout" type="number" min="1" max="3600" required></label>
 <label>Context window (tokens)<input form="experiment-form" id="eval-context_window" type="number" min="1" max="1000000" required></label>
+<label>Max tries before solution<input form="experiment-form" id="eval-max_tries_before_solution" type="number" min="1" max="1000" required aria-describedby="solution-tries-help"></label>
 </fieldset>
+<p id="solution-tries-help" class="small">Default: 6 agent turns without new progress. Applies only when progressive hints are enabled. The solution includes the walkthrough and answer for the first unsolved challenge. The trial still stops at its turn or time limit.</p>
 <p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
 </section>
 </section></div><div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>

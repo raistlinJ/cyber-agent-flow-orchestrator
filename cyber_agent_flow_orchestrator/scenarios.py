@@ -50,13 +50,15 @@ def networks(text, required=False):
 
 
 EVALUATION_LIMITS = dict(repetitions=(1, 100), max_turns=(1, 1000), wall_seconds=(1, 86400),
-                         tool_timeout=(1, 3600), context_window=(1, 1000000))
+                         tool_timeout=(1, 3600), context_window=(1, 1000000), max_tries_before_solution=(1, 1000))
 
 
 def evaluation_settings(value):
-    if not isinstance(value, dict) or set(value) != set(EVALUATION_LIMITS):
+    if not isinstance(value, dict) or set(value) - set(EVALUATION_LIMITS) or set(EVALUATION_LIMITS) - {'max_tries_before_solution'} - set(value):
         raise SampleRequestError('Supply repetitions, max_turns, wall_seconds, tool_timeout and context_window')
     for name, (minimum, maximum) in EVALUATION_LIMITS.items():
+        if name not in value:
+            continue
         if type(value[name]) is not int or not minimum <= value[name] <= maximum:
             raise SampleRequestError(f'{name} must be an integer from {minimum} to {maximum}')
     return dict(value)

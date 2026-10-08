@@ -395,9 +395,9 @@ function validateExperimentFields(form){
 }
 
 let customEvaluation={};
-const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window'];
+const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window','max_tries_before_solution'];
 function renderEvaluationSettings(scenario,sample){
- const defaults=snapshot?.experiment_defaults?.evaluation||{repetitions:1,max_turns:snapshot?.scenarios?.max_turns||20,wall_seconds:snapshot?.scenarios?.wall_seconds||300,tool_timeout:60,context_window:8192};
+ const defaults={max_tries_before_solution:6,...(snapshot?.experiment_defaults?.evaluation||{repetitions:1,max_turns:snapshot?.scenarios?.max_turns||20,wall_seconds:snapshot?.scenarios?.wall_seconds||300,tool_timeout:60,context_window:8192})};
  const preset=scenario?defaults:{...defaults,repetitions:sample?.profile?.repetitions||1,max_turns:sample?.max_turns||3,wall_seconds:sample?.wall_seconds||120,tool_timeout:sample?.profile?.tool_timeout||30};
  const values=customEvaluation[$('experiment-sample').value]||preset;
  for(const key of evaluationKeys)$('eval-'+key).value=values[key];

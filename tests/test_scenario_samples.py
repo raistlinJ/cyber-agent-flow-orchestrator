@@ -44,7 +44,7 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
             return {}
     monkeypatch.setattr(scenarios,'guest',lambda backend:Remote())
     try:
-        settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096)
+        settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096,max_tries_before_solution=4)
         request=dict(sample_id=sample_id,request_id='a'*32)
         if custom_limits:
             request['evaluation']=settings
