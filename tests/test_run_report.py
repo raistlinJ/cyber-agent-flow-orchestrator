@@ -51,6 +51,21 @@ def test_reported_usage_does_not_invent_missing_tokens():
     assert run_report.reported_tokens(dict(provider_usage=[dict(input_tokens=4,output_tokens=3),dict(total_tokens=2)]))==9
 
 
+def test_report_includes_judge_verdict_errors_and_escaped_reasons():
+    report=fixture_report()
+    report['run_configuration']['judge']={'enabled':True,'model':{'name':'review-model','provider':'openai'}}
+    reviewed=report['evaluation']['attempts'][1]
+    reviewed.update(judge_enabled=True,judge_passed=False,judge_score=0,judge_seconds=2,judge_calls=2,
+                    judge_prompt_tokens=40,judge_output_tokens=15,judge_reason='Unsupported completion claim <script>unsafe</script>')
+    report['evaluation']['attempts'][2].update(judge_enabled=True,judge_error='Judge endpoint unavailable')
+    docs=run_report.render(report,recorded_at='fixed')
+    md,html=docs['experiment-summary.md'].replace('\\',''),docs['experiment-summary.html']
+    assert 'Judge agent reviews' in md and 'review-model' in md
+    assert '| trial-1 | FAIL | 0 | 2.00 s | 2 | 40 | 15 |' in md
+    assert '| trial-2 | ERROR |' in md and 'Judge endpoint unavailable' in md
+    assert '<script>unsafe</script>' not in html and '&lt;script&gt;unsafe&lt;/script&gt;' in html
+
+
 def test_downloads_capture_prompts_actual_tools_and_never_probe_guests(lab,tmp_path):
     config,output,agent,_=lab
     workflow.run(config,output,agent=agent)

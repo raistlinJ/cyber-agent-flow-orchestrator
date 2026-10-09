@@ -47,6 +47,12 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096,max_tries_before_solution=4)
         request=dict(sample_id=sample_id,request_id='a'*32)
         if custom_limits:
+            request['judge']={'enabled':True,'use_participant_model':True,'max_turns':3,'timeout_seconds':30,'max_tokens':1000}
+            from cyber_agent_flow_eval import judge
+            def completion(config,messages,timeout):
+                if len(messages)==2:return json.dumps({'action':'read_evidence','file':'worker-result.json'}),{}
+                return json.dumps({'action':'verdict','passed':True,'score':1,'reason':'Reviewed the worker result.','evidence':['worker-result.json']}),{}
+            monkeypatch.setattr(judge,'_completion',completion)
             request['evaluation']=settings
             trials=2 if sample_id=='smoke' else 4
         result=dashboard.experiment(user,'create',request)
@@ -59,6 +65,8 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         assert saved['workflow']['prepare'][0]['id']=='fixed-demo-xml'
         assert saved['sample_id']==sample_id
         if custom_limits:
+            assert saved['runtime']['judge']['model']['name']==saved['runtime']['model']['name']
+            assert saved['runtime']['judge']['max_turns']==3
             assert saved['runtime']['repetitions']==settings['repetitions']
             assert all(saved['runtime']['execution'][key]==value for key,value in settings.items() if key!='repetitions')
         assert not agent.calls  # Import transfers only; deployment waits for Run.
@@ -80,6 +88,8 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         assert len(deploy)==1 and '--evaluation-export' in deploy[0]['argv']
         spec=ev.resolve(output/'study.yaml')
         if custom_limits:
+            assert spec['judge']['enabled'] and spec['judge']['model']['name']==spec['model']['name']
+            assert all(row['judge_passed'] for row in report['evaluation']['attempts'])
             assert spec['repetitions']==settings['repetitions']
             assert all(spec['execution'][key]==value for key,value in settings.items() if key!='repetitions')
         assert spec['execution']['network_policy']['allow']==['10.77.0.10/32','10.77.0.20/32']
@@ -221,3 +231,20 @@ def test_demo_attaches_provisioned_participant_network():
     demo_prepare.configure_participant_network(scene,Backend())
     assert len(scene.findall('.//HardwareInLoop'))==1
     assert len(scene.findall(".//section[@name='Routing']/item"))==1
+
+
+def test_judge_validation_precedes_sample_upload_and_cannot_choose_host_secrets(pve,lab,tmp_path,monkeypatch):
+    pve[0]['resources']['operator@pve']=[vm(9402),vm(9403),vm(9404)]
+    user=access(pve)
+    dashboard=UserDashboard(lab[0],tmp_path/'runs',2,lambda b,a:Probe(b,a,[]))
+    workspace=Workspace(tmp_path/'runs',user.username)
+    workspace.save_roles(dict(scenarioforge=9402,participant=9403,core=9404),user)
+    monkeypatch.setattr(dashboard.scenarios,'upload',lambda *a,**k:pytest.fail('Invalid judge must not upload anything'))
+    try:
+        with pytest.raises(ValueError,match='API keys must be configured'):
+            dashboard.scenarios.create_sample(user,'smoke','a'*32,judge={'enabled':True,'model':{
+                'provider':'openai','url':'http://unapproved.example/v1','name':'judge','api_key_env':'HOST_SECRET'}})
+        config=dashboard.scenarios.judge_settings({'enabled':True,'use_participant_model':True},user)
+        assert config['model']['name']==dashboard.scenarios.runtime['model']['name']
+        assert config['use_participant_model'] is False
+    finally:dashboard.close()

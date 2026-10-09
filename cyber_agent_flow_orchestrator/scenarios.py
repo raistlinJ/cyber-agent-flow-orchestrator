@@ -252,7 +252,33 @@ class ScenarioExperiments:
             private_file(path, json.dumps(dict(result, vmid=vmid, repo=repo, roots=roots)).encode(), replace=path.exists())
         return dict(result, vmid=vmid, roots=roots, truncated=False)
 
-    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False, progress=lambda step, message: None):
+    def judge_settings(self, value, access):
+        from cyber_agent_flow_eval.judge import resolve_judge
+        from .model_config import apply_model
+        workspace = Workspace(self.root, access.username)
+        model = deepcopy(apply_model(workspace, self.runtime, workspace.roles()['participant'])['model'])
+        # Web users select model settings, not arbitrary host secret variables.
+        model.pop('api_key_env', None)
+        value = deepcopy(value)
+        if not isinstance(value, dict):
+            raise SampleRequestError('Judge settings must be a mapping')
+        if isinstance(value.get('model'), dict) and 'api_key_env' in value['model']:
+            raise SampleRequestError('Judge API keys must be configured on the orchestrator host')
+        try:
+            config = resolve_judge(value, model)
+        except ValueError as exc:
+            raise SampleRequestError(str(exc)) from None
+        if config['enabled']:
+            candidates = [self.runtime.get('judge', {}).get('model', {}), self.runtime['model']]
+            approved = next((candidate for candidate in candidates
+                             if candidate.get('url') == config['model']['url'] and candidate.get('api_key_env')), None)
+            if approved:
+                config['model']['api_key_env'] = approved['api_key_env']
+            # The participant's final model is already captured here. Freeze it.
+            config['use_participant_model'] = False
+        return config
+
+    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False, progress=lambda step, message: None, judge=None):
         progress(1, "Validating scenario, evaluation settings and VM access")
         if not re.fullmatch('[0-9a-f]{32}', request_id) or not re.fullmatch('[0-9a-f]{64}', selection_id):
             raise SampleRequestError('Choose a listed scenario and supply a valid request ID')
@@ -265,6 +291,8 @@ class ScenarioExperiments:
         if _sample_id is not None and definitions is not None:
             raise SampleRequestError('Sample tasks are fixed')
         progressive_hint_settings({}, provide_progressive_hints)
+        if judge is not None:
+            judge = self.judge_settings(judge, access)
         access.current()
         workspace = Workspace(self.root, access.username)
         run_id = 'scenario-' + request_id
@@ -321,6 +349,8 @@ class ScenarioExperiments:
             if overrides:
                 runtime['repetitions'] = overrides['repetitions']
                 runtime['execution'].update({key: value for key, value in overrides.items() if key != 'repetitions'})
+            if judge is not None:
+                runtime['judge'] = judge
             source = workspace.materialize(cfg, runtime, access, run_id)
             saved_runtime = yaml.safe_load((source.parent / 'runtime.yaml').read_text())
             private_file(source.parent / 'baseline.json', baseline.read_bytes())
@@ -341,13 +371,15 @@ class ScenarioExperiments:
             ev.write_json(output / 'workflow.json', self.record(cfg, runtime, identity, captured, request_id))
         return dict(run_id=run_id, status='ready')
 
-    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False, progress=lambda step, message: None, evaluation=None):
+    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False, progress=lambda step, message: None, evaluation=None, judge=None):
         progress(1, "Validating sample selection and VM access")
         overrides = evaluation_settings(evaluation) if evaluation is not None else None
         from .samples import CATALOG
         if type(provide_progressive_hints) is not bool:
             raise SampleRequestError('provide_progressive_hints must be a boolean')
         progressive_hint_settings({}, provide_progressive_hints)
+        if judge is not None:
+            self.judge_settings(judge, access)  # Validate before any bundle upload.
         if sample_id not in self.samples.enabled or not re.fullmatch('[0-9a-f]{32}', request_id):
             raise SampleRequestError('Choose an enabled sample and valid request ID')
         workspace = Workspace(self.root, access.username)
@@ -367,7 +399,7 @@ class ScenarioExperiments:
         item = imported['items'][0]
         return self.create(access, item['id'], request_id,
             ','.join(self.runtime['execution']['network_policy']['allow']),
-            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints, evaluation=overrides,
+            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints, evaluation=overrides, judge=judge,
             progress=lambda step, message: progress(step + 4 if step > 1 else 5, message))
 
     def configure_sample(self, sample_id, cfg, runtime, captured, roles, token):

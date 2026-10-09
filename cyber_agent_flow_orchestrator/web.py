@@ -346,9 +346,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         expected.add('provide_progressive_hints')
                         if type(data['provide_progressive_hints']) is not bool:
                             raise SampleRequestError('provide_progressive_hints must be a boolean')
+                    if action == 'create' and 'judge' in data:
+                        expected.add('judge')
                     if action == 'create' and 'evaluation' in data:
                         expected.add('evaluation')
-                    if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k not in ('evaluation', 'tasks', 'provide_progressive_hints')):
+                    if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k not in ('evaluation', 'tasks', 'provide_progressive_hints', 'judge')):
                         raise SampleRequestError('Invalid experiment request fields')
                     access = auth.access(token, revalidate=False)
                     self.respond(202, dashboard.experiment(access, action, data))

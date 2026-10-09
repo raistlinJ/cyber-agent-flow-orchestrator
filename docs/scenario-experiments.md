@@ -170,3 +170,38 @@ may end before the limit is reached. Results distinguish **unassisted**,
 in `assistance.json`. Incorrect final answers before the limit receive neutral
 retry feedback when no intermediate hint is due; this feedback is audited
 separately and counts as assistance.
+
+
+### Judge LLM
+
+New WebUI experiments default to **Use an LLM judge agent** on the Evaluation
+tab. By default it uses the participant's provider, endpoint and model; turn off
+that checkbox to choose a separate OpenAI-compatible, Ollama or LiteLLM judge.
+Judge turns (default 6), total review time (120 seconds) and output tokens per
+call (2,048) are independent of the participant's budgets and saved for reruns.
+Existing experiments retain their saved configuration.
+
+The judge runs on the **orchestrator host**, using bounded read-only tools to
+inspect collected result, message, tool-event, model-call and assistance files.
+It never runs commands or probes live VM state. A trial passes only when both
+the judge and the deterministic success criteria pass. A malformed, unavailable
+or timed-out judge produces `judge_error`, with success unverified; it never
+silently falls back to passing with the deterministic checker alone.
+
+Results show the verdict and reason, judge time, request count and reported token
+usage. `judge.json` in each attempt records the judge prompt, evidence reads,
+responses, settings and usage. The formatted experiment report includes judge
+reviews. Assistance categories still distinguish answer disclosure from
+independent task completion.
+
+The endpoint must be reachable from the host. API credentials live in the
+orchestrator process environment, not the participant VM. An administrator can
+configure `judge.model.api_key_env` in the host runtime YAML; the WebUI reuses
+those credentials only for that configured endpoint and cannot select arbitrary
+host secret variables. The guest API key is never copied to the host.
+
+Attack graph and guide buttons appear only on the **Evaluation** tab. References
+are exported from the selected saved XML, with a private copy preserving relative
+artifact paths. Update ScenarioForge on the APP VM to support custom evaluation
+target chains with flag sequencing disabled. Restart the orchestrator after
+updating its code so the popup page and API routes are active.

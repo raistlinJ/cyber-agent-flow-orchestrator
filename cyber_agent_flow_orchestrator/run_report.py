@@ -319,6 +319,17 @@ def render(report, *, root=None, recorded_at=None):
     doc.table(['Trial','Started','Ended'],[[r['trial_id'],r.get('started_at'),r.get('ended_at')] for r in rows])
     doc.heading('Stage timing')
     doc.table(['Stage','VM','Status','Started','Ended','Elapsed','Error'],[[s.get('label') or s.get('id'),s.get('vmid'),s.get('status'),s.get('started_at'),s.get('ended_at'),seconds(s.get('elapsed_seconds')),s.get('error') or ''] for s in steps])
+    judged = [row for row in rows if row.get('judge_enabled')]
+    if judged:
+        doc.heading('Judge agent reviews')
+        doc.table(['Trial','Verdict','Score','Time','Model calls','Input tokens','Output tokens','Reason'],
+                  [[row['trial_id'], 'ERROR' if row.get('judge_error') else 'PASS' if row.get('judge_passed') else 'FAIL',
+                    row.get('judge_score'), seconds(row.get('judge_seconds')), row.get('judge_calls'),
+                    row.get('judge_prompt_tokens'), row.get('judge_output_tokens'), row.get('judge_error') or row.get('judge_reason')]
+                   for row in judged])
+        judge_config = config.get('judge') or {}
+        doc.table(['Judge setting','Value'], [[key,value] for key,value in judge_config.items() if key != 'model'] +
+                  [['model.' + key,value] for key,value in (judge_config.get('model') or {}).items()])
     doc.heading('Recorded limits and provenance')
     execution = config.get('execution') or {}
     doc.table(['Setting','Value'],[[key,execution.get(key)] for key in ('max_turns','wall_seconds','tool_timeout','context_window','provide_progressive_hints','max_tries_before_solution')] +

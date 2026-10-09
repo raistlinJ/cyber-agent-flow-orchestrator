@@ -19,6 +19,11 @@ def main():
         root=Path(temp)
         config,_,agent,manifest=lab.__wrapped__(root,patch)
         install_transport(patch,agent,manifest)
+        from cyber_agent_flow_eval import judge
+        def completion(config,messages,timeout):
+            if len(messages)==2:return json.dumps({'action':'read_evidence','file':'worker-result.json'}),{'prompt_tokens':10,'output_tokens':5}
+            return json.dumps({'action':'verdict','passed':True,'score':1,'reason':'Reviewed the saved result.','evidence':['worker-result.json']}),{'prompt_tokens':10,'output_tokens':5}
+        patch.setattr(judge,'_completion',completion)
         with pve_server(root) as pve:
             pve[0]['resources']['operator@pve']=[vm(9402),vm(9403),vm(9404)]
             dashboard=UserDashboard(config,root/'runs',2,lambda b,a:Probe(b,a,[]))
@@ -59,6 +64,16 @@ def main():
                         expect(page.locator('#sample-sf-companion')).to_be_disabled()
                         expect(page.locator('#sample-sf-companion')).to_have_value('demo-'+sample+'.xml · fixed sample XML')
                         page.get_by_role('tab',name='Evaluation',exact=True).click()
+                        expect(page.locator('#judge-enabled')).to_be_checked()
+                        expect(page.locator('#judge-inherit')).to_be_checked()
+                        expect(page.locator('#judge-url')).to_be_disabled()
+                        page.locator('#judge-max_turns').fill('4')
+                        page.locator('#judge-timeout_seconds').fill('45')
+                        if sample=='tools-vs-helper':
+                            page.locator('#judge-inherit').uncheck()
+                            page.locator('#judge-provider').select_option('openai')
+                            page.locator('#judge-url').fill('http://judge.fixture/v1')
+                            page.locator('#judge-name').fill('independent-judge')
                         settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096,max_tries_before_solution=4)
                         expect(page.locator('#eval-repetitions')).to_have_value('1' if sample=='smoke' else '3')
                         expect(page.locator('#eval-wall_seconds')).to_have_value('120')
@@ -81,6 +96,8 @@ def main():
                         expect(page.locator('#create-experiment')).to_be_disabled()
                         page.locator('#eval-repetitions').fill('2')
                         if sample=='smoke':
+                            page.locator('#judge-max_turns').scroll_into_view_if_needed()
+                            page.screenshot(path='/tmp/caf-judge-configuration.png')
                             page.locator('#eval-max_tries_before_solution').scroll_into_view_if_needed()
                             page.screenshot(path='/tmp/caf-solution-tries.png')
                         page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
@@ -115,6 +132,10 @@ def main():
                         records=[(path,json.loads(path.read_text())) for path in (root/'runs').rglob('workflow.json')]
                         path,record=next((p,r) for p,r in records if r.get('sample_id')==sample)
                         assert record['status']=='completed'
+                        assert record['runtime']['judge']['enabled']
+                        assert record['runtime']['judge']['model']['name']==('independent-judge' if sample=='tools-vs-helper' else record['runtime']['model']['name'])
+                        assert record['runtime']['judge']['max_turns']==4
+                        assert record['runtime']['judge']['timeout_seconds']==45
                         assert record['runtime']['repetitions']==2
                         assert all(record['runtime']['execution'][key]==value for key,value in settings.items() if key!='repetitions')
                         from cyber_agent_flow_orchestrator import service

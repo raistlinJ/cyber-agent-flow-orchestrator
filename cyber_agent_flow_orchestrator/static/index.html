@@ -84,7 +84,7 @@
 <div id="scenario-upload-options" hidden><label for="scenario-file">Upload scenario XML or reproduction ZIP</label><input form="experiment-form" id="scenario-file" type="file" accept=".xml,.zip,application/xml,text/xml,application/zip"><button id="upload-scenario" type="button" disabled>Send to ScenarioForge</button><p id="scenario-upload-info" class="small" role="status">Import saves the scenario on the selected VM; it does not deploy it. Maximum 32 MiB (128 MiB expanded).</p></div>
 <div id="scenario-find-options"><button id="load-scenarios" type="button">Load from ScenarioForge VM</button></div>
 <label for="scenario-selection">Saved scenario</label><select form="experiment-form" id="scenario-selection"><option value="">Load scenarios to choose an XML</option></select>
-<p id="scenario-selection-info" class="small" role="status"></p><div class="scenario-reference-actions result-actions" aria-label="Scenario reference documents"><button type="button" data-scenario-reference="attack-graph" disabled>Open attack graph</button><button type="button" data-scenario-reference="participant-guide" disabled>Open participant guide</button><button type="button" data-scenario-reference="facilitator-guide" disabled>Open facilitator guide</button></div><p class="small">Use the participant guide to write the task. The facilitator guide includes solutions; references are for the experiment author and are not automatically sent to the agent.</p>
+<p id="scenario-selection-info" class="small" role="status"></p>
 <p class="small">The Evaluation tab controls repetitions and trial budgets. Baseline tools are fixed. Scenario reset hooks are not applied.</p>
 </section>
 </section><section role="tabpanel" tabindex="0" id="experiment-panel-caf" aria-labelledby="experiment-tab-caf" hidden>
@@ -128,6 +128,22 @@
 <label>Max tries before solution<input form="experiment-form" id="eval-max_tries_before_solution" type="number" min="1" max="1000" required aria-describedby="solution-tries-help"></label>
 </fieldset>
 <p id="solution-tries-help" class="small">Default: 6 agent turns without new progress. Applies only when progressive hints are enabled. The solution includes the walkthrough and answer for the first unsolved challenge. The trial still stops at its turn or time limit.</p>
+<h3>Judge LLM</h3>
+<label><input id="judge-enabled" type="checkbox" checked> Use an LLM judge agent</label>
+<p class="small">The judge reviews saved trial evidence on the orchestrator host using read-only tools. Passing requires both its verdict and the exact-answer checks. Judge failures are reported as evaluation errors.</p>
+<label><input id="judge-inherit" type="checkbox" checked> Use the participant’s provider, endpoint and model for the judge</label>
+<fieldset id="judge-model-settings" class="evaluation-grid" disabled>
+<label>Judge provider<select id="judge-provider" form="experiment-form"><option value="openai">OpenAI-compatible</option><option value="ollama_direct">Ollama</option><option value="litellm">LiteLLM</option></select></label>
+<label>Judge endpoint<input id="judge-url" form="experiment-form" type="url" required></label>
+<label>Judge model<input id="judge-name" form="experiment-form" required></label>
+<label><input id="judge-ssl" type="checkbox" checked> Verify judge TLS certificate</label>
+</fieldset>
+<fieldset id="judge-limits" class="evaluation-grid">
+<label>Maximum judge turns<input id="judge-max_turns" form="experiment-form" type="number" min="2" max="32" value="6" required></label>
+<label>Judge time limit (seconds)<input id="judge-timeout_seconds" form="experiment-form" type="number" min="1" max="3600" value="120" required></label>
+<label>Judge output tokens per call<input id="judge-max_tokens" form="experiment-form" type="number" min="1" max="16384" value="2048" required></label>
+</fieldset>
+<p class="small">The endpoint must be reachable from the orchestrator host. Host credentials configured for that endpoint are reused; participant VM API keys are not copied. These judge settings are saved for reruns.</p>
 <p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
 </section>
 </section></div><div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>

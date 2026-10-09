@@ -358,6 +358,7 @@ for(const button of document.querySelectorAll('[data-scenario-reference]'))butto
  if(opened){opened.focus();$('scenario-reference-notice').hidden=true;}else{const notice=$('scenario-reference-notice');notice.hidden=false;notice.replaceChildren(el('span','Allow popups for this site, or '));const link=el('a','open the scenario reference');link.href=url;link.target='_blank';link.rel='noopener';notice.append(link);}
 });
 function syncCreateExperiment(){
+ syncJudge();
  syncScenarioReferences();
  const busy=isBusy()||experimentCreating;
  const reason=busy?'Wait for the current operation to finish.':experimentMissingFields();
@@ -393,6 +394,32 @@ function validateExperimentFields(form){
  if(panel)selectExperimentTab(panel.id.replace('experiment-panel-',''));
  invalid.reportValidity();invalid.focus();return false;
 }
+
+function judgeSettings(){
+ const enabled=$('judge-enabled').checked;
+ if(!enabled)return {enabled:false};
+ const settings={enabled:true,use_participant_model:$('judge-inherit').checked,...Object.fromEntries(['max_turns','timeout_seconds','max_tokens'].map(key=>[key,Number($('judge-'+key).value)]))};
+ if(!settings.use_participant_model)settings.model={provider:$('judge-provider').value,url:$('judge-url').value.trim(),name:$('judge-name').value.trim(),ssl_verify:$('judge-ssl').checked};
+ return settings;
+}
+function syncJudge(){
+ const enabled=$('judge-enabled').checked;
+ $('judge-inherit').disabled=!enabled;
+ $('judge-model-settings').disabled=!enabled||$('judge-inherit').checked;
+ if(enabled&&$('judge-inherit').checked&&$('model-config-participant')){const current=modelFormSettings('participant');$('judge-provider').value=current.provider;$('judge-url').value=current.url;$('judge-name').value=current.model;$('judge-ssl').checked=current.ssl_verify;}
+ $('judge-limits').disabled=!enabled;
+}
+function resetJudge(){
+ const config=snapshot?.experiment_defaults?.judge;
+ $('judge-enabled').checked=config?.enabled!==false;
+ $('judge-inherit').checked=config?.use_participant_model??!config?.model;
+ const model=config?.model||snapshot?.experiment_defaults?.model||{};
+ $('judge-provider').value=['openai','litellm','ollama_direct'].includes(model.provider)?model.provider:'openai';
+ $('judge-url').value=model.url||'';$('judge-name').value=model.name||'';$('judge-ssl').checked=model.ssl_verify!==false;
+ for(const [key,value] of Object.entries({max_turns:6,timeout_seconds:120,max_tokens:2048}))$('judge-'+key).value=config?.[key]??value;
+ syncJudge();
+}
+for(const id of ['judge-enabled','judge-inherit'])$(id).addEventListener('change',()=>{syncJudge();syncCreateExperiment();});
 
 let customEvaluation={};
 const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window','max_tries_before_solution'];
@@ -432,7 +459,7 @@ function describeSample(){
  updateEvaluationBudget();
 }
 
-$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
+$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};resetJudge();lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
 let scenarioChoices=[],scenarioChoiceVM=null,lastUploadedScenarioFile=null;
 let autoExcludedTargets=[];
 function applyModelNetworkScope(scope){
@@ -525,7 +552,7 @@ $('experiment-form').addEventListener('submit',async event=>{
  $('experiment-error').textContent='';
  startCreationProgress(false);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{} )}:{sample_id:$('experiment-sample').value}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),judge:judgeSettings(),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{} )}:{sample_id:$('experiment-sample').value}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed: '+error.message);$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });

@@ -435,7 +435,7 @@ def reference_details(data):
         raise ValueError('Unknown scenario reference')
     repo = Path(data['repo'])
     parent = repo / 'outputs' / 'caf-reference-previews'
-    cache = parent / (selected['id'] + '-' + kind + '.json.gz')
+    cache = parent / (selected['id'] + '-v2-' + kind + '.json.gz')
     if parent.is_symlink() or (repo / 'outputs').is_symlink() or cache.is_symlink():
         raise ValueError('Invalid scenario reference cache path')
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -445,7 +445,7 @@ def reference_details(data):
             output = Path(folder)
             # Export a private copy beside the XML so relative artifact paths
             # keep their base and even an exporter write cannot change the source.
-            command = [python, '-m', 'scenarioforge.cli', '--phase',
+            command = [python, '-m', 'scenarioforge.cli',
                        'attack-graph' if kind == 'attack-graph' else 'guides',
                        '--xml', selected['path'], '--scenario', selected['scenario'],
                        '--output-dir', folder, '--output-prefix', 'reference']
@@ -465,13 +465,33 @@ def reference_details(data):
                 raise ValueError('ScenarioForge could not export this reference. Check that the saved Flow is resolved and valid, and that ScenarioForge supports the guides and attack-graph CLI phases.')
             if Path(selected['path']).read_bytes() != original:
                 raise ValueError('Scenario XML changed while exporting; reload its scenarios')
+            # Prefer the exporter's declared paths; filenames are its contract.
+            payload = {}
+            decoder = json.JSONDecoder()
+            for match in re.finditer(r'\{', result.stdout):
+                try:
+                    candidate, _ = decoder.raw_decode(result.stdout[match.start():])
+                    if isinstance(candidate, dict) and isinstance(candidate.get('outputs'), dict):
+                        payload = candidate
+                        break
+                except ValueError:
+                    continue
+            def artifact(key, fallback):
+                outputs = payload.get('outputs', {})
+                value = outputs.get(key) if kind == 'attack-graph' else outputs.get(kind.split('-')[0], {}).get(key)
+                target = Path(value) if isinstance(value, str) else output / fallback
+                if not target.is_absolute():
+                    target = output / target
+                if target.is_symlink() or not target.resolve().is_relative_to(output.resolve()) or not target.is_file():
+                    raise ValueError('ScenarioForge did not produce the requested ' + kind + ' artifact. Update ScenarioForge on the APP VM, reload the saved scenario, and retry.')
+                return target.read_text()
             details = dict(kind=kind, scenario=selected['scenario'], source=selected['path'],
                            xml_sha256=selected['sha256'])
             if kind == 'attack-graph':
-                details['graph'] = json.loads((output / 'reference.attack-graph.json').read_text())
-                details['dot'] = (output / 'reference.attack-graph.dot').read_text()
+                details['graph'] = json.loads(artifact('json', 'reference.attack-graph.json'))
+                details['dot'] = artifact('dot', 'reference.attack-graph.dot')
             else:
-                details['html'] = (output / ('reference.' + kind + '.html')).read_text()
+                details['html'] = artifact('html', 'reference.' + kind + '.html')
             encoded = json.dumps(details, ensure_ascii=False, allow_nan=False).encode()
             if len(encoded) > 2 * 1024 * 1024:
                 raise ValueError('Scenario reference exceeds the 2 MiB viewer limit')

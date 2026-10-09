@@ -46,7 +46,7 @@ function renderRunConfiguration(config){
   ['Context window',config.execution?.context_window]]){
   const row=el('div');row.append(el('dt',label),el('dd',value??'Not recorded'));settings.append(row);
  }
- target.append(settings,el('h3','Tools and guidance'));
+ target.append(settings);if(config.judge?.enabled)target.append(configurationDetails('Judge LLM settings',config.judge,'judge-config'));target.append(el('h3','Tools and guidance'));
  for(const condition of config.conditions||[]){
   const section=el('section',null,'run-condition');section.append(el('h4',condition.id),
    el('p',condition.tools?.length?condition.tools.join(', '):'No tools'));
@@ -58,7 +58,7 @@ function renderRunConfiguration(config){
  for(const [index,prompt] of (config.system_prompts||[]).entries())target.append(configurationDetails('Captured system prompt '+(index+1),prompt.text,'system-'+index));
  target.append(configurationDetails('All saved settings and provenance',{
   source:config.source,model:config.model,engine:config.engine,backend:config.backend,execution:config.execution,
-  repetitions:config.repetitions,order_seed:config.order_seed,schedule:config.schedule,
+  judge:config.judge,repetitions:config.repetitions,order_seed:config.order_seed,schedule:config.schedule,
   provenance:config.provenance,workflow:config.workflow},'settings'));
  const scenario=config.scenarioforge||{};
  target.append(el('h3','ScenarioForge'),el('p',scenario.message));

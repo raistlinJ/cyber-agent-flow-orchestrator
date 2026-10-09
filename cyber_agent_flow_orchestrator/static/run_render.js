@@ -118,6 +118,9 @@ function renderResultSummary(data){
  if(!data.evaluation){target.append(el('p','Trial results will appear here once evaluation starts.','small'));return;}
  for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
  for(const trial of data.evaluation.attempts||[])if(trial.provide_progressive_hints&&trial.progressive_hints_available===false)target.append(el('p',`${trial.trial_id} · Progressive hints unavailable: ${trial.progressive_hints_reason||'No usable guidance was supplied; ran unassisted.'}`,'notice'));
+ for(const trial of data.evaluation.attempts||[])if(trial.judge_enabled){
+  const details=el('details'),summary=el('summary',`${trial.trial_id} · Judge: ${trial.judge_error?'error':trial.judge_passed?'pass':'fail'} · ${duration(trial.judge_seconds)}`);details.append(summary,el('p',trial.judge_error||trial.judge_reason||'Judge verdict recorded.'));details.append(el('p',`${trial.judge_calls??0} model calls · ${trial.judge_prompt_tokens??'unknown'} input / ${trial.judge_output_tokens??'unknown'} output tokens · Full evidence review: judge.json in the run bundle`,'small'));target.append(details);
+ }
  renderTrialFailures(workflow,target,data.failure_diagnostics);
 
  const groups=Object.entries(data.evaluation.conditions||{});
