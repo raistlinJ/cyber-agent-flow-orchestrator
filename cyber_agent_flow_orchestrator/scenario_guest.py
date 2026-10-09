@@ -423,12 +423,93 @@ def task_details(data):
     return dict(chunk=encoded[offset:offset+4096], total=len(encoded),
                 sha256=hashlib.sha256(encoded.encode()).hexdigest())
 
+def _reference_file(path, root):
+    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) or not path.is_file():
+        return None
+    if path.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError('Scenario reference exceeds the 2 MiB viewer limit')
+    return path.read_text(encoding='utf-8')
+
+
+def _saved_reference(selected, generated, kind):
+    source = Path(selected['path'])
+    prefix = re.sub(r'[^A-Za-z0-9._-]+', '-', Path(selected['scenario']).name).strip('.-_') or 'scenario'
+    bases = [(generated, 'reference', 'persistent-cache'),
+             (source.parent / ('attack-graphs' if kind == 'attack-graph' else 'guides'), prefix, 'saved-export')]
+    if len(inspect(source)) == 1:
+        bases.append((source.parent, '', 'saved-export'))
+    for folder, name, origin in bases:
+        base = name + '.' if name else ''
+        suffixes = ['attack-graph.json'] if kind == 'attack-graph' else [kind + '.html', kind + '.md']
+        for suffix in suffixes:
+            path = folder / (base + suffix)
+            text = _reference_file(path, folder if folder == generated else source.parent)
+            if text is None:
+                continue
+            if kind == 'attack-graph':
+                graph = json.loads(text)
+                if not isinstance(graph, dict):
+                    raise ValueError('Saved attack graph must be a JSON object')
+                values = dict(graph=graph, dot=_reference_file(folder / (base + 'attack-graph.dot'), folder if folder == generated else source.parent))
+            else:
+                values = {'html' if suffix.endswith('.html') else 'markdown':text}
+            return dict(values, reference_origin=origin, reference_file=str(path))
+
+    # Reproduction imports retain the uploaded archive. Read its existing
+    # documents without extracting, executing or regenerating them.
+    archive_path = source.parent / 'source'
+    if not source.parent.name.startswith('caf-upload-') or archive_path.is_symlink() or not archive_path.is_file() or archive_path.stat().st_size > MAX_XML:
+        return None
+    if not zipfile.is_zipfile(archive_path):
+        return None
+    with zipfile.ZipFile(archive_path) as archive:
+        entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+        if len(entries) > 4096:
+            return None
+        xmls = [entry for entry in entries if entry.filename.lower().endswith('.xml')]
+        if len(xmls) != 1 or xmls[0].file_size > MAX_XML:
+            return None
+        with archive.open(xmls[0]) as stream:
+            xml = stream.read(MAX_XML + 1)
+        if len(xml) > MAX_XML or b'<!DOCTYPE' in xml.upper():
+            return None
+        root = ET.fromstring(xml)
+        scenarios = [root] if root.tag == 'Scenario' else root.findall('Scenario')
+        if len(scenarios) != 1 or scenarios[0].get('name', '').strip() != selected['scenario']:
+            return None
+        def member(suffix):
+            matches = [entry for entry in entries if Path(entry.filename).name in (suffix, prefix + '.' + suffix)]
+            if len(matches) != 1:
+                return None, None
+            entry = matches[0]
+            if entry.file_size > 2 * 1024 * 1024:
+                raise ValueError('Bundled reference exceeds the 2 MiB viewer limit')
+            with archive.open(entry) as stream:
+                content = stream.read(2 * 1024 * 1024 + 1)
+            if len(content) > 2 * 1024 * 1024:
+                raise ValueError('Bundled reference exceeds the 2 MiB viewer limit')
+            return content.decode('utf-8'), str(archive_path) + ':' + entry.filename
+        for suffix in (['attack-graph.json'] if kind == 'attack-graph' else [kind + '.html', kind + '.md']):
+            text, path = member(suffix)
+            if text is not None:
+                if kind == 'attack-graph':
+                    graph = json.loads(text)
+                    if not isinstance(graph, dict):
+                        raise ValueError('Bundled attack graph must be a JSON object')
+                    values = dict(graph=graph, dot=member('attack-graph.dot')[0])
+                else:
+                    values = {'html' if suffix.endswith('.html') else 'markdown':text}
+                return dict(values, reference_origin='uploaded-bundle', reference_file=path)
+    return None
+
+
 def reference_details(data):
-    """Export the selected XML with ScenarioForge's own read-only CLI phases."""
+    """Reuse saved documents, otherwise export once into a persistent cache."""
     import subprocess
     import tempfile
     import gzip
     import base64
+    import fcntl
     selected, original = selected_source(data)
     kind = data.get('kind')
     if kind not in ('attack-graph', 'participant-guide', 'facilitator-guide'):
@@ -436,72 +517,99 @@ def reference_details(data):
     repo = Path(data['repo'])
     parent = repo / 'outputs' / 'caf-reference-previews'
     cache = parent / (selected['id'] + '-v2-' + kind + '.json.gz')
-    if parent.is_symlink() or (repo / 'outputs').is_symlink() or cache.is_symlink():
+    generated = parent / selected['id']
+    lock_path = parent / (selected['id'] + '.lock')
+    if parent.is_symlink() or (repo / 'outputs').is_symlink() or cache.is_symlink() or generated.is_symlink() or lock_path.is_symlink():
         raise ValueError('Invalid scenario reference cache path')
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not cache.exists():
-        python = data.get('python') or str(repo / '.venv/bin/python')
-        with tempfile.TemporaryDirectory(dir=parent) as folder:
-            output = Path(folder)
-            # Export a private copy beside the XML so relative artifact paths
-            # keep their base and even an exporter write cannot change the source.
-            command = [python, '-m', 'scenarioforge.cli',
-                       'attack-graph' if kind == 'attack-graph' else 'guides',
-                       '--xml', selected['path'], '--scenario', selected['scenario'],
-                       '--output-dir', folder, '--output-prefix', 'reference']
-            if kind == 'attack-graph':
-                command += ['--format', 'json', '--format', 'dot']
-            else:
-                command += ['--guide-audience', kind.split('-')[0], '--guide-format', 'html']
-            with tempfile.NamedTemporaryFile(dir=Path(selected['path']).parent,
-                    prefix='.caf-reference-', suffix='.xml') as snapshot:
-                snapshot.write(original)
-                snapshot.flush()
-                command[command.index('--xml') + 1] = snapshot.name
-                result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=180)
-            if result.returncode:
-                if 'requires Node.js' in result.stderr:
-                    raise ValueError('ScenarioForge guide export requires Node.js on the ScenarioForge APP VM. Update its provisioning/runtime, then retry.')
-                raise ValueError('ScenarioForge could not export this reference. Check that the saved Flow is resolved and valid, and that ScenarioForge supports the guides and attack-graph CLI phases.')
+    with lock_path.open('a+') as lock:
+        lock_path.chmod(0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not cache.exists():
+            values = _saved_reference(selected, generated, kind)
+            if values is None:
+                python = data.get('python') or str(repo / '.venv/bin/python')
+                with tempfile.TemporaryDirectory(dir=parent) as folder:
+                    output = Path(folder)
+                    command = [python, '-m', 'scenarioforge.cli',
+                               'attack-graph' if kind == 'attack-graph' else 'guides',
+                               '--xml', selected['path'], '--scenario', selected['scenario'],
+                               '--output-dir', folder, '--output-prefix', 'reference']
+                    if kind == 'attack-graph':
+                        command += ['--format', 'json', '--format', 'dot']
+                    else:
+                        other = 'facilitator' if kind == 'participant-guide' else 'participant'
+                        other_cache = parent / (selected['id'] + '-v2-' + other + '-guide.json.gz')
+                        other_exists = other_cache.exists() or _saved_reference(selected, generated, other + '-guide') is not None
+                        audience = kind.split('-')[0] if other_exists else 'both'
+                        command += ['--guide-audience', audience, '--guide-format', 'html']
+                    with tempfile.NamedTemporaryFile(dir=Path(selected['path']).parent,
+                            prefix='.caf-reference-', suffix='.xml') as snapshot:
+                        snapshot.write(original)
+                        snapshot.flush()
+                        command[command.index('--xml') + 1] = snapshot.name
+                        result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=180)
+                    if result.returncode:
+                        if 'requires Node.js' in result.stderr:
+                            raise ValueError('ScenarioForge guide export requires Node.js on the ScenarioForge APP VM. Update its provisioning/runtime, then retry.')
+                        raise ValueError('ScenarioForge could not export this reference. Check that the saved Flow is resolved and valid, and that ScenarioForge supports the guides and attack-graph CLI phases.')
+                    payload = {}
+                    decoder = json.JSONDecoder()
+                    for match in re.finditer(r'\{', result.stdout):
+                        try:
+                            candidate, _ = decoder.raw_decode(result.stdout[match.start():])
+                            if isinstance(candidate, dict) and isinstance(candidate.get('outputs'), dict):
+                                payload = candidate
+                                break
+                        except ValueError:
+                            continue
+                    def artifact(key, audience=None):
+                        outputs = payload.get('outputs', {})
+                        mapped = outputs.get(audience, {}) if audience else outputs
+                        value = mapped.get(key) if isinstance(mapped, dict) else None
+                        fallback = 'reference.' + (audience + '-guide.' if audience else 'attack-graph.') + key
+                        target = Path(value) if isinstance(value, str) else output / fallback
+                        if not target.is_absolute():
+                            target = output / target
+                        text = _reference_file(target, output)
+                        if text is None:
+                            raise ValueError('ScenarioForge did not produce the requested ' + kind + ' artifact. Update ScenarioForge on the APP VM, reload the saved scenario, and retry.')
+                        return target
+                    if kind == 'attack-graph':
+                        exports = {'reference.attack-graph.json':artifact('json'), 'reference.attack-graph.dot':artifact('dot')}
+                    else:
+                        # Older exporters may produce only the requested guide.
+                        exports = {'reference.' + kind + '.html':artifact('html', kind.split('-')[0])}
+                        if audience == 'both':
+                            try:
+                                exports['reference.' + other + '-guide.html'] = artifact('html', other)
+                            except ValueError:
+                                pass
+                    generated.mkdir(mode=0o700, exist_ok=True)
+                    for name, target in exports.items():
+                        target.chmod(0o600)
+                        destination = generated / name
+                        if destination.is_symlink():
+                            raise ValueError('Invalid persistent reference artifact')
+                        os.replace(target, destination)
+                values = _saved_reference(selected, generated, kind)
             if Path(selected['path']).read_bytes() != original:
                 raise ValueError('Scenario XML changed while exporting; reload its scenarios')
-            # Prefer the exporter's declared paths; filenames are its contract.
-            payload = {}
-            decoder = json.JSONDecoder()
-            for match in re.finditer(r'\{', result.stdout):
-                try:
-                    candidate, _ = decoder.raw_decode(result.stdout[match.start():])
-                    if isinstance(candidate, dict) and isinstance(candidate.get('outputs'), dict):
-                        payload = candidate
-                        break
-                except ValueError:
-                    continue
-            def artifact(key, fallback):
-                outputs = payload.get('outputs', {})
-                value = outputs.get(key) if kind == 'attack-graph' else outputs.get(kind.split('-')[0], {}).get(key)
-                target = Path(value) if isinstance(value, str) else output / fallback
-                if not target.is_absolute():
-                    target = output / target
-                if target.is_symlink() or not target.resolve().is_relative_to(output.resolve()) or not target.is_file():
-                    raise ValueError('ScenarioForge did not produce the requested ' + kind + ' artifact. Update ScenarioForge on the APP VM, reload the saved scenario, and retry.')
-                return target.read_text()
             details = dict(kind=kind, scenario=selected['scenario'], source=selected['path'],
-                           xml_sha256=selected['sha256'])
-            if kind == 'attack-graph':
-                details['graph'] = json.loads(artifact('json', 'reference.attack-graph.json'))
-                details['dot'] = artifact('dot', 'reference.attack-graph.dot')
-            else:
-                details['html'] = artifact('html', 'reference.' + kind + '.html')
+                           xml_sha256=selected['sha256'], **values)
             encoded = json.dumps(details, ensure_ascii=False, allow_nan=False).encode()
             if len(encoded) > 2 * 1024 * 1024:
                 raise ValueError('Scenario reference exceeds the 2 MiB viewer limit')
             packed = gzip.compress(encoded)
             if len(packed) > 256 * 1024:
                 raise ValueError('Compressed scenario reference exceeds the transfer limit')
-            temporary = output / 'payload'
-            temporary.write_bytes(packed)
-            temporary.chmod(0o600)
-            os.replace(temporary, cache)
+            with tempfile.NamedTemporaryFile(dir=parent, delete=False) as temporary:
+                temporary.write(packed)
+                temporary_path = Path(temporary.name)
+            try:
+                os.replace(temporary_path, cache)
+            finally:
+                temporary_path.unlink(missing_ok=True)
     packed = cache.read_bytes()
     if len(packed) > 256 * 1024:
         raise ValueError('Invalid scenario reference cache size')

@@ -115,3 +115,107 @@ def test_reference_rejects_missing_or_escaped_declared_file(tmp_path,monkeypatch
         json.dumps({'outputs':{'participant':{'html':str(outside)}}}),''))
     with pytest.raises(ValueError,match='did not produce'):
         guest.dispatch(dict(op='references',roots=[str(tmp_path)],repo=str(tmp_path),path=str(path),selection_id=row['id'],kind='participant-guide'))
+
+
+def reference_payload(result):
+    return json.loads(gzip.decompress(base64.b64decode(result['chunk'])))
+
+
+def test_saved_export_is_reused_and_cached_persistently(tmp_path,monkeypatch):
+    path=source(tmp_path);row=guest.inspect(path)[0]
+    guides=tmp_path/'guides';guides.mkdir()
+    guide=guides/(row['scenario']+'.participant-guide.html');guide.write_text('<h1>Already exported</h1>')
+    monkeypatch.setattr(subprocess,'run',lambda *a,**kw:pytest.fail('Existing export must not be regenerated'))
+    args=dict(op='references',roots=[str(tmp_path)],repo=str(tmp_path),path=str(path),selection_id=row['id'],kind='participant-guide')
+    payload=reference_payload(guest.dispatch(args))
+    assert payload['html']=='<h1>Already exported</h1>' and payload['reference_origin']=='saved-export'
+    guide.unlink()
+    assert reference_payload(guest.dispatch(args))==payload
+    assert list((tmp_path/'outputs/caf-reference-previews').glob('*.json.gz'))
+
+
+def test_both_generated_guides_share_persistent_artifacts(tmp_path,monkeypatch):
+    path=source(tmp_path);row=guest.inspect(path)[0];calls=[]
+    def export(command,**kwargs):
+        calls.append(command)
+        assert command[command.index('--guide-audience')+1]=='both'
+        output=Path(command[command.index('--output-dir')+1]);outputs={}
+        for audience in ('participant','facilitator'):
+            guide=output/('reference.'+audience+'-guide.html');guide.write_text('<h1>'+audience+'</h1>')
+            outputs[audience]={'html':str(guide)}
+        return subprocess.CompletedProcess(command,0,json.dumps({'outputs':outputs}),'')
+    monkeypatch.setattr(subprocess,'run',export)
+    args=dict(op='references',roots=[str(tmp_path)],repo=str(tmp_path),path=str(path),selection_id=row['id'])
+    guest.dispatch(dict(args,kind='participant-guide'))
+    cache=tmp_path/'outputs/caf-reference-previews'
+    for packed in cache.glob('*.json.gz'):packed.unlink()
+    assert reference_payload(guest.dispatch(dict(args,kind='facilitator-guide')))['html']=='<h1>facilitator</h1>'
+    assert reference_payload(guest.dispatch(dict(args,kind='participant-guide')))['html']=='<h1>participant</h1>'
+    assert len(calls)==1
+
+
+def test_concurrent_opens_export_once(tmp_path,monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    path=source(tmp_path);row=guest.inspect(path)[0];started=threading.Event();release=threading.Event();calls=[]
+    def export(command,**kwargs):
+        calls.append(command);started.set();assert release.wait(3)
+        output=Path(command[command.index('--output-dir')+1]);(output/'reference.participant-guide.html').write_text('Exported once')
+        return subprocess.CompletedProcess(command,0,'','')
+    monkeypatch.setattr(subprocess,'run',export)
+    args=dict(op='references',roots=[str(tmp_path)],repo=str(tmp_path),path=str(path),selection_id=row['id'],kind='participant-guide')
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first=pool.submit(guest.dispatch,args);assert started.wait(2)
+        second=pool.submit(guest.dispatch,args);release.set()
+        assert first.result(timeout=4)==second.result(timeout=4)
+    assert len(calls)==1
+
+
+def test_uploaded_markdown_and_graph_are_reused_without_export(tmp_path,monkeypatch):
+    import zipfile
+    import xml.etree.ElementTree as ET
+    folder=tmp_path/'caf-upload-test';folder.mkdir()
+    path=source(folder)
+    tree=ET.parse(path);tree.getroot().remove(tree.getroot().findall('Scenario')[1]);tree.write(path)
+    row=guest.inspect(path)[0]
+    with zipfile.ZipFile(folder/'source','w') as archive:
+        archive.write(path,'scenario.xml')
+        archive.writestr('participant-guide.md','# Saved participant guide\n\nInspect the service.')
+        archive.writestr('attack-graph.json',json.dumps({'nodes':[{'id':'1','name':'Entry'}],'edges':[]}))
+    monkeypatch.setattr(subprocess,'run',lambda *a,**kw:pytest.fail('Bundled documents must not be regenerated'))
+    args=dict(op='references',roots=[str(tmp_path)],repo=str(tmp_path),path=str(path),selection_id=row['id'])
+    guide=reference_payload(guest.dispatch(dict(args,kind='participant-guide')))
+    graph=reference_payload(guest.dispatch(dict(args,kind='attack-graph')))
+    assert guide['markdown'].startswith('# Saved participant guide') and guide['reference_origin']=='uploaded-bundle'
+    assert graph['graph']['nodes'][0]['name']=='Entry' and graph['dot'] is None
+
+
+def test_missing_guide_does_not_regenerate_existing_other_audience(tmp_path,monkeypatch):
+    path=source(tmp_path);row=guest.inspect(path)[0]
+    guides=tmp_path/'guides';guides.mkdir()
+    existing=guides/(row['scenario']+'.facilitator-guide.html');existing.write_text('Saved solution')
+    def export(command,**kwargs):
+        assert command[command.index('--guide-audience')+1]=='participant'
+        output=Path(command[command.index('--output-dir')+1]);(output/'reference.participant-guide.html').write_text('New participant guide')
+        return subprocess.CompletedProcess(command,0,'','')
+    monkeypatch.setattr(subprocess,'run',export)
+    args=dict(op='references',roots=[str(tmp_path)],repo=str(tmp_path),path=str(path),selection_id=row['id'])
+    assert reference_payload(guest.dispatch(dict(args,kind='participant-guide')))['html']=='New participant guide'
+    monkeypatch.setattr(subprocess,'run',lambda *a,**kw:pytest.fail('Saved facilitator guide must not be regenerated'))
+    assert reference_payload(guest.dispatch(dict(args,kind='facilitator-guide')))['html']=='Saved solution'
+    assert existing.read_text()=='Saved solution'
+
+
+@pytest.mark.parametrize('bundle', sorted((Path(__file__).resolve().parents[1]/'ScenarioForge-Bundles').glob('*.zip')), ids=lambda p:p.stem)
+def test_sample_bundle_guides_are_reused(tmp_path,monkeypatch,bundle):
+    import zipfile
+    folder=tmp_path/'caf-upload-test';folder.mkdir()
+    (folder/'source').write_bytes(bundle.read_bytes())
+    path=folder/'scenario.xml'
+    with zipfile.ZipFile(bundle) as archive:path.write_bytes(archive.read('scenario.xml'))
+    row=guest.inspect(path)[0]
+    monkeypatch.setattr(subprocess,'run',lambda *a,**kw:pytest.fail('Existing bundle guide must not be regenerated'))
+    args=dict(op='references',roots=[str(tmp_path)],repo=str(tmp_path),path=str(path),selection_id=row['id'])
+    for kind in ('participant-guide','facilitator-guide'):
+        payload=reference_payload(guest.dispatch(dict(args,kind=kind)))
+        assert payload['reference_origin']=='uploaded-bundle' and payload['markdown'].strip()

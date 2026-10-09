@@ -84,3 +84,5 @@
 #experiment-panel-evaluation label:has(>input[type=checkbox]){display:flex;align-items:center;gap:8px}
 #experiment-panel-evaluation input[type=checkbox]{display:inline-block;width:auto;padding:0;margin:0;flex-shrink:0}
 .evaluation-grid select{display:block;width:100%;margin-top:6px;padding:10px;border:1px solid var(--line);border-radius:6px;font:inherit;background:var(--surface)}
+.evaluation-pages{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.evaluation-pages button[aria-selected=true]{background:#e7f3ef;border-color:var(--teal);color:var(--teal);font-weight:600}.scenario-reference-actions select{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);font:inherit}
+.markdown-guide{background:white;border:1px solid var(--line);border-radius:8px;padding:24px;max-width:1000px;margin:auto}.markdown-guide h1{font-size:28px}.markdown-guide h2,.markdown-guide h3{margin-top:24px}.markdown-guide p,.markdown-guide li{white-space:pre-wrap;overflow-wrap:anywhere}.markdown-guide pre{white-space:pre-wrap;background:#f3f6f4;padding:16px;border-radius:6px;overflow-wrap:anywhere}

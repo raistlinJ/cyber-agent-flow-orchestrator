@@ -349,10 +349,11 @@ function experimentMissingFields(){
  return '';
 }
 function syncScenarioReferences(){
- for(const button of document.querySelectorAll('[data-scenario-reference]'))button.disabled=!(scenarioChoiceVM===snapshot?.roles?.scenarioforge&&$('scenario-selection').value&&$('experiment-sample').value==='scenarioforge-xml');
+ $('scenario-reference-choice').disabled=!(scenarioChoiceVM===snapshot?.roles?.scenarioforge&&$('scenario-selection').value&&$('experiment-sample').value==='scenarioforge-xml');
 }
-for(const button of document.querySelectorAll('[data-scenario-reference]'))button.addEventListener('click',()=>{
- const selection=$('scenario-selection').value,kind=button.dataset.scenarioReference;
+$('scenario-reference-choice').addEventListener('change',event=>{
+ const selection=$('scenario-selection').value,kind=event.target.value;
+ if(!kind)return;event.target.value='';
  const url='/scenario-reference?selection='+encodeURIComponent(selection)+'&kind='+encodeURIComponent(kind);
  const opened=window.open(url,'caf_reference_'+kind,'popup,width=1100,height=850,resizable=yes,scrollbars=yes');
  if(opened){opened.focus();$('scenario-reference-notice').hidden=true;}else{const notice=$('scenario-reference-notice');notice.hidden=false;notice.replaceChildren(el('span','Allow popups for this site, or '));const link=el('a','open the scenario reference');link.href=url;link.target='_blank';link.rel='noopener';notice.append(link);}
@@ -378,6 +379,15 @@ function selectExperimentTab(name,{focus=false}={}){
  }
  document.querySelector('.experiment-tab-content').scrollTop=0;
 }
+function selectEvaluationPage(name,{focus=false}={}){
+ for(const button of document.querySelectorAll('[data-evaluation-tab]')){const selected=button.dataset.evaluationTab===name;button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;$('evaluation-page-'+button.dataset.evaluationTab).hidden=!selected;if(selected&&focus)button.focus();}
+ document.querySelector('.experiment-tab-content').scrollTop=0;
+}
+const evaluationTabs=[...document.querySelectorAll('[data-evaluation-tab]')];
+for(const button of evaluationTabs){
+ button.addEventListener('click',()=>selectEvaluationPage(button.dataset.evaluationTab));
+ button.addEventListener('keydown',event=>{const index=evaluationTabs.indexOf(button),target=event.key==='ArrowRight'?(index+1)%evaluationTabs.length:event.key==='ArrowLeft'?(index+evaluationTabs.length-1)%evaluationTabs.length:event.key==='Home'?0:event.key==='End'?evaluationTabs.length-1:null;if(target!==null){event.preventDefault();selectEvaluationPage(evaluationTabs[target].dataset.evaluationTab,{focus:true});}});
+}
 const experimentTabs=[...document.querySelectorAll('[data-experiment-tab]')];
 for(const button of experimentTabs){
  button.addEventListener('click',()=>selectExperimentTab(button.dataset.experimentTab));
@@ -391,7 +401,7 @@ function validateExperimentFields(form){
  const invalid=[...form.elements].find(input=>input.willValidate&&!input.validity.valid);
  if(!invalid)return true;
  const panel=invalid.closest('[role="tabpanel"]');
- if(panel)selectExperimentTab(panel.id.replace('experiment-panel-',''));
+ if(panel?.dataset.evaluationPage){selectExperimentTab('evaluation');selectEvaluationPage(panel.dataset.evaluationPage);}else if(panel)selectExperimentTab(panel.id.replace('experiment-panel-',''));
  invalid.reportValidity();invalid.focus();return false;
 }
 
@@ -411,7 +421,7 @@ function syncJudge(){
 }
 function resetJudge(){
  const config=snapshot?.experiment_defaults?.judge;
- $('judge-enabled').checked=config?.enabled!==false;
+ $('judge-enabled').checked=config?.enabled===true;
  $('judge-inherit').checked=config?.use_participant_model??!config?.model;
  const model=config?.model||snapshot?.experiment_defaults?.model||{};
  $('judge-provider').value=['openai','litellm','ollama_direct'].includes(model.provider)?model.provider:'openai';
@@ -459,7 +469,7 @@ function describeSample(){
  updateEvaluationBudget();
 }
 
-$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};resetJudge();lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
+$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};selectEvaluationPage('settings');resetJudge();lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
 let scenarioChoices=[],scenarioChoiceVM=null,lastUploadedScenarioFile=null;
 let autoExcludedTargets=[];
 function applyModelNetworkScope(scope){

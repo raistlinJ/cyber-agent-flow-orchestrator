@@ -95,7 +95,9 @@
 <p class="small">Allowed targets start with the selected scenario’s saved topology subnets. Exclusions include the applied LLM provider and its route gateway. Review or edit these comma-separated limits before creating the experiment.</p><p id="scenario-scope-info" class="small" role="status"></p>
 </section>
 <section id="model-config-panel" hidden aria-labelledby="model-config-title"><div class="section-title"><h2 id="model-config-title">CAF model settings on participant VM</h2><span>Read and save through the guest agent</span></div><p class="small">Pull replaces the values shown below with the current VM configuration. Edit those values, then Apply settings to update the VM, its model route, and the defaults used by new experiments.</p><div id="model-config-cards" class="sample-cards"></div></section>
-</section><section role="tabpanel" tabindex="0" id="experiment-panel-evaluation" aria-labelledby="experiment-tab-evaluation" hidden><section class="experiment-settings" aria-labelledby="eval-settings-title">
+</section><section role="tabpanel" tabindex="0" id="experiment-panel-evaluation" aria-labelledby="experiment-tab-evaluation" hidden>
+<div class="evaluation-pages" role="tablist" aria-label="Evaluation pages"><button type="button" role="tab" id="evaluation-tab-settings" data-evaluation-tab="settings" aria-controls="evaluation-page-settings" aria-selected="true">Tasks &amp; trial settings</button><button type="button" role="tab" id="evaluation-tab-judge" data-evaluation-tab="judge" aria-controls="evaluation-page-judge" aria-selected="false" tabindex="-1">Judge LLM</button></div>
+<section id="evaluation-page-settings" role="tabpanel" data-evaluation-page="settings" aria-labelledby="evaluation-tab-settings"><section class="experiment-settings" aria-labelledby="eval-settings-title">
 <section class="experiment-settings" aria-labelledby="evaluation-tasks-title">
 <h3 id="evaluation-tasks-title">Tasks and prompts</h3>
 <fieldset id="sample-task-info" disabled>
@@ -107,7 +109,7 @@
 </fieldset>
 <div id="custom-task-info" hidden>
 <label for="task-source">Task source</label><select id="task-source"><option value="scenario">Use ScenarioForge’s saved or default task</option><option value="custom">Use editable tasks for this experiment</option></select>
-<div class="scenario-reference-actions result-actions" aria-label="Scenario reference documents"><button type="button" data-scenario-reference="attack-graph" disabled>Open attack graph</button><button type="button" data-scenario-reference="participant-guide" disabled>Open participant guide</button><button type="button" data-scenario-reference="facilitator-guide" disabled>Open facilitator guide</button></div><p class="small">Use the participant guide to write the task. The facilitator guide includes solutions; references are for the experiment author and are not automatically sent to the agent.</p><div class="result-actions"><button id="load-scenario-tasks" type="button">Load task draft from scenario</button><button id="edit-scenario-tasks" type="button" hidden>Edit loaded tasks</button></div>
+<div class="scenario-reference-actions"><label for="scenario-reference-choice">Open scenario reference</label><select id="scenario-reference-choice" disabled><option value="">Choose a document…</option><option value="attack-graph">Attack graph</option><option value="participant-guide">Participant guide</option><option value="facilitator-guide">Facilitator guide</option></select></div><p class="small">Saved documents are reused; missing documents are generated once and cached persistently. Use the participant guide to write the task. The facilitator guide includes solutions. References are for the experiment author and are not automatically sent to the agent.</p><div class="result-actions"><button id="load-scenario-tasks" type="button">Load task draft from scenario</button><button id="edit-scenario-tasks" type="button" hidden>Edit loaded tasks</button></div>
 <p id="task-source-note" class="small" role="status">Select a scenario, then load its task draft. Saved evaluation tasks are used first; otherwise the Flow chain, generated flags, public hints and topology seed an editable draft.</p>
 <section id="task-scenario-context" class="task-scenario-context" hidden aria-live="polite"></section>
 <div id="task-edit-actions" hidden><label for="task-import">Import task definitions (JSON array, up to 64 KiB)</label><input id="task-import" type="file" accept=".json,application/json"><button id="add-task" type="button">Add task</button><p class="small">These tasks replace the selected scenario’s tasks in this experiment’s saved XML. Prompts must use actual scenario targets. ScenarioForge validates node references and discovery facts when it exports the deployed scenario.</p></div>
@@ -128,9 +130,12 @@
 <label>Max tries before solution<input form="experiment-form" id="eval-max_tries_before_solution" type="number" min="1" max="1000" required aria-describedby="solution-tries-help"></label>
 </fieldset>
 <p id="solution-tries-help" class="small">Default: 6 agent turns without new progress. Applies only when progressive hints are enabled. The solution includes the walkthrough and answer for the first unsolved challenge. The trial still stops at its turn or time limit.</p>
+<p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
+</section></section>
+<section id="evaluation-page-judge" role="tabpanel" data-evaluation-page="judge" aria-labelledby="evaluation-tab-judge" hidden><section class="experiment-settings">
 <h3>Judge LLM</h3>
-<label><input id="judge-enabled" type="checkbox" checked> Use an LLM judge agent</label>
-<p class="small">The judge reviews cyber-agent-flow execution logs and the final answer on the orchestrator host using read-only tools. It checks tool outputs and errors, and must cite a log it read when logs are available. Passing requires both its verdict and the exact-answer checks. Judge failures are reported as evaluation errors.</p>
+<label><input id="judge-enabled" type="checkbox"> Use an LLM judge agent</label>
+<p class="small">Optional, off by default. Exact answer and flag checks can determine success without a judge. Enable it for additional review of cyber-agent-flow execution logs and the final answer. It uses read-only tools and must cite a log it read when logs are available. When enabled, passing requires both its verdict and the exact-answer checks. Judge failures leave success unverified.</p>
 <label><input id="judge-inherit" type="checkbox" checked> Use the participant’s provider, endpoint and model for the judge</label>
 <fieldset id="judge-model-settings" class="evaluation-grid" disabled>
 <label>Judge provider<select id="judge-provider" form="experiment-form"><option value="openai">OpenAI-compatible</option><option value="ollama_direct">Ollama</option><option value="litellm">LiteLLM</option></select></label>
@@ -144,9 +149,8 @@
 <label>Judge output tokens per call<input id="judge-max_tokens" form="experiment-form" type="number" min="1" max="16384" value="2048" required></label>
 </fieldset>
 <p class="small">The endpoint must be reachable from the orchestrator host. Host credentials configured for that endpoint are reused; participant VM API keys are not copied. These judge settings are saved for reruns.</p>
-<p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
 </section>
-</section></div><div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>
+</section></section></div><div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>
 <p id="create-experiment-hint" class="small" role="status"></p><p id="experiment-error" class="error" role="status"></p><button id="create-experiment" type="submit" disabled aria-describedby="create-experiment-hint" form="experiment-form">Create experiment</button></div>
 </fieldset></dialog>
 <details id="debug-console" class="debug-console" open><summary>Troubleshooting console <span class="small">Commands, sample events and transfer progress</span></summary>

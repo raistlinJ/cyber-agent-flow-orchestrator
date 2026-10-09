@@ -31,6 +31,7 @@ def main():
                 assert op=='references'
                 payload=dict(kind=data['kind'],scenario=item['scenario'],source=item['path'],xml_sha256=item['sha256'])
                 if data['kind']=='attack-graph':payload.update(graph=dict(nodes=[dict(id='1',name='Start'),dict(id='2',name='Target')],edges=[dict(source='1',target='2')]),dot='digraph {1->2}')
+                elif data['kind']=='participant-guide':payload.update(markdown='# Saved participant guide\n\nInspect the target service.\n\n- Read the response\n\n<script>window.UNSAFE_GUIDE=true</script>',reference_origin='uploaded-bundle')
                 else:payload['html']='<!doctype html><html><head><style>h1{color:rgb(0, 128, 0)}</style></head><body><h1>ScenarioForge exported guide</h1><p>Inspect the target service.</p><script>window.UNSAFE_GUIDE=true</script></body></html>'
                 encoded=base64.b64encode(gzip.compress(json.dumps(payload).encode())).decode()
                 return dict(chunk=encoded[data['offset']:data['offset']+16384],total=len(encoded),sha256=hashlib.sha256(encoded.encode()).hexdigest())
@@ -48,11 +49,11 @@ def main():
                     page.locator('[data-route=setup]').click();page.locator('#role-scenarioforge').select_option('9402');page.locator('#role-participant').select_option('9403');page.get_by_role('button',name='Save VM roles').click()
                     page.locator('[data-route=experiments]').click();page.locator('#new-experiment').click();page.locator('#experiment-sample').select_option('scenarioforge-xml');page.get_by_role('tab',name='ScenarioForge',exact=True).click()
                     expect(page.locator('#scenario-options [data-scenario-reference]')).to_have_count(0)
-                    expect(page.locator('#experiment-panel-evaluation [data-scenario-reference="attack-graph"]')).to_be_disabled()
+                    expect(page.locator('#scenario-reference-choice')).to_be_disabled()
                     page.locator('#load-scenarios').click();expect(page.locator('#scenario-selection option')).to_have_count(2,timeout=30000);page.locator('#scenario-selection').select_option(item['id'])
                     page.get_by_role('tab',name='Evaluation',exact=True).click()
                     with page.expect_popup() as popup:
-                        page.locator('#experiment-panel-evaluation [data-scenario-reference="attack-graph"]').click()
+                        page.locator('#scenario-reference-choice').select_option('attack-graph')
                     graph=popup.value;graph.on('pageerror',lambda error:errors.append(str(error)))
                     expect(graph.locator('#reference-title')).to_have_text('Attack graph · Reference lab',timeout=30000);expect(graph.locator('svg[role="img"]')).to_be_visible();expect(graph.locator('#reference-downloads a')).to_have_count(2);expect(graph.locator('#loading-modal')).not_to_be_visible();graph.screenshot(path='/tmp/caf-scenario-attack-graph.png');graph.close()
                     page.get_by_role('tab',name='Evaluation',exact=True).click();page.locator('#task-source').select_option('custom');page.locator('#task-0-prompt').fill('My experiment prompt stays here.')
@@ -63,15 +64,21 @@ def main():
                     expect(page.locator('#task-editor-error')).to_contain_text('contains a verifier answer')
                     page.locator('#task-0-hints').fill('Inspect the target service.\nCheck the response headers.')
                     for kind in ['participant-guide','facilitator-guide']:
-                        with page.expect_popup() as popup:page.locator('#experiment-panel-evaluation [data-scenario-reference="'+kind+'"]').click()
+                        with page.expect_popup() as popup:page.locator('#scenario-reference-choice').select_option(kind)
                         guide=popup.value;guide.on('pageerror',lambda error:errors.append(str(error)))
-                        expect(guide.locator('iframe')).to_be_visible(timeout=30000);frame=guide.frame_locator('iframe');expect(frame.locator('h1')).to_have_text('ScenarioForge exported guide');expect(frame.locator('h1')).to_have_css('color','rgb(0, 128, 0)')
-                        assert guide.frames[1].evaluate('typeof window.UNSAFE_GUIDE')=='undefined'
+                        if kind=='participant-guide':
+                            expect(guide.locator('.markdown-guide h1')).to_have_text('Saved participant guide',timeout=30000)
+                            expect(guide.locator('.markdown-guide li')).to_have_text('Read the response')
+                            expect(guide.locator('#reference-status')).to_contain_text('uploaded bundle')
+                            assert guide.evaluate('typeof window.UNSAFE_GUIDE')=='undefined'
+                        else:
+                            expect(guide.locator('iframe')).to_be_visible(timeout=30000);frame=guide.frame_locator('iframe');expect(frame.locator('h1')).to_have_text('ScenarioForge exported guide');expect(frame.locator('h1')).to_have_css('color','rgb(0, 128, 0)')
+                            assert guide.frames[1].evaluate('typeof window.UNSAFE_GUIDE')=='undefined'
                         guide.screenshot(path='/tmp/caf-scenario-'+kind+'.png');guide.close()
                         expect(page.locator('#task-0-prompt')).to_have_value('My experiment prompt stays here.')
                         expect(page.locator('#task-0-hints')).to_have_value('Inspect the target service.\nCheck the response headers.')
                     page.context.route('**/api/scenarios/references',lambda route:route.fulfill(status=400,json=dict(error='Scenario XML changed; reload the scenario list.')))
-                    with page.expect_popup() as popup:page.locator('#experiment-panel-evaluation [data-scenario-reference="attack-graph"]').click()
+                    with page.expect_popup() as popup:page.locator('#scenario-reference-choice').select_option('attack-graph')
                     failed=popup.value
                     expect(failed.locator('#reference-error')).to_contain_text('Scenario XML changed',timeout=30000)
                     expect(failed.locator('#loading-modal')).not_to_be_visible()
@@ -79,7 +86,7 @@ def main():
                     failed.close()
                     page.context.unroute('**/api/scenarios/references')
                     page.evaluate('window.originalOpen=window.open;window.open=()=>null;')
-                    page.locator('#experiment-panel-evaluation [data-scenario-reference="attack-graph"]').click()
+                    page.locator('#scenario-reference-choice').select_option('attack-graph')
                     expect(page.locator('#scenario-reference-notice')).to_be_visible()
                     expect(page.locator('#scenario-reference-notice a')).to_have_attribute('href','/scenario-reference?selection='+item['id']+'&kind=attack-graph')
                     page.evaluate('window.open=window.originalOpen;')

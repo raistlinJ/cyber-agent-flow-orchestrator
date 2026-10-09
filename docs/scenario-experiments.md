@@ -112,22 +112,29 @@ Deploy the matching orchestrator, evaluator, ScenarioForge, and participant CAF 
 
 ### Reference documents while writing a prompt
 
-Select a saved scenario in **New → ScenarioForge**. **Open attack graph**, **Open
-participant guide** and **Open facilitator guide** open separate popup windows;
-the same buttons are available on **Evaluation** beside the task editor. Allow
+Select a saved scenario in **New → ScenarioForge**. On **Evaluation → Tasks &
+trial settings**, use the **Open scenario reference** dropdown beside the task
+editor to open the attack graph, participant guide or facilitator guide. Allow
 popups for the orchestrator site, or use the fallback link if a popup is blocked.
 
-References use ScenarioForge's `attack-graph` and `guides` CLI exports from the
-selected saved XML. The graph is visual and offers JSON/DOT downloads; guides
-are formatted and offer HTML downloads. Exports do not deploy the scenario or
+References reuse saved ScenarioForge exports beside the selected XML and existing
+documents in uploaded scenario bundles. Missing documents use ScenarioForge's
+`attack-graph` and `guides` CLI exports from a copy of the selected XML. The graph
+is visual and offers JSON and, when available, DOT downloads; guides are formatted
+and offer HTML or Markdown downloads. Exports do not deploy the scenario or
 change your experiment draft. The participant guide helps define the task, while
 the facilitator guide includes solutions. Opening a reference does not include
 it in the agent's prompt or hints.
 
-Reference exports are cached by the selected XML's content and path. Changing the
-XML requires reloading the scenario list and selecting its new revision. Guide
-export requires Node.js in the ScenarioForge APP VM and a ScenarioForge version
-with these CLI phases. Popup loading/errors are independent of dashboard refresh.
+Reference documents persist under `outputs/caf-reference-previews/` in the
+ScenarioForge checkout, keyed by the selected XML's content, path and scenario.
+Opening or reloading a popup reuses the disk cache, including after a service
+restart. Concurrent opens share an export lock. If both guides are missing, one
+export produces both; an existing guide is never regenerated while exporting the
+other. Changing the XML requires reloading the scenario list and selecting its
+new revision. Generating a missing guide requires Node.js in the ScenarioForge
+APP VM and a ScenarioForge version with these CLI phases. Popup loading/errors
+are independent of dashboard refresh.
 
 
 ### Progressive hints
@@ -174,9 +181,13 @@ separately and counts as assistance.
 
 ### Judge LLM
 
-New WebUI experiments default to **Use an LLM judge agent** on the Evaluation
-tab. By default it uses the participant's provider, endpoint and model; turn off
-that checkbox to choose a separate OpenAI-compatible, Ollama or LiteLLM judge.
+Configure the judge on **New → Evaluation → Judge LLM**. It is optional and off
+by default unless the server's experiment defaults explicitly enable it. Exact
+answer and flag checks can determine success without a judge. Enable **Use an
+LLM judge agent** for an additional review of the execution evidence. By default
+it uses the participant's provider, endpoint and model; turn off **Use the
+participant's provider, endpoint and model** to choose a separate
+OpenAI-compatible, Ollama or LiteLLM judge.
 Judge turns (default 6), total review time (120 seconds) and output tokens per
 call (2,048) are independent of the participant's budgets and saved for reruns.
 Existing experiments retain their saved configuration.
@@ -191,8 +202,9 @@ page through full saved outputs when a tool record contains only a preview.
 Missing execution logs are clearly flagged as limited evidence in Results and
 the formatted report. `judge_execution_trace_reviewed`, `judge_evidence_files`
 and `judge_evidence_warning` record what was available and read.
-It never runs commands or probes live VM state. A trial passes only when both
-the judge and the deterministic success criteria pass. A malformed, unavailable
+It never runs commands or probes live VM state. When the judge is enabled, a
+trial passes only when both the judge and the deterministic success criteria
+pass. A malformed, unavailable
 or timed-out judge produces `judge_error`, with success unverified; it never
 silently falls back to passing with the deterministic checker alone.
 
