@@ -120,6 +120,8 @@ function renderResultSummary(data){
  for(const trial of data.evaluation.attempts||[])if(trial.provide_progressive_hints&&trial.progressive_hints_available===false)target.append(el('p',`${trial.trial_id} · Progressive hints unavailable: ${trial.progressive_hints_reason||'No usable guidance was supplied; ran unassisted.'}`,'notice'));
  for(const trial of data.evaluation.attempts||[])if(trial.judge_enabled){
   const details=el('details'),summary=el('summary',`${trial.trial_id} · Judge: ${trial.judge_error?'error':trial.judge_passed?'pass':'fail'} · ${duration(trial.judge_seconds)}`);details.append(summary,el('p',trial.judge_error||trial.judge_reason||'Judge verdict recorded.'));details.append(el('p',`${trial.judge_calls??0} model calls · ${trial.judge_prompt_tokens??'unknown'} input / ${trial.judge_output_tokens??'unknown'} output tokens · Full evidence review: judge.json in the run bundle`,'small'));target.append(details);
+  if(trial.judge_evidence_warning)details.append(el('p',trial.judge_evidence_warning,'notice'));
+  if(trial.judge_evidence_files?.length)details.append(el('p','Evidence read: '+trial.judge_evidence_files.join(', '),'small'));
  }
  renderTrialFailures(workflow,target,data.failure_diagnostics);
 

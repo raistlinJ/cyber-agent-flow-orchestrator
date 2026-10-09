@@ -322,11 +322,14 @@ def render(report, *, root=None, recorded_at=None):
     judged = [row for row in rows if row.get('judge_enabled')]
     if judged:
         doc.heading('Judge agent reviews')
-        doc.table(['Trial','Verdict','Score','Time','Model calls','Input tokens','Output tokens','Reason'],
+        doc.table(['Trial','Verdict','Score','Time','Model calls','Input tokens','Output tokens','Execution logs reviewed','Reason'],
                   [[row['trial_id'], 'ERROR' if row.get('judge_error') else 'PASS' if row.get('judge_passed') else 'FAIL',
                     row.get('judge_score'), seconds(row.get('judge_seconds')), row.get('judge_calls'),
-                    row.get('judge_prompt_tokens'), row.get('judge_output_tokens'), row.get('judge_error') or row.get('judge_reason')]
+                    row.get('judge_prompt_tokens'), row.get('judge_output_tokens'), row.get('judge_execution_trace_reviewed'), row.get('judge_error') or row.get('judge_reason')]
                    for row in judged])
+        limited = [row for row in judged if row.get('judge_evidence_warning')]
+        if limited:
+            doc.table(['Trial','Judge evidence limitation'], [[row['trial_id'],row['judge_evidence_warning']] for row in limited])
         judge_config = config.get('judge') or {}
         doc.table(['Judge setting','Value'], [[key,value] for key,value in judge_config.items() if key != 'model'] +
                   [['model.' + key,value] for key,value in (judge_config.get('model') or {}).items()])

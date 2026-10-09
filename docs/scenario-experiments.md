@@ -183,6 +183,14 @@ Existing experiments retain their saved configuration.
 
 The judge runs on the **orchestrator host**, using bounded read-only tools to
 inspect collected result, message, tool-event, model-call and assistance files.
+It also reads CAF's native transcript, per-tool JSON logs and saved text outputs
+under `guest-output/runs/<run_id>/`. When execution logs are present, a verdict
+must cite an actual log read; native tool records take priority over summaries.
+The review checks tool arguments, observed output, exit codes and errors. It can
+page through full saved outputs when a tool record contains only a preview.
+Missing execution logs are clearly flagged as limited evidence in Results and
+the formatted report. `judge_execution_trace_reviewed`, `judge_evidence_files`
+and `judge_evidence_warning` record what was available and read.
 It never runs commands or probes live VM state. A trial passes only when both
 the judge and the deterministic success criteria pass. A malformed, unavailable
 or timed-out judge produces `judge_error`, with success unverified; it never

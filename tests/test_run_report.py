@@ -56,13 +56,14 @@ def test_report_includes_judge_verdict_errors_and_escaped_reasons():
     report['run_configuration']['judge']={'enabled':True,'model':{'name':'review-model','provider':'openai'}}
     reviewed=report['evaluation']['attempts'][1]
     reviewed.update(judge_enabled=True,judge_passed=False,judge_score=0,judge_seconds=2,judge_calls=2,
-                    judge_prompt_tokens=40,judge_output_tokens=15,judge_reason='Unsupported completion claim <script>unsafe</script>')
-    report['evaluation']['attempts'][2].update(judge_enabled=True,judge_error='Judge endpoint unavailable')
+                    judge_prompt_tokens=40,judge_output_tokens=15,judge_execution_trace_reviewed=True,judge_reason='Unsupported completion claim <script>unsafe</script>')
+    report['evaluation']['attempts'][2].update(judge_enabled=True,judge_error='Judge endpoint unavailable',judge_evidence_warning='No execution logs collected')
     docs=run_report.render(report,recorded_at='fixed')
     md,html=docs['experiment-summary.md'].replace('\\',''),docs['experiment-summary.html']
     assert 'Judge agent reviews' in md and 'review-model' in md
-    assert '| trial-1 | FAIL | 0 | 2.00 s | 2 | 40 | 15 |' in md
+    assert '| trial-1 | FAIL | 0 | 2.00 s | 2 | 40 | 15 | Yes |' in md
     assert '| trial-2 | ERROR |' in md and 'Judge endpoint unavailable' in md
+    assert 'Judge evidence limitation' in md and 'No execution logs collected' in md
     assert '<script>unsafe</script>' not in html and '&lt;script&gt;unsafe&lt;/script&gt;' in html
 
 

@@ -130,7 +130,7 @@
 <p id="solution-tries-help" class="small">Default: 6 agent turns without new progress. Applies only when progressive hints are enabled. The solution includes the walkthrough and answer for the first unsolved challenge. The trial still stops at its turn or time limit.</p>
 <h3>Judge LLM</h3>
 <label><input id="judge-enabled" type="checkbox" checked> Use an LLM judge agent</label>
-<p class="small">The judge reviews saved trial evidence on the orchestrator host using read-only tools. Passing requires both its verdict and the exact-answer checks. Judge failures are reported as evaluation errors.</p>
+<p class="small">The judge reviews cyber-agent-flow execution logs and the final answer on the orchestrator host using read-only tools. It checks tool outputs and errors, and must cite a log it read when logs are available. Passing requires both its verdict and the exact-answer checks. Judge failures are reported as evaluation errors.</p>
 <label><input id="judge-inherit" type="checkbox" checked> Use the participant’s provider, endpoint and model for the judge</label>
 <fieldset id="judge-model-settings" class="evaluation-grid" disabled>
 <label>Judge provider<select id="judge-provider" form="experiment-form"><option value="openai">OpenAI-compatible</option><option value="ollama_direct">Ollama</option><option value="litellm">LiteLLM</option></select></label>
