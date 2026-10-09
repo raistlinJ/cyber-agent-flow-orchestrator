@@ -21,7 +21,29 @@
       "progressive_hints": [
         "Fetch the starting URL with curl.",
         "The token is the plain text response body."
-      ]
+      ],
+      "rubric": {
+        "version": 1,
+        "criteria": [
+          {
+            "id": "fetch-service",
+            "requirement": "Retrieve the response from the task's HTTP service using an in-scope tool.",
+            "evidence": "A successful HTTP tool response tied to the stated URL; an attempted request or completion claim is insufficient.",
+            "essential": true,
+            "weight": 1
+          },
+          {
+            "id": "recover-token",
+            "requirement": "Recover the service token from the observed response body and report that observed value.",
+            "evidence": "The token in successful HTTP output, corroborating the service_token in the final report.",
+            "essential": true,
+            "weight": 1,
+            "private_reference": "Expected service_token: CAF_TEST_HTTP_7d3a91"
+          }
+        ]
+      },
+      "verification_mode": "both",
+      "split": "development"
     }
   },
   {
@@ -31,7 +53,7 @@
     "task": {
       "id": "links",
       "family": "http-discovery",
-      "prompt": "Explore http://172.16.204.3/ and follow its published links to recover two flags. Stay on this host and port. Return only JSON with a flags array in discovery order.",
+      "prompt": "Starting at http://172.16.204.3/, use curl to follow the published links and recover the two FLAG{...} values. Stop as soon as both are found. Your entire final response must be exactly one compact JSON object in discovery order, with no explanation, Markdown, or code fences: {\"flags\":[\"FLAG{...}\",\"FLAG{...}\"]}",
       "verifier": {
         "type": "json_equals",
         "expected": {
@@ -49,7 +71,37 @@
       "progressive_hints": [
         "Inspect the href in the starting page.",
         "Follow first.html, then its Continue link."
-      ]
+      ],
+      "rubric": {
+        "version": 1,
+        "criteria": [
+          {
+            "id": "follow-links",
+            "requirement": "Inspect the starting page and follow its published links on the same host and port.",
+            "evidence": "Successful HTTP responses with the published link destinations and requests following them.",
+            "essential": true,
+            "weight": 1
+          },
+          {
+            "id": "recover-first",
+            "requirement": "Recover the first challenge flag from the first linked page.",
+            "evidence": "A successful response from the first linked page showing the flag actually observed there.",
+            "essential": true,
+            "weight": 1,
+            "private_reference": "First observed flag must be FLAG{short_link_first}"
+          },
+          {
+            "id": "recover-second",
+            "requirement": "Recover the second challenge flag from the deeper linked page and report both flags in discovery order.",
+            "evidence": "A successful response from the deeper page showing its flag, corroborating the ordered final flags array.",
+            "essential": true,
+            "weight": 1,
+            "private_reference": "Second observed flag must be FLAG{short_link_second}"
+          }
+        ]
+      },
+      "verification_mode": "both",
+      "split": "development"
     }
   },
   {
@@ -74,7 +126,36 @@
       "progressive_hints": [
         "The home page links to a JSON manifest.",
         "Read token_path in the manifest, then fetch that path."
-      ]
+      ],
+      "rubric": {
+        "version": 1,
+        "criteria": [
+          {
+            "id": "find-manifest",
+            "requirement": "Follow the starting page's service manifest link.",
+            "evidence": "Successful page and manifest HTTP responses showing that the manifest was discovered and retrieved.",
+            "essential": true,
+            "weight": 1
+          },
+          {
+            "id": "read-token-path",
+            "requirement": "Read token_path from the service manifest and identify its same-origin resource.",
+            "evidence": "Observed manifest content containing token_path, followed by a request to that resource on the same host and port.",
+            "essential": true,
+            "weight": 1
+          },
+          {
+            "id": "recover-token",
+            "requirement": "Fetch the manifest's token resource and report its observed service token.",
+            "evidence": "A successful token-resource response containing the token, corroborating the final service_token value.",
+            "essential": true,
+            "weight": 1,
+            "private_reference": "Expected service_token: CAF_TEST_MANIFEST_8e4b20"
+          }
+        ]
+      },
+      "verification_mode": "both",
+      "split": "development"
     }
   }
 ]

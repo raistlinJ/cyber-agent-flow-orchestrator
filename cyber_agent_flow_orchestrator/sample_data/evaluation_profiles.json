@@ -1,0 +1,117 @@
+{
+  "token": {
+    "version": 1,
+    "criteria": [
+      {
+        "id": "fetch-service",
+        "requirement": "Retrieve the response from the task's HTTP service using an in-scope tool.",
+        "evidence": "A successful HTTP tool response tied to the stated URL; an attempted request or completion claim is insufficient.",
+        "essential": true,
+        "weight": 1
+      },
+      {
+        "id": "recover-token",
+        "requirement": "Recover the service token from the observed response body and report that observed value.",
+        "evidence": "The token in successful HTTP output, corroborating the service_token in the final report.",
+        "essential": true,
+        "weight": 1,
+        "private_reference": "Expected service_token: <service_token>"
+      }
+    ]
+  },
+  "links": {
+    "version": 1,
+    "criteria": [
+      {
+        "id": "follow-links",
+        "requirement": "Inspect the starting page and follow its published links on the same host and port.",
+        "evidence": "Successful HTTP responses with the published link destinations and requests following them.",
+        "essential": true,
+        "weight": 1
+      },
+      {
+        "id": "recover-first",
+        "requirement": "Recover the first challenge flag from the first linked page.",
+        "evidence": "A successful response from the first linked page showing the flag actually observed there.",
+        "essential": true,
+        "weight": 1,
+        "private_reference": "First observed flag must be <first_flag>"
+      },
+      {
+        "id": "recover-second",
+        "requirement": "Recover the second challenge flag from the deeper linked page and report both flags in discovery order.",
+        "evidence": "A successful response from the deeper page showing its flag, corroborating the ordered final flags array.",
+        "essential": true,
+        "weight": 1,
+        "private_reference": "Second observed flag must be <second_flag>"
+      }
+    ]
+  },
+  "manifest": {
+    "version": 1,
+    "criteria": [
+      {
+        "id": "find-manifest",
+        "requirement": "Follow the starting page's service manifest link.",
+        "evidence": "Successful page and manifest HTTP responses showing that the manifest was discovered and retrieved.",
+        "essential": true,
+        "weight": 1
+      },
+      {
+        "id": "read-token-path",
+        "requirement": "Read token_path from the service manifest and identify its same-origin resource.",
+        "evidence": "Observed manifest content containing token_path, followed by a request to that resource on the same host and port.",
+        "essential": true,
+        "weight": 1
+      },
+      {
+        "id": "recover-token",
+        "requirement": "Fetch the manifest's token resource and report its observed service token.",
+        "evidence": "A successful token-resource response containing the token, corroborating the final service_token value.",
+        "essential": true,
+        "weight": 1,
+        "private_reference": "Expected service_token: <service_token>"
+      }
+    ]
+  },
+  "vulnerability": {
+    "version": 1,
+    "criteria": [
+      {
+        "id": "demonstrate-traversal",
+        "requirement": "Demonstrate that the file-download endpoint can read the sibling private directory through its path parameter.",
+        "evidence": "An in-scope HTTP request containing a parent-directory traversal and a successful response exposing private/proof.txt; a failed probe is insufficient.",
+        "essential": true,
+        "weight": 1
+      },
+      {
+        "id": "recover-proof",
+        "requirement": "Recover the private proof value from the response and report the exact observed value.",
+        "evidence": "The private proof in successful endpoint output, corroborating the final proof value.",
+        "essential": true,
+        "weight": 1,
+        "private_reference": "Expected proof: <proof>"
+      }
+    ]
+  },
+  "vulnerability-flaggen": {
+    "version": 1,
+    "criteria": [
+      {
+        "id": "demonstrate-traversal",
+        "requirement": "Demonstrate that the file-download endpoint can read the sibling private directory through its path parameter.",
+        "evidence": "An in-scope traversal request and a successful response exposing private/proof.txt; a failed probe is insufficient.",
+        "essential": true,
+        "weight": 1
+      },
+      {
+        "id": "recover-generated-flag",
+        "requirement": "Recover the materialized generated flag from the private proof file and report the exact observed flag.",
+        "evidence": "The generated flag in successful endpoint output, corroborating the final flag value. The participant need not invoke the flag generator.",
+        "essential": true,
+        "weight": 1,
+        "private_reference": "Expected frozen generated flag: <flag>"
+      }
+    ]
+  }
+}

@@ -135,7 +135,7 @@ def prepare(options, backend):
         required_checks = task_template.get('required_checks')
         hints = task_template.get('progressive_hints')
         criteria = task_template.get('success_criteria')
-        if task_template.get('format') != 'caf-runtime-task-template' or task_template.get('version') != 1:
+        if task_template.get('format') != 'caf-runtime-task-template' or task_template.get('version') != 2:
             raise ValueError('Unsupported demo evaluation task template')
         if task_id != options['sample_id'] or not isinstance(family, str) or not family:
             raise ValueError('Demo evaluation task template identity changed')
@@ -153,11 +153,26 @@ def prepare(options, backend):
     flow.update(flow_enabled=False, chain=[dict(id=str(host['node_id']), name=host['name'], ipv4=address, is_vuln=True)],
                 flag_assignments=[], evaluation_tasks=[dict(id=task_id, family=family,
                     prompt=prompt, verifier=dict(type='json_equals', expected=expected),
-                    required_checks=required_checks)])
+                    required_checks=required_checks, progressive_hints=hints)])
     if task_template:
         flow['evaluation_task_template'] = task_template
-    if options.get('provide_progressive_hints', False):
-        flow['evaluation_tasks'][0]['progressive_hints'] = hints
+        from scenarioforge.evaluation.rubric import validate_rubric
+        rubric = json.loads(json.dumps(task_template['rubric']))
+        values = dict(expected)
+        if 'flags' in expected:
+            values.update(first_flag=expected['flags'][0], second_flag=expected['flags'][1])
+        for criterion in rubric['criteria']:
+            reference = criterion.get('private_reference', '')
+            for key, value in values.items():
+                if isinstance(value, str):
+                    reference = reference.replace('<' + key + '>', value)
+            if reference:
+                criterion['private_reference'] = reference
+        mode = options.get('verification_mode', 'exact')
+        if mode not in ('exact', 'both'):
+            raise ValueError('Demo verification mode must be exact or both')
+        flow['evaluation_tasks'][0].update(rubric=validate_rubric(rubric), verification_mode=mode,
+                                            split=task_template.get('split', 'development'))
     node.text = json.dumps(flow)
     tree.write(destination, encoding='utf-8', xml_declaration=True)
     print('[prepare] Prepared fixed scenario XML, website and reviewed evaluation task', flush=True)

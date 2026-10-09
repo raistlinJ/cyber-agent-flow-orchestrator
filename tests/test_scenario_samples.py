@@ -64,6 +64,8 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         assert saved['workflow']['scenarioforge']['mode']=='execute'
         assert saved['workflow']['prepare'][0]['id']=='fixed-demo-xml'
         assert saved['sample_id']==sample_id
+        prepared_options=json.loads(saved['workflow']['prepare'][0]['argv'][-1])
+        assert prepared_options['verification_mode']==('both' if custom_limits else 'exact')
         if custom_limits:
             assert saved['runtime']['judge']['model']['name']==saved['runtime']['model']['name']
             assert saved['runtime']['judge']['max_turns']==3
@@ -99,8 +101,10 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
 
 
 @pytest.mark.parametrize('sample_id',['smoke','tools-vs-helper'])
+@pytest.mark.parametrize('mode', ['exact', 'both'])
 @pytest.mark.parametrize('hints_enabled', [False, True])
-def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hints_enabled):
+def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,monkeypatch,sample_id,hints_enabled,mode):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]/'scenarioforge'))
     assets=tmp_path/'imported'
     (assets/'site/deeper').mkdir(parents=True)
     (assets/'docker-compose.yml').write_text('services: {}')
@@ -113,7 +117,8 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hi
     ET.SubElement(sec,'item',v_path='/old/docker-compose.yml')
     node=ET.SubElement(ET.SubElement(editor,'FlagSequencing'),'FlowState')
     template_hints=['First bundled hint.','Second bundled hint.','Third bundled hint.']
-    task_template=dict(format='caf-runtime-task-template',version=1,id=sample_id,family='http-discovery',
+    task_template=dict(format='caf-runtime-task-template',version=2,id=sample_id,family='http-discovery',
+        rubric=json.loads((Path(__file__).resolve().parents[1]/'cyber_agent_flow_orchestrator/sample_data/evaluation_profiles.json').read_text())['token' if sample_id=='smoke' else 'links'],
         prompt_template=('Fetch http://<deployed-host>/ and return the token.' if sample_id=='smoke' else
                          'Explore http://<deployed-host>/ and return both flags.'),
         success_criteria=dict(type='json_equals',expected_shape=(
@@ -138,7 +143,7 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hi
             tree.write(kwargs['xml_path'])
             return {'persisted':True}
     output=tmp_path/'run/scenario.xml'
-    options=dict(source=str(source),destination=str(output),sample_id=sample_id,scenario='Fixed demo',provide_progressive_hints=hints_enabled)
+    options=dict(source=str(source),destination=str(output),sample_id=sample_id,scenario='Fixed demo',provide_progressive_hints=hints_enabled,verification_mode=mode)
     demo_prepare.prepare(options,Backend())
     flow=json.loads(ET.parse(output).find('.//FlowState').text)
     task=flow['evaluation_tasks'][0]
@@ -148,10 +153,9 @@ def test_preparation_uses_resolved_host_and_fresh_verifier(tmp_path,sample_id,hi
     assert task['required_checks'] == ['containers', 'services', 'ports']
     assert flow['chain'][0]['ipv4']=='10.77.0.7'
     assert 'http://10.77.0.7/' in task['prompt']
-    assert ('progressive_hints' in task) is hints_enabled
-    assert len(task.get('progressive_hints', [])) == (3 if hints_enabled else 0)
-    if hints_enabled:
-        assert task['progressive_hints'] == template_hints
+    assert task['progressive_hints'] == template_hints
+    assert task['verification_mode'] == mode and task['rubric']['version'] == 1
+    assert all('<' not in c.get('private_reference', '') for c in task['rubric']['criteria'])
     # Optional cross-repository contract check with ScenarioForge's own CLI.
     sf_python = os.environ.get('SCENARIOFORGE_TEST_PYTHON')
     if sf_python:
@@ -173,7 +177,8 @@ export_package(xml_path=xml, graph={'schema_version': 2, 'scenario': 'Fixed demo
     definitions=state['evaluation_tasks'])
 public = json.loads((out / 'participant/tasks.json').read_text())
 private = json.loads((out / 'evaluator/verifiers.json').read_text())
-assert public[0]['prompt'] == state['evaluation_tasks'][0]['prompt']
+assert public[0]['prompt'].startswith(state['evaluation_tasks'][0]['prompt'])
+assert 'Preserve the task' in public[0]['prompt']
 assert private[public[0]['id']] == state['evaluation_tasks'][0]['verifier']
 # Reproduce the deployed report: healthy website, no configured injects.
 from datetime import datetime, timezone

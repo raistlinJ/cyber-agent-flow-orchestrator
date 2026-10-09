@@ -177,3 +177,5 @@ Use `--resume` for unchanged studies. To summarize existing evaluations, use
 `cyber-agent-flow-eval study --evaluations run-a run-b --output study-report`.
 No ScenarioForge application import is needed in the evaluator, and none of these
 features require the orchestrator for standalone use.
+
+For a task using Both, rubric completion credit is retained even if the final answer fails the exact check. Verified success still requires both checks to pass; a criterion score of 1 does not override an incorrect JSON answer. The rubric scaffold preserves the task's required final response format and uses the recorded execution logs for evidence when the task requires JSON only.

@@ -361,6 +361,11 @@ class ScenarioExperiments:
                 runtime['execution'].update({key: value for key, value in overrides.items() if key != 'repetitions'})
             if judge is not None:
                 runtime['judge'] = judge
+            if _sample_id is not None:
+                command = cfg['prepare'][0]
+                options = json.loads(command['argv'][-1])
+                options['verification_mode'] = 'both' if runtime.get('judge', {}).get('enabled') else 'exact'
+                command['argv'][-1] = json.dumps(options)
             if controls is not None:
                 from .experiment_controls import apply
                 apply(controls, runtime, cfg, workspace.path/'condition-inputs'/request_id, self.runtime, self.cfg)
