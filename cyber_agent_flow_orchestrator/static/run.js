@@ -27,12 +27,11 @@ async function refreshRun({silent=false}={}){
  finally{loadingModal.set('run',false);loading=false;retryAllowed=retry;$('refresh-run').disabled=false;showRefreshStatus();scheduleRunRefresh();}
 }
 $('close-window').addEventListener('click',()=>{window.close();$('run-status').textContent='You can close this browser tab.';});
-$('refresh-run').addEventListener('click',()=>view==='transcript'?transcriptView.refresh():refreshRun());
+$('refresh-run').addEventListener('click',refreshRun);
 new ResizeObserver(()=>document.body.style.setProperty('--console-height',$('debug-console').getBoundingClientRect().height+'px')).observe($('debug-console'));
 try{$('debug-console').open=localStorage.getItem('caf-console-open')!=='false';}catch{}
 $('debug-console').addEventListener('toggle',()=>{try{localStorage.setItem('caf-console-open',String($('debug-console').open));}catch{}});
 $('download-console').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([$('console-output').textContent],{type:'text/plain'})),link=el('a');link.href=url;link.download=`${runId}-console.log`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 setInterval(()=>{for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);}},1000);
-if(!['results','progress','transcript'].includes(view)||!runId||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(runId)){$('run-error').hidden=false;$('run-error').textContent='Invalid run window URL.';$('refresh-run').disabled=true;}
-else if(view==='transcript'){$('window-title').textContent='Agent transcript';document.title='Transcript · '+runId;$('run-id').textContent=runId;$('debug-console').hidden=true;transcriptView.open(runId);}
+if(!['results','progress'].includes(view)||!runId||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(runId)){$('run-error').hidden=false;$('run-error').textContent='Invalid run window URL.';$('refresh-run').disabled=true;}
 else{$('window-title').textContent=view==='results'?'Experiment results':'Experiment progress';document.title=`${view==='results'?'Results':'Progress'} · ${runId}`;$('run-id').textContent=runId;$(view==='results'?'result-panel':'sample-activity-panel').hidden=false;refreshRun();}

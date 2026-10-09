@@ -299,13 +299,6 @@ Navigation preserves form edits, results, logs and active-operation progress wit
 reloading the application. In PVE mode, users see their own VM selections and saved
 runs. Full workflow launch, recovery and other export formats remain CLI operations.
 
-The run queue remains visible after dismissing a launch overlay or closing a
-Progress window. Click its pulsing guest-agent indicator to open the live CAF
-transcript: prompts, replies, tool output, errors and provider-returned reasoning.
-Server-sent events replay the host's transcript mirror and work independently of
-the automatic refresh preference. Opening a transcript adds no VM polling and
-closing it never stops the experiment. See [queue and transcript details](docs/scenario-experiments.md#run-queue-and-live-transcript).
-
 See [HTTPS/login setup](docs/https-login.md) and the
 [WebUI configuration, screenshot and status definitions](docs/webui.md).
 

@@ -29,7 +29,6 @@ let snapshot = null, fetching = false, failed = false, rolesDirty = false, roles
 let initialized=false, operation=null, waitingForObservation=false, waitingForMaintenance=false, redirecting=false, maintenanceStarting=false;
 let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, busySince=performance.now();
 let experimentCreating=false;
-let pendingLaunch=null;
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
 const clientLog=[];
 const pages={overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
@@ -86,7 +85,7 @@ function syncBusy(){
  else{label=maintenanceFailed?`Dashboard loaded · ${lastChange.role} ${lastChange.action} ${lastChange.status}; see Applications`:'Dashboard loaded';bar.hidden=true;}
  if(percent==null)bar.removeAttribute('value');else bar.value=percent;
  $('loading-label').textContent=!busy&&loading?`Background refresh · ${label}`:label;$('loading-elapsed').textContent=loading?`${Math.floor((performance.now()-busySince)/1000)}s elapsed`:'';
- loadingModal.set('dashboard',loading&&busy,label,percent,Boolean(pendingLaunch));
+ loadingModal.set('dashboard',loading&&busy,label,percent);
  syncUpdateControls(busy?label:null);
  syncCreateExperiment();
 }
@@ -115,8 +114,6 @@ function render(data) {
   const list=el('dl');detail(list,'Guest agent',vm.guest_access);if(vm.qmp_status && vm.qmp_status!==vm.power)detail(list,'Emulator state',vm.qmp_status);detail(list,'Application',vm.application_present==null?'Not checked':vm.application_present?'Present':'Not found at configured location');
   detail(list,'Processes observed',vm.guest_access==='reachable'?String(vm.processes.length):'Unknown');
   card.append(list);
-  const agentRun=(data.runs||[]).find(run=>runActive(run)&&vm.role==='participant'&&run.saved_settings?.participant_vmid===vm.vmid);
-  if(agentRun)card.append(agentTranscriptButton(agentRun,data.backend_type));
   for(const service of vm.services||[]){if(service.unit===vm.unit){card.append(el('p',`${service.unit} · ${service.error?'Check unavailable':service.LoadState==='not-found'?'not found':service.ActiveState+' / '+service.SubState}`,'small'));}}
   if(vm.error||vm.guest_error)card.append(el('div',vm.error||vm.guest_error,'error'));
   if(!vm.vmid)card.append(el('p',data.roles?'Choose this VM on the Lab setup page.':'Set monitoring.core_vmid in your workflow YAML.','small'));
@@ -173,7 +170,7 @@ $('sign-out').addEventListener('click',async()=>{
  finally{operation=null;syncBusy();schedulePoll();}
 });
 
-function clearPrivateView(){pendingLaunch=null;$('window-notice').hidden=true;$('window-notice').replaceChildren();$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();snapshot=null;modelDrafts={};$('model-config-cards').replaceChildren();$('model-config-panel').hidden=true;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
+function clearPrivateView(){$('window-notice').hidden=true;$('window-notice').replaceChildren();$('sample-global-status').hidden=true;$('sample-global-status').replaceChildren();snapshot=null;modelDrafts={};$('model-config-cards').replaceChildren();$('model-config-panel').hidden=true;clientLog.length=0;renderConsole();waitingForObservation=false;waitingForMaintenance=false;$('updates-panel').hidden=true;$('update-message').textContent='';$('update-cards').replaceChildren();$('update-jobs').replaceChildren();$('machines').replaceChildren();$('commands').replaceChildren();$('runs').replaceChildren();$('experiment-dialog').close();$('experiment-sample').replaceChildren();$('new-experiment').disabled=true;for(const role of ['scenarioforge','participant','core'])$('role-'+role).replaceChildren();$('role-panel').hidden=true;}
 function renderRoles(data){
  $('roles-unavailable').hidden=Boolean(data.roles);
  const panel=$('role-panel');panel.hidden=!data.roles;if(!data.roles)return;
@@ -319,7 +316,6 @@ function renderExperiments(data){
   actions.append(iconAction(run.scenario_experiment?'Stop after current stage or trial':'Stop after current trial','■',!data.owner||!(run.sample_id||run.scenario_experiment)||!live||run.recorded_status==='stopping',()=>experimentAction('stop',id)));
   actions.append(iconAction('View results','▤',!data.owner||ready,()=>showResults(id)));
   actions.append(iconAction('Open progress','◴',!p||ready,()=>openProgress(id)));
-  if(live)actions.append(agentTranscriptButton(run,data.backend_type));
   row.append(title,state,el('td',p?`${p.finished_trials} / ${p.planned_trials}`:run.evaluation?`${summary.trials_observed} / ${run.evaluation.planned_trials}`:'—'),el('td',p?.verified_successes??summary?.verified_successes??'—'),actions);runs.append(row);
  }
  updateDisplayList($('runs'),runs);
@@ -563,7 +559,7 @@ $('experiment-form').addEventListener('submit',async event=>{
 async function experimentRequestWithProgress(payload,action="create"){
  let finished=false,timer=null,lastStatus='Submitting request and checking access…';
  const started=Date.now(),title=action==='run'?'Starting experiment':'Creating experiment';
- const render=()=>{if(finished)return;const label=`${title} · ${lastStatus} · ${Math.floor((Date.now()-started)/1000)}s elapsed`;operation=label;if(action==='create')creationProgress(2,'running',label);else if(pendingLaunch){pendingLaunch.message=label;renderSampleActivity(snapshot||{runs:[]});}syncBusy();};
+ const render=()=>{if(finished)return;const label=`${title} · ${lastStatus} · ${Math.floor((Date.now()-started)/1000)}s elapsed`;operation=label;if(action==='create')creationProgress(2,'running',label);syncBusy();};
  render();
  const heartbeat=setInterval(render,1000);
  const poll=async()=>{
@@ -585,24 +581,14 @@ async function experimentRequestWithProgress(payload,action="create"){
 async function experimentAction(action,id){
  if(isBusy()||sampleStarting)return;
  if(action==='run'&&rolesDirty){$('sample-message').textContent='Save VM role changes on Lab setup before running.';return;}
- if(action==='run'){const saved=snapshot?.runs.find(run=>run.output.split('/').pop()===id);pendingLaunch={...saved,output:saved?.output||id,recorded_status:'starting',message:'Submitting experiment to the coordinator…'};renderSampleActivity(snapshot);}
  sampleStarting=true;operation=action==='stop'?'Requesting experiment stop…':'Starting experiment…';syncBusy();
  try{await finishDashboardRead();const payload={run_id:id,...(action==='run'?{request_id:crypto.randomUUID().replaceAll('-','')}:{})};const response=action==='run'?await experimentRequestWithProgress(payload,'run'):await apiFetch('/api/experiments/stop',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(payload)});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Experiment action failed');$('sample-message').textContent=action==='stop'?'Stop requested. The current stage or trial will finish and results will be collected.':'Experiment started.';const link=el('a',' Open progress ↗');link.href=runWindowURL('progress',result.run_id);link.addEventListener('click',event=>{event.preventDefault();openProgress(result.run_id);});$('sample-message').append(link);await refresh();}
  catch(error){$('sample-message').textContent=error.message;}
- finally{sampleStarting=false;operation=null;pendingLaunch=null;if(snapshot){renderExperiments(snapshot);renderSampleActivity(snapshot);}syncBusy();schedulePoll();}
+ finally{sampleStarting=false;operation=null;if(snapshot)renderExperiments(snapshot);syncBusy();schedulePoll();}
 }
 function renderSampleActivity(data){
- const active=(data.runs||[]).filter(runActive),target=$('sample-global-status');
- if(pendingLaunch&&!active.some(run=>run.output===pendingLaunch.output))active.unshift(pendingLaunch);
- target.hidden=!active.length;
- const next=el('div'),heading=el('h2','Run queue');heading.dataset.displayKey='heading';next.append(heading);
- for(const run of active){const id=run.output.split('/').pop(),p=run.sample_progress,card=el('article',null,'queued-run');card.dataset.displayKey=id;
-  const name=p?.name||run.scenario_experiment?.scenario||run.workflow_id||id;
-  card.append(el('strong',name),badge(run.recorded_status),el('p',run.message||p?.current_trial?.transport?.activity||'Waiting for the next stage.','small'));
-  const agent=agentTranscriptButton(run,data.backend_type);agent.disabled=run===pendingLaunch;card.append(agent);
-  const progress=el('a','Open progress');progress.href=runWindowURL('progress',id);progress.target='_blank';progress.rel='noopener';card.append(progress,el('p','Closing a window keeps this run in the queue.','small'));next.append(card);
- }
- updateDisplayList(target,next);
+ const active=(data.runs||[]).find(run=>run.sample_progress?.active),target=$('sample-global-status');target.replaceChildren();target.hidden=!active;
+ if(active){const p=active.sample_progress,id=active.output.split('/').pop(),link=el('a','View experiment activity ↗');link.href=runWindowURL('progress',id);link.addEventListener('click',event=>{event.preventDefault();openProgress(id);});target.append(document.createTextNode(`${p.name} · ${active.recorded_status} · ${p.finished_trials}/${p.planned_trials} trials finished. `),link);}
 }
 
 const maintenanceRefs={};
@@ -693,10 +679,12 @@ async function checkExperimentCompletion(){
    if(response.status===401){sessionExpired();return;}
    if(!response.ok)continue;
    const current=await dashboardJSON(response);
-   const index=snapshot?.runs.indexOf(previous)??-1;
-   if(index>=0){snapshot.runs[index]=current;changed=true;}
+   if(['completed','completed_with_errors','cancelled','failed','interrupted'].includes(current.recorded_status)&&!runActive(current)){
+    const index=snapshot?.runs.indexOf(previous)??-1;
+    if(index>=0){snapshot.runs[index]=current;changed=true;}
+   }
   }
-  if(changed){renderExperiments(snapshot);renderSampleActivity(snapshot);for(const button of document.querySelectorAll('[data-transcript-run]')){const run=snapshot.runs.find(run=>run.output.split('/').pop()===button.dataset.transcriptRun);button.classList.toggle('is-executing',Boolean(run&&agentIsExecuting(run)));}syncBusy();}
+  if(changed){renderExperiments(snapshot);syncBusy();}
  }catch(error){console.warn('Experiment completion check failed',error.message);}
  finally{schedulePoll();}
 }

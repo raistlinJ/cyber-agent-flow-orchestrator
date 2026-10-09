@@ -152,7 +152,6 @@ class UserDashboard:
             judge={key:value for key,value in runtime.get('judge', {}).items() if key!='model'} | ({'model':{key:value for key,value in runtime['judge']['model'].items() if key!='api_key_env'}} if runtime.get('judge', {}).get('model') else {}),
             evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192,'max_tries_before_solution':6}.get(key)) for key in
                 ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window', 'max_tries_before_solution')}))
-        value['backend_type'] = self.runtime['backend']['type']
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         value['model_config_writable'] = self.runtime['backend']['type']=='fusion' or bool((value['updates'] or {}).get('can_update'))
         access.current()
@@ -169,13 +168,6 @@ class UserDashboard:
             value = service.results(path) if kind == 'results' else service.status(path)
         access.current()
         return value
-
-    def transcript_path(self, access, run_id):
-        workspace = self.workspace(access)
-        path = workspace.run_path(run_id)
-        service.journal(path)  # Verify this owner-scoped run exists before headers.
-        access.current()
-        return path
 
     def run_sample(self, access, sample_id, request_id):
         created = self.scenarios.create_sample(access, sample_id, request_id)

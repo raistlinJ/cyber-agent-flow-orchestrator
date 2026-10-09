@@ -21,7 +21,6 @@ function renderWorkflowProgress(run,target){
    else if(role.role==='participant'&&current.id!=='evaluate')activity='Waiting for scenario preparation and evaluation inputs. '+role.responsibility;
   }
   card.append(el('p',activity,'small'));roles.append(card);
-  if(role.role==='participant'&&run.sample_progress?.current_trial)card.append(agentTranscriptButton(run,run.backend_type));
  }
  section.append(roles);
  const observation=p.guest_observation;
