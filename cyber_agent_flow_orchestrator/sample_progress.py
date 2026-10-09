@@ -43,7 +43,7 @@ def build(root, journal, report, state, coordinator):
         if transport.is_file():
             record = ev.read_json(transport)
             trial['transport'] = {key: record.get(key) for key in ('phase', 'updated_at', 'files_uploaded', 'files_total',
-                                      'bytes_uploaded', 'bytes_total', 'execution_started_at')}
+                                      'bytes_uploaded', 'bytes_total', 'execution_started_at', 'live_transcript_bytes', 'live_transcript_error')}
             trial['transport']['activity'] = PHASES.get(record.get('phase'),
                 'Collecting trial outputs' if record.get('stopped') and not record.get('collected') else
                 'Scoring and exporting trial results' if record.get('collected') else

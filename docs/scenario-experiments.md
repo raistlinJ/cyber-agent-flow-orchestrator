@@ -172,6 +172,35 @@ retry feedback when no intermediate hint is due; this feedback is audited
 separately and counts as assistance.
 
 
+### Run queue and live transcript
+
+Starting an experiment adds it to the run queue. **Keep running in queue** closes
+the launch overlay without cancelling the request or coordinator. Closing
+Progress or Transcript windows also leaves the run active; Stop remains an
+explicit action. Completed runs stay in the Experiments history.
+
+Click the **QEMU guest agent** indicator (VMware Tools on Fusion) to open the
+live transcript. The indicator pulses while the participant worker is executing.
+It is available in the run queue, active experiment rows, the participant's
+machine card and Progress. The transcript displays prompts, assistant replies,
+tool calls/results, errors, hints and reasoning actually returned by the provider.
+Updates arrive as CAF emits events and model turns return; token-by-token model
+streaming is not enabled by this view. Follow output can be paused, and Refresh
+reconnects without duplicating events.
+
+The evaluator mirrors bounded event chunks through its existing guest status
+checks on both Proxmox and Fusion. The authenticated transcript uses server-sent
+events from this **host** journal, with reconnect cursors and replay when a window
+is reopened. Viewing adds no guest polling. Automatic refresh **Never** still
+allows lightweight run-queue updates, Progress updates and transcript streaming;
+it does not trigger full VM scans. Displayed output is text only and common
+credentials are redacted. The latest 400 events are shown; complete original
+events and the host mirror are included in the run bundle.
+
+Pull the evaluator and orchestrator on the host, run `uv sync` and restart the
+WebUI. The updated worker/helper is sent on each new trial. This feature requires
+no participant or CORE reprovisioning and no ScenarioForge update.
+
 ### Judge LLM
 
 New WebUI experiments default to **Use an LLM judge agent** on the Evaluation

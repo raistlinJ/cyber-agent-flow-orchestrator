@@ -85,6 +85,7 @@ def status(output):
     return {'output': str(root), 'workflow_id': data['workflow']['id'],
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,
             'coordinator_active': coordinator_active,
+            'backend_type': runtime.get('backend', {}).get('type'),
             'sample_id': data.get('sample_id'), 'scenario_experiment': data.get('scenario_experiment'), 'message': 'Stop requested; finishing the current stage or trial and collecting results' if stopping else data.get('message'),
             'sample_progress': sample_progress,
             'trial_failures': failures, 'failure_diagnostics': diagnostics,

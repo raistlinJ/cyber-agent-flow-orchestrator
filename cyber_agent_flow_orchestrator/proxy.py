@@ -26,6 +26,8 @@ async def api_errors(request, handler):
 
 
 def upstream_timeout(path):
+    if path.endswith('/transcript-stream'):
+        return ClientTimeout(total=None, sock_connect=10, sock_read=15)
     # Sample creation imports a bundle and snapshots XML through multiple QGA calls.
     slow = path.endswith('/artifact') or path in (
         '/api/scenarios/upload', '/api/scenarios/list', '/api/scenarios/tasks', '/api/experiments/create',
@@ -57,7 +59,7 @@ def application(upstream_port, proxy_key, config):
         if slots.locked():
             raise web.HTTPServiceUnavailable(text='Server busy')
         # The client cannot select an upstream or supply trusted proxy headers.
-        headers = {k: request.headers[k] for k in ('Cookie', 'Origin', 'Content-Type', 'X-CSRF-Token') if k in request.headers}
+        headers = {k: request.headers[k] for k in ('Cookie', 'Origin', 'Content-Type', 'X-CSRF-Token', 'Last-Event-ID') if k in request.headers}
         headers.update({'Host': config['authority'], 'X-Orchestrator-Proxy-Key': proxy_key,
                         'X-Forwarded-Proto': 'https', 'X-Forwarded-For': request.remote or 'unknown'})
         async with slots:
@@ -72,15 +74,15 @@ def application(upstream_port, proxy_key, config):
                                                        headers=headers, data=body if request.method == 'POST' else None,
                                                        allow_redirects=False,
                                                        timeout=upstream_timeout(request.path)) as response:
-                    if request.path.endswith('/artifact') and response.status == 200:
+                    if (request.path.endswith('/artifact') or request.path.endswith('/transcript-stream')) and response.status == 200:
                         result = web.StreamResponse(status=response.status)
                         for key in ('Content-Type', 'Content-Length', 'Content-Disposition', 'Cache-Control',
-                                    'Content-Security-Policy', 'X-Content-Type-Options'):
+                                    'Content-Security-Policy', 'X-Content-Type-Options', 'X-Accel-Buffering'):
                             if key in response.headers:
                                 result.headers[key] = response.headers[key]
                         result.headers['Strict-Transport-Security'] = 'max-age=31536000'
                         await result.prepare(request)
-                        async for chunk in response.content.iter_chunked(1024 * 1024):
+                        async for chunk in response.content.iter_any():
                             await result.write(chunk)
                         await result.write_eof()
                         return result

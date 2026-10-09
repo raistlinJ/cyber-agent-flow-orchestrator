@@ -6,6 +6,7 @@ import logging
 import traceback
 from pathlib import Path
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 from .model_config import ModelConfigError
@@ -68,7 +69,8 @@ def handler(dashboard, *, auth, proxy_key, origin):
     protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
                         '/scenario-reference': ('scenario_reference.html', 'text/html'), '/scenario_reference.js': ('scenario_reference.js', 'text/javascript'),
                         '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),
-                        '/run_config.js': ('run_config.js', 'text/javascript'), '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
+                        '/run_config.js': ('run_config.js', 'text/javascript'), '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript'), '/transcript.js': ('transcript.js', 'text/javascript')}
+    stream_lock, stream_counts = threading.Lock(), {}
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
@@ -135,6 +137,79 @@ def handler(dashboard, *, auth, proxy_key, origin):
             name, mime = entry
             self.respond(200, (assets / name).read_bytes(), mime)
 
+        def transcript_stream(self, token, session, run_id):
+            from . import transcript
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                after = int(self.headers.get('Last-Event-ID') or query.get('after', ['0'])[0])
+                access = auth.access(token, revalidate=False)
+                root = dashboard.transcript_path(access, run_id)
+                batch = transcript.read(root, after)
+                state = transcript.state(root)
+            except (ValueError, FileNotFoundError, KeyError):
+                self.respond(404, {'error':'Run or transcript cursor unavailable'})
+                return
+            owner = session['username']
+            with stream_lock:
+                if sum(stream_counts.values()) >= 16 or stream_counts.get(owner, 0) >= 3:
+                    self.respond(429, {'error':'Close another transcript window before opening a new one'})
+                    return
+                stream_counts[owner] = stream_counts.get(owner, 0) + 1
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.send_header('X-Accel-Buffering', 'no')
+                self.end_headers()
+                def send(kind, value, cursor=None):
+                    message = ('id: '+str(cursor)+'\n' if cursor is not None else '') + 'event: '+kind+'\ndata: '+json.dumps(value, ensure_ascii=False)+'\n\n'
+                    self.wfile.write(message.encode())
+                    self.wfile.flush()
+                self.wfile.write(b'retry: 1000\n\n')
+                send('state', state)
+                deadline, checked, validated = time.monotonic()+25, time.monotonic(), time.monotonic()
+                while True:
+                    if not auth.session(token, revalidate=False):
+                        send('access-error', {'error':'Your session expired. Sign in again.'})
+                        break
+                    if time.monotonic()-validated >= 10:
+                        access.current()
+                        validated = time.monotonic()
+                    for event in batch['events']:
+                        send('transcript', event, event['id'])
+                    after = batch['cursor']
+                    if time.monotonic()-checked >= 3:
+                        state = transcript.state(root)
+                        send('state', state)
+                        checked = time.monotonic()
+                    if not state['active'] and not batch['more']:
+                        tail = transcript.read(root, after)
+                        if tail['events']:
+                            batch = tail
+                            continue
+                        send('complete', state)
+                        break
+                    if time.monotonic() >= deadline:
+                        break  # EventSource reconnects with its last byte cursor.
+                    if not batch['more']:
+                        self.wfile.write(b': heartbeat\n\n')
+                        self.wfile.flush()
+                        time.sleep(1)
+                    batch = transcript.read(root, after)
+            except AccessDenied:
+                try:
+                    send('access-error', {'error':'Access not granted'})
+                except OSError:
+                    pass
+            except (OSError, ValueError, KeyError):
+                pass  # Disconnecting a reader never affects its coordinator.
+            finally:
+                with stream_lock:
+                    stream_counts[owner] -= 1
+                    if not stream_counts[owner]:
+                        del stream_counts[owner]
+
         def do_GET(self):
             if not self.trusted():
                 return
@@ -174,8 +249,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(200, dashboard.read())
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):
                     parts = path.split('/')
-                    if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv', 'artifact'):
+                    if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv', 'artifact', 'transcript-stream'):
                         self.respond(404, {'error': 'Not found'})
+                        return
+                    if parts[4] == 'transcript-stream':
+                        self.transcript_stream(token, session, parts[3])
                         return
                     try:
                         access = auth.access(token, revalidate=False)

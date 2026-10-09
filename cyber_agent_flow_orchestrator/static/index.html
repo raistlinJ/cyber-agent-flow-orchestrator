@@ -11,7 +11,7 @@
 </nav>
 <main>
 <div id="loading-status" class="loading-status" role="status" aria-live="polite"><span id="loading-label">Preparing dashboard…</span><span id="loading-elapsed"></span><progress id="loading-progress" max="100" aria-label="Dashboard loading progress"></progress></div>
-<p id="sample-global-status" class="sample-global-status" role="status" hidden></p>
+<section id="sample-global-status" class="run-queue" aria-label="Run queue" hidden></section>
 <p id="window-notice" class="notice" role="status" hidden></p>
 <fieldset id="dashboard-controls" class="workspace-controls" aria-label="Dashboard controls" disabled>
 <div class="heading"><div><p class="eyebrow">LAB OPERATIONS</p><h1 id="page-title" tabindex="-1">Overview</h1><p id="page-intro" class="intro">Live machines, application processes, and workflow activity.</p></div><div class="result-actions"><button id="refresh" type="button">↻ Refresh view</button><button id="recheck-vms" type="button" title="Bypass observation caches and scan the selected VMs">Recheck VMs</button></div></div>
@@ -48,7 +48,7 @@
 
 </div>
 </fieldset>
-<div data-page="setup" hidden><section aria-labelledby="refresh-title"><div class="section-title"><h2 id="refresh-title">Refresh preferences</h2></div><div class="refresh-settings"><label for="refresh-period">Automatic refresh</label><select id="refresh-period"><option value="0">Never</option><option value="1" selected>Every 1 minute</option><option value="2">Every 2 minutes</option><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option></select><span class="small">Saved in this browser. Never pauses page refreshes; experiments still update when they finish.</span></div>
+<div data-page="setup" hidden><section aria-labelledby="refresh-title"><div class="section-title"><h2 id="refresh-title">Refresh preferences</h2></div><div class="refresh-settings"><label for="refresh-period">Automatic refresh</label><select id="refresh-period"><option value="0">Never</option><option value="1" selected>Every 1 minute</option><option value="2">Every 2 minutes</option><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option></select><span class="small">Saved in this browser. Never pauses VM refreshes; the run queue, progress windows and live transcripts keep updating.</span></div>
 </section></div>
 <footer><span>VM power, guest access, and application presence are checked separately.</span><span>Samples use ScenarioForge, CORE and your selected CAF participant</span></footer>
 </main>
