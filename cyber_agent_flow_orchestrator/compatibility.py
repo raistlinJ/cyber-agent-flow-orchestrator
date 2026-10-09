@@ -1,5 +1,6 @@
 """Check the evaluator's actual host API, not just its package version."""
 import importlib
+import inspect
 import sys
 
 
@@ -17,12 +18,18 @@ def check_evaluator():
             'proxmox': ('authorized_operations', 'UPLOAD_CHUNK'),
             'guest_agent': ('MAINTENANCE_LOCK', 'MAINTENANCE_PENDING', 'RPC_INPUT_LIMIT', 'SUPPORTED_OPERATIONS'),
             'fusion': ('vm_lock_path',),
+            'rubric': ('validate_rubric', 'participant_scaffold', 'aggregate'),
+            'studies': ('compare', 'summarize'),
+            'usage': ('validate_pricing',),
         }
         for name, symbols in modules.items():
             module = importlib.import_module('cyber_agent_flow_eval.' + name)
             for symbol in symbols:
                 if not hasattr(module, symbol):
                     raise ImportError(f'cyber_agent_flow_eval.{name}.{symbol} is missing')
+        runner = importlib.import_module('cyber_agent_flow_eval.runner')
+        if 'prepare_trial' not in inspect.signature(runner.run).parameters:
+            raise ImportError('Evaluator runner.run lacks per-trial preparation support')
         guest = importlib.import_module('cyber_agent_flow_eval.guest_agent')
         required = {'preflight', 'start', 'stop', 'status', 'hook', 'stat', 'write', 'hint_request', 'hint_reply'}
         if not required.issubset(guest.SUPPORTED_OPERATIONS):
@@ -31,7 +38,7 @@ def check_evaluator():
     except ImportError as exc:
         raise RuntimeError(
             f'Incompatible evaluator at {location}: {exc}. '
-            'This orchestrator requires the evaluator host API (0.4.2+), including integration.py, '
+            'This orchestrator requires the evaluator host API (0.5.0+), including rubric scoring, studies, pricing, integration.py, '
             'reporting.py, Proxmox authorization, guest maintenance locking, preflight/reset-hook cleanup, shared VM locks and stdin uploads. Update the evaluator checkout '
             'to a revision containing those files, then rerun python3 install.py. '
             'uv sync alone cannot restore missing source files.'

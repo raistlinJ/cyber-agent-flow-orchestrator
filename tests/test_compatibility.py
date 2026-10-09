@@ -47,3 +47,11 @@ def test_old_helper_without_capability_contract_is_rejected(monkeypatch):
     monkeypatch.delattr(guest_agent,'SUPPORTED_OPERATIONS')
     with pytest.raises(RuntimeError,match='SUPPORTED_OPERATIONS is missing'):
         check_evaluator()
+
+
+def test_rubric_modules_with_old_runner_are_rejected(monkeypatch):
+    from cyber_agent_flow_eval import runner
+    from cyber_agent_flow_orchestrator.compatibility import check_evaluator
+    monkeypatch.setattr(runner,'run',lambda spec,output:[])
+    with pytest.raises(RuntimeError,match='per-trial preparation support'):
+        check_evaluator()

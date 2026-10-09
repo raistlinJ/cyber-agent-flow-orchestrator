@@ -31,7 +31,7 @@ let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, bus
 let experimentCreating=false;
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
 const clientLog=[];
-const pages={overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
+const pages={studies:['Studies','Controlled comparisons across ScenarioForge scenarios.'],overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
 function routePage(focus=false){
  const route=location.hash.slice(1),page=Object.hasOwn(pages,route)?route:'overview';
  if(page!==route)history.replaceState(null,'','#'+page);
@@ -131,6 +131,7 @@ function render(data) {
  if(!jobs.length)commands.append(el('p','No unfinished workflow commands recorded. Applications may still be running above.','empty'));
  updateDisplayList($('commands'),commands);
  renderExperiments(data);
+ if(window.renderStudyMembers)renderStudyMembers(data);
  waitingForMaintenance=Boolean((data.updates?.jobs||[]).some(job=>['queued','running'].includes(job.status)));waitingForObservation=Boolean(data.refreshing&&(data.loading?data.loading.total>0:(!data.checked_at||data.vms.length>0)));if(!waitingForObservation)foregroundChecks=false;tick();syncBusy();
 }
 function tick(){const age=snapshot?.checked_at?Math.max(0,(Date.now()-Date.parse(snapshot.checked_at))/1000):null;const stale=failed||(age!=null&&age>Math.max(60,Number($('refresh-period').value)*120));$('connection').textContent=failed?'Dashboard unavailable':stale?'Observation is stale':snapshot?.checked_at?'Monitoring lab':'Checking machines…';$('pulse').className='dot'+(stale||!snapshot?.checked_at?' muted':'');$('checked').textContent=age==null?'Waiting for first check':`Checked ${duration(age)} ago${snapshot.refreshing?' · refreshing':''}`;for(const clock of document.querySelectorAll('[data-seconds]')){let seconds=Number(clock.dataset.seconds);if(clock.dataset.live==='yes'&&(!stale||clock.dataset.source==='sample')&&clock.dataset.observed)seconds+=Math.max(0,(Date.now()-Date.parse(clock.dataset.observed))/1000);clock.textContent=duration(seconds);clock.title=stale&&clock.dataset.source!=='sample'?'Last observation; refresh required':clock.dataset.source==='sample'?'Elapsed time since sample or trial start':'Elapsed time since process start';}}
@@ -333,6 +334,9 @@ function experimentMissingFields(){
   if(!$('scenario-allowed').value.trim())return 'Enter allowed target IPs or CIDRs on the Cyber-agent-flow tab.';
  }
  const taskError=taskValidationMessage();if(taskError)return 'Evaluation: '+taskError;
+ try{experimentControls();}catch(error){return error.message;}
+ const taskDefs=$('task-source').value==='custom'?experimentTasks():scenarioTaskDefinitions;
+ if(taskDefs?.some(t=>['judge','both'].includes(t.verification_mode))&&!$('judge-enabled').checked)return 'Enable Judge LLM for judge/both task verification.';
  const invalid=[...$('experiment-form').elements].find(input=>input.willValidate&&(!input.validity.valid||(input.required&&typeof input.value==='string'&&!input.value.trim())));
  if(invalid){const panel=invalid.closest('[role="tabpanel"]');return 'Complete the required fields on the '+(panel?$(panel.getAttribute('aria-labelledby')).textContent:'Experiment')+' tab.';}
  if(modelDrafts.participant){
@@ -469,7 +473,7 @@ function describeSample(){
  updateEvaluationBudget();
 }
 
-$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};selectEvaluationPage('settings');resetJudge();lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
+$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};customConditions=[];renderConditions();for(const id of ['price-participant-input','price-participant-output','price-judge-input','price-judge-output','price-generation'])$(id).value='';$('condition-order-seed').value='42';$('reset-each-trial').checked=true;$('extra-reset-hooks').checked=false;$('extra-reset-hooks').disabled=!snapshot?.extra_reset_hooks_available;selectEvaluationPage('settings');resetJudge();lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
 let scenarioChoices=[],scenarioChoiceVM=null,lastUploadedScenarioFile=null;
 let autoExcludedTargets=[];
 function applyModelNetworkScope(scope){
@@ -562,7 +566,7 @@ $('experiment-form').addEventListener('submit',async event=>{
  $('experiment-error').textContent='';
  startCreationProgress(false);
  experimentCreating=true;operation='Creating experiment…';syncBusy();for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=true;
- try{creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),judge:judgeSettings(),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{} )}:{sample_id:$('experiment-sample').value}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
+ try{creationProgress(2,'running','Waiting for earlier dashboard reads to finish…');operation='Creating experiment · Waiting for earlier dashboard reads to finish…';syncBusy();await finishDashboardRead();const response=await experimentRequestWithProgress({request_id:crypto.randomUUID().replaceAll('-',''),judge:judgeSettings(),controls:experimentControls(),...($('provide-progressive-hints').checked?{provide_progressive_hints:true}:{}),...(scenario?{selection_id:$('scenario-selection').value,allowed_targets:$('scenario-allowed').value,disallowed_targets:$('scenario-disallowed').value,...(experimentTasks()!==null?{tasks:experimentTasks()}:{} )}:{sample_id:$('experiment-sample').value}),evaluation:Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]))});const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to create experiment');creationProgress(2,'complete','Experiment saved · complete');$('experiment-dialog').close();$('sample-message').textContent='Experiment created. Press its Run icon when ready.';await refresh();}
  catch(error){const current=creationSteps.findIndex(step=>step.state==='running');if(current>=0)creationProgress(current,'failed',creationSteps[current].message+' · failed: '+error.message);$('experiment-error').textContent=error.message;}
  finally{experimentCreating=false;operation=null;for(const input of $('experiment-form').querySelectorAll('button,select'))input.disabled=false;syncBusy();schedulePoll();}
 });
@@ -698,3 +702,24 @@ async function checkExperimentCompletion(){
  }catch(error){console.warn('Experiment completion check failed',error.message);}
  finally{schedulePoll();}
 }
+
+let customConditions=[];
+function experimentControls(){
+ const ids=new Set();for(const row of customConditions){if(!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(row.id)||ids.has(row.id))throw Error('Condition IDs must be valid and unique.');ids.add(row.id);if(!row.source)throw Error('Choose a condition catalog.');if(new Set(row.tools).size!==row.tools.length)throw Error('Condition tools must be distinct.');}
+ const pricing={};for(const key of ['participant','judge']){const a=$('price-'+key+'-input').value,b=$('price-'+key+'-output').value;if(Boolean(a)!==Boolean(b))throw Error('Enter both input and output prices, or leave both empty.');if(a){pricing[key]={input_per_million:Number(a),output_per_million:Number(b)};}}if($('price-generation').value)pricing.generation_cost_usd=Number($('price-generation').value);
+ return {order_seed:Number($('condition-order-seed').value),reset_each_trial:$('reset-each-trial').checked,use_configured_reset_hooks:$('extra-reset-hooks').checked,conditions:customConditions,...(Object.keys(pricing).length?{pricing}:{})};
+}
+function renderConditions(){
+ const target=$('condition-editor');target.replaceChildren();const choices=snapshot?.condition_catalogs||{'baseline':{tools:['nmap','curl','python3']},'http-helper':{tools:['nmap','curl','python3','http_flag_walk']}};
+ customConditions.forEach((row,index)=>{const card=el('fieldset',null,'condition-row');card.append(el('legend','Condition '+(index+1)));
+  const field=(label,node)=>{const holder=el('label',label);holder.append(node);card.append(holder);};
+  const id=el('input');id.value=row.id;id.addEventListener('input',()=>{row.id=id.value;syncCreateExperiment();});field('Condition ID',id);
+  const source=el('select');for(const key of Object.keys(choices))source.add(new Option(key,key));source.value=row.source;source.addEventListener('change',()=>{row.source=source.value;row.tools=[...choices[row.source].tools];renderConditions();syncCreateExperiment();});field('Tool catalog',source);
+  const tools=el('input');tools.value=row.tools.join(', ');tools.addEventListener('input',()=>{row.tools=tools.value.split(',').map(t=>t.trim()).filter(Boolean);syncCreateExperiment();});field('Allowed tools (comma separated)',tools);
+  const guidance=el('textarea');guidance.rows=3;guidance.value=row.guidance||'';guidance.maxLength=32000;guidance.addEventListener('input',()=>{row.guidance=guidance.value;});field('Participant guidance (optional)',guidance);
+  const hints=el('input');hints.type='checkbox';hints.checked=row.provide_progressive_hints||false;hints.addEventListener('change',()=>{row.provide_progressive_hints=hints.checked;});field('Provide progressive hints in this condition',hints);
+  const remove=el('button','Remove condition');remove.type='button';remove.addEventListener('click',()=>{customConditions.splice(index,1);renderConditions();syncCreateExperiment();});card.append(remove);target.append(card);
+ });
+}
+$('add-condition').addEventListener('click',()=>{let n=1;while(customConditions.some(c=>c.id==='condition-'+n))n++;customConditions.push({id:'condition-'+n,source:'baseline',tools:['nmap','curl','python3'],guidance:'',provide_progressive_hints:false});renderConditions();syncCreateExperiment();});
+$('baseline-helper-conditions').addEventListener('click',()=>{customConditions=[{id:'baseline',source:'baseline',tools:['nmap','curl','python3'],guidance:'',provide_progressive_hints:false},{id:'added-helper',source:'http-helper',tools:['nmap','curl','python3','http_flag_walk'],guidance:'',provide_progressive_hints:false}];renderConditions();syncCreateExperiment();});

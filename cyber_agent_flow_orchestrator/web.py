@@ -65,7 +65,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
     authority = urlsplit(origin).netloc
     public_assets = {'/task_editor.js': ('task_editor.js', 'text/javascript'), '/http.js': ('http.js', 'text/javascript'), '/loading.js': ('loading.js', 'text/javascript'), '/login': ('login.html', 'text/html'), '/login.js': ('login.js', 'text/javascript'),
                      '/style.css': ('style.css', 'text/css')}
-    protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
+    protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/studies.js': ('studies.js', 'text/javascript'),
                         '/scenario-reference': ('scenario_reference.html', 'text/html'), '/scenario_reference.js': ('scenario_reference.js', 'text/javascript'),
                         '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),
                         '/run_config.js': ('run_config.js', 'text/javascript'), '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
@@ -94,17 +94,17 @@ def handler(dashboard, *, auth, proxy_key, origin):
             self.end_headers()
             self.wfile.write(body)
 
-        def send_artifact(self, stream, mime, filename):
+        def send_artifact(self, stream, mime, filename, *, inline=False):
             import os
             import shutil
             safe_name = ''.join(c if c.isalnum() or c in '._-' else '_' for c in filename)
             self.send_response(200)
             self.send_header('Content-Type', mime)
             self.send_header('Content-Length', str(os.fstat(stream.fileno()).st_size))
-            self.send_header('Content-Disposition', 'attachment; filename="' + safe_name + '"')
+            self.send_header('Content-Disposition', ('inline' if inline else 'attachment') + '; filename="' + safe_name + '"')
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
-            self.send_header('Content-Security-Policy', "default-src 'none'; sandbox")
+            self.send_header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox" if inline else "default-src 'none'; sandbox")
             self.end_headers()
             shutil.copyfileobj(stream, self.wfile, 1024 * 1024)
 
@@ -172,6 +172,18 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(200, dashboard.read(auth.access(token, revalidate=False), **options))
                     else:
                         self.respond(200, dashboard.read())
+                elif path.startswith('/api/studies/') and getattr(dashboard,'scoped',False):
+                    parts=path.split('/')
+                    if len(parts)!=5 or parts[4]!='artifact':
+                        self.respond(404, {'error': 'Unknown study resource'})
+                        return
+                    try:
+                        access=auth.access(token,revalidate=False)
+                        name=parse_qs(urlsplit(self.path).query).get('name',[''])[0]
+                        with dashboard.studies.artifact(access,parts[3],name) as (stream,mime,filename):
+                            access.current();self.send_artifact(stream,mime,filename,inline=name=='study-summary.html')
+                    except (FileNotFoundError, KeyError, ValueError):
+                        self.respond(404, {'error': 'Study not found or report unavailable'})
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):
                     parts = path.split('/')
                     if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv', 'artifact'):
@@ -335,6 +347,14 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     if set(data) != {'selection_id'}:
                         raise SampleRequestError('Supply a scenario selection ID only')
                     self.respond(200, dashboard.scenarios.tasks(auth.access(token, revalidate=False), data['selection_id']))
+                elif path.startswith('/api/studies/') and getattr(dashboard, 'scoped', False):
+                    access=auth.access(token,revalidate=False)
+                    action=path.rsplit('/',1)[1]
+                    expected={'create':{'run_ids','name','baseline'},'list':set(),'run':{'study_id'},'stop':{'study_id'},'summary':{'study_id'}}
+                    if action=='create':expected[action].update(k for k in ('reference_run_ids','require_references') if k in data)
+                    if action not in expected or set(data)!=expected[action]:raise SampleRequestError('Invalid study request')
+                    methods={'create':dashboard.studies.create,'list':dashboard.studies.listing,'run':dashboard.studies.start,'stop':dashboard.studies.stop,'summary':dashboard.studies.summarize}
+                    self.respond(200,methods[action](access,**data))
                 elif path in ('/api/experiments/create', '/api/experiments/run', '/api/experiments/stop') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     action = path.rsplit('/', 1)[1]
                     expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
@@ -348,9 +368,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
                             raise SampleRequestError('provide_progressive_hints must be a boolean')
                     if action == 'create' and 'judge' in data:
                         expected.add('judge')
+                    if action == 'create' and 'controls' in data:
+                        expected.add('controls')
                     if action == 'create' and 'evaluation' in data:
                         expected.add('evaluation')
-                    if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k not in ('evaluation', 'tasks', 'provide_progressive_hints', 'judge')):
+                    if set(data) != expected or any(not isinstance(v, str) for k, v in data.items() if k not in ('evaluation', 'tasks', 'provide_progressive_hints', 'judge', 'controls')):
                         raise SampleRequestError('Invalid experiment request fields')
                     access = auth.access(token, revalidate=False)
                     self.respond(202, dashboard.experiment(access, action, data))

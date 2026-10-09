@@ -26,6 +26,8 @@ def seconds(value):
 
 
 def outcome(row):
+    if row.get('task_outcome') in {'success','partial','fail','unverified'}:
+        return {'success':'PASS','partial':'PARTIAL','fail':'FAIL','unverified':'UNVERIFIED'}[row['task_outcome']]
     if row.get('status') == 'completed' and type(row.get('verified_success')) is bool:
         return 'PASS' if row['verified_success'] else 'FAIL'
     return 'RUNNING' if row.get('status') == 'running' else 'ERROR' if row.get('status') != 'completed' else 'UNVERIFIED'
@@ -118,7 +120,7 @@ class Document:
         self.html.append('<pre><code>' + escape(text) + '</code></pre>')
 
 
-COLORS = dict(PASS='#167d58', FAIL='#c34642', ERROR='#a86512', UNVERIFIED='#686c9c', RUNNING='#2776b8', PENDING='#9ca9b8')
+COLORS = dict(PARTIAL='#ba7b16', PASS='#167d58', FAIL='#c34642', ERROR='#a86512', UNVERIFIED='#686c9c', RUNNING='#2776b8', PENDING='#9ca9b8')
 
 
 def charts(groups, rows, observed_tools):
@@ -249,14 +251,14 @@ def render(report, *, root=None, recorded_at=None):
     summaries = evaluation.get('conditions') or {}
     for name, group in groups.items():
         summary, results = summaries.get(name, {}), group['outcomes']
-        verified = results['PASS'] + results['FAIL']
-        comparisons.append([name, results['PASS'], results['FAIL'], results['ERROR'], results['UNVERIFIED'], results['RUNNING'], results['PENDING'],
+        verified = results['PASS'] + results['FAIL'] + results['PARTIAL']
+        comparisons.append([name, results['PASS'], results['PARTIAL'], results['FAIL'], results['ERROR'], results['UNVERIFIED'], results['RUNNING'], results['PENDING'],
                             f'{100 * results["PASS"] / verified:.1f}%' if verified else 'Not verified'])
         condition_metrics.append([name, summary.get('mean_score'), seconds(summary.get('mean_execution_seconds')),
                                   summary.get('unassisted_successes'), summary.get('hints_assisted_successes', summary.get('assisted_successes')), summary.get('solution_assisted_successes', 0),
                                   summary.get('hints_released'), summary.get('solutions_released', 0), summary.get('facts_revealed'),
                                   summary.get('mean_progress_score'), seconds(summary.get('mean_time_to_first_flag_seconds'))])
-    doc.table(['Condition','Pass','Fail','Error','Unverified','Running','Pending','Verified success rate'], comparisons)
+    doc.table(['Condition','Pass','Partial','Fail','Error','Unverified','Running','Pending','Verified success rate'], comparisons)
     doc.table(['Condition','Mean score','Mean worker time','Unassisted passes','Hint-assisted passes','Solution-assisted passes','Hints','Solutions provided','Facts revealed','Mean progress','Mean first flag'], condition_metrics)
     doc.heading('Trial runs')
     doc.table(['Trial','Task','Condition','Repeat','Attempt','Outcome','Worker status','Worker time','Total trial time'], [
@@ -323,7 +325,7 @@ def render(report, *, root=None, recorded_at=None):
     if judged:
         doc.heading('Judge agent reviews')
         doc.table(['Trial','Verdict','Score','Time','Model calls','Input tokens','Output tokens','Execution logs reviewed','Reason'],
-                  [[row['trial_id'], 'ERROR' if row.get('judge_error') else 'PASS' if row.get('judge_passed') else 'FAIL',
+                  [[row['trial_id'], 'ERROR' if row.get('judge_error') else 'UNVERIFIED' if row.get('judge_passed') is None else 'PASS' if row.get('judge_passed') else 'PARTIAL' if row.get('task_outcome') == 'partial' else 'FAIL',
                     row.get('judge_score'), seconds(row.get('judge_seconds')), row.get('judge_calls'),
                     row.get('judge_prompt_tokens'), row.get('judge_output_tokens'), row.get('judge_execution_trace_reviewed'), row.get('judge_error') or row.get('judge_reason')]
                    for row in judged])
@@ -333,6 +335,21 @@ def render(report, *, root=None, recorded_at=None):
         judge_config = config.get('judge') or {}
         doc.table(['Judge setting','Value'], [[key,value] for key,value in judge_config.items() if key != 'model'] +
                   [['model.' + key,value] for key,value in (judge_config.get('model') or {}).items()])
+    doc.heading('Challenge outcomes and evidence')
+    doc.table(['Trial','Task outcome','Execution status','Assistance','Reset time'],[[r['trial_id'],r.get('task_outcome',outcome(r)),r.get('execution_status',r.get('status')),r.get('assistance_level','none'),seconds(r.get('reset_seconds'))] for r in rows])
+    doc.table(['Trial','Criterion','Finding','Reason','Evidence read'],[[r['trial_id'],c['id'],c['status'],c['reason'],c['evidence']] for r in rows for c in r.get('criterion_results',[])])
+    doc.heading('Paired comparisons')
+    doc.table(['Condition','Baseline','Success difference','95% interval','Eligible pairs','Excluded pairs','Scenario clusters'],[[c['condition'],c['baseline'],c['mean_success_difference'],c['confidence_interval_95'],c['eligible_pairs'],c['excluded_pairs'],c['independent_scenarios']] for c in evaluation.get('paired_comparisons',[])])
+    doc.paragraph('Intervals resample scenario clusters; repeated trials within a scenario are not independent scenarios. Fewer than two clusters produce no interval. Judge accuracy has not been human calibrated.')
+    doc.heading('Evaluation coverage and costs')
+    doc.table(['Condition','Planned','Evaluable','Unverified','Unstarted','Success / all planned'],[[key,s.get('planned_trials'),s.get('evaluable_trials',s.get('verified_trials')),s.get('unverified_trials'),s.get('unstarted_trials'),s.get('success_rate_all_planned')] for key,s in (evaluation.get('conditions') or {}).items()])
+    doc.table(['Trial','Participant USD','Judge USD','Participant usage complete'],[[r['trial_id'],r.get('participant_cost_usd'),r.get('judge_cost_usd'),r.get('participant_usage_complete')] for r in rows])
+    doc.table(['Generation measurement','Value'],[['Recorded generation cost USD',(config.get('pricing') or {}).get('generation_cost_usd')]])
+    doc.paragraph('Generation happens once before conditions are frozen. Stage timing reports its duration separately. Unknown prices or provider usage remain unrecorded rather than zero; recorded model calls may omit nested tool/provider usage.')
+    for task in config.get('tasks') or []:
+        if task.get('rubric'):
+            doc.heading('Rubric · ' + task['id'],3)
+            doc.code(__import__('json').dumps(task['rubric'],indent=2))
     doc.heading('Recorded limits and provenance')
     execution = config.get('execution') or {}
     doc.table(['Setting','Value'],[[key,execution.get(key)] for key in ('max_turns','wall_seconds','tool_timeout','context_window','provide_progressive_hints','max_tries_before_solution')] +

@@ -59,6 +59,7 @@ def main():
                     page.get_by_role('tab',name='Evaluation',exact=True).click();page.locator('#task-source').select_option('custom');page.locator('#task-0-prompt').fill('My experiment prompt stays here.')
                     page.locator('#task-0-hints').fill('Inspect the target service.\nCheck the response headers.')
                     assert page.evaluate('parseTaskRows(customTaskRows)[0].progressive_hints')==['Inspect the target service.','Check the response headers.']
+                    page.locator('#task-0-mode').select_option('exact')
                     page.locator('#task-0-criteria').fill('{"type":"json_equals","expected":{"token":"SECRET"}}')
                     page.locator('#task-0-hints').fill('The answer is SECRET.')
                     expect(page.locator('#task-editor-error')).to_contain_text('contains a verifier answer')
@@ -91,6 +92,19 @@ def main():
                     expect(page.locator('#scenario-reference-notice a')).to_have_attribute('href','/scenario-reference?selection='+item['id']+'&kind=attack-graph')
                     page.evaluate('window.open=window.originalOpen;')
                     expect(page.locator('#experiment-dialog')).to_be_visible();assert not errors,errors
+                    page.locator('#task-0-mode').select_option('judge')
+                    expect(page.locator('#task-0-criteria')).to_be_disabled()
+                    page.locator('.rubric-criterion textarea').nth(0).fill('Locate and read the service configuration.')
+                    page.locator('.rubric-criterion textarea').nth(1).fill('A successful tool response containing the observed configuration.')
+                    tasks=page.evaluate('parseTaskRows(customTaskRows)')
+                    assert tasks[0]['verification_mode']=='judge' and 'verifier' not in tasks[0]
+                    assert tasks[0]['rubric']['criteria'][0]['requirement']=='Locate and read the service configuration.'
+                    page.get_by_role('tab',name='Judge LLM',exact=True).click();page.locator('#judge-enabled').check()
+                    page.get_by_role('tab',name='Tasks & trial settings',exact=True).click()
+                    page.locator('#baseline-helper-conditions').click()
+                    controls=page.evaluate('experimentControls()')
+                    assert len(controls['conditions'])==2 and controls['reset_each_trial']
+                    page.locator('.rubric-editor').first.scroll_into_view_if_needed();page.screenshot(path='/tmp/caf-rubric-editor.png')
                     page.set_viewport_size(dict(width=390,height=844));assert page.evaluate('document.documentElement.scrollWidth<=innerWidth');page.screenshot(path='/tmp/caf-scenario-references-mobile.png')
                     assert all(op in ('list','references') for _,op in calls),calls
                     browser.close()

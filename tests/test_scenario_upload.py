@@ -111,6 +111,9 @@ def test_binary_upload_http_auth_scope_validation_and_selection(pve, lab, tmp_pa
                 return dict(items=[dict(id='a'*64,path='/safe/scenario.xml',scenario='Uploaded lab',
                     sha256=hashlib.sha256(XML).hexdigest(),resolved_chain=True,chain_length=1,bytes=len(XML))],
                     path='/safe/scenario.xml',kind='xml',fidelity='definition')
+            if op == 'tasks':
+                text=json.dumps({'tasks':None,'suggested_tasks':[],'context':{}})
+                return {'chunk':text,'total':len(text),'sha256':hashlib.sha256(text.encode()).hexdigest()}
             if op == 'snapshot':
                 return dict(id='a'*64,path='/safe/scenario.xml',scenario='Uploaded lab',
                             sha256=hashlib.sha256(XML).hexdigest(),resolved_chain=True,chain_length=1,
@@ -196,6 +199,6 @@ def test_binary_upload_http_auth_scope_validation_and_selection(pve, lab, tmp_pa
                 assert 'must-not-leak' not in response['error']
             pve[0]['resources']['operator@pve'] = []
             assert upload(cookie=cookie,csrf=csrf)[0] == 403
-            assert len(calls) == 4
+            assert len(calls) == 5
     finally:
         dash.close()

@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/http.js" defer></script><script src="/loading.js" defer></script><script src="/run_windows.js" defer></script><script src="/task_editor.js" defer></script><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Overview · CAF Orchestrator</title><link rel="stylesheet" href="/style.css"><script src="/http.js" defer></script><script src="/loading.js" defer></script><script src="/run_windows.js" defer></script><script src="/task_editor.js" defer></script><script src="/app.js" defer></script><script src="/studies.js" defer></script></head>
 <body class="workspace">
 <header><a class="brand" href="#overview" aria-label="Orchestrator home"><span class="brand-mark">C</span>CYBER AGENT FLOW<span class="brand-divider">/</span><span class="brand-sub">Orchestrator</span></a><div class="user-menu"><span class="readonly">LAB MONITOR</span><span id="username-label"></span><button id="sign-out" type="button">Sign out</button></div></header>
 <nav class="workspace-nav" aria-label="Workspace pages">
 <a href="#overview" data-route="overview" aria-current="page">Overview</a>
 <a href="#experiments" data-route="experiments">Experiments</a>
+<a href="#studies" data-route="studies">Studies</a>
 <a href="#applications" data-route="applications">Applications</a>
 <a href="#setup" data-route="setup">Lab setup</a>
 </nav>
@@ -30,6 +31,10 @@
 
 
 </div>
+<div data-page="studies" hidden><section aria-labelledby="studies-title"><div class="section-title"><h2 id="studies-title">Multi-scenario studies</h2><button id="reload-studies" type="button">Refresh studies</button></div>
+<p class="small">Collect saved experiments with matching models, judges, budgets and conditions. Members run sequentially with lab resets. Keep scenario families in separate development, validation or test splits.</p>
+<div class="study-design-grid"><label>Study name<input id="study-name" maxlength="120" placeholder="Generated helpers on held-out scenarios"></label><label>Baseline condition ID<input id="study-baseline" value="baseline"></label></div>
+<h3>Experiment members</h3><div id="study-members"></div><h3>Optional successful reference runs</h3><div id="study-references"></div><label><input id="study-require-references" type="checkbox"> Require reference completion for every scenario definition</label><p class="small">References establish an automated successful execution of the saved scenario definition; they do not establish human-calibrated judge accuracy.</p><button id="create-study" type="button">Create study from selected experiments</button><p id="study-message" role="status"></p><div id="studies-list"></div></section></div>
 <div data-page="applications" hidden><p id="applications-unavailable" class="empty" hidden>Application maintenance is unavailable for this server configuration.</p><section id="updates-panel" aria-labelledby="updates-title" hidden>
 <div class="section-title"><h2 id="updates-title">Application versions</h2><span>Host downloads · guest-agent transfer</span></div>
 <p id="updates-context" class="small"></p><div id="update-cards" class="sample-cards"></div>
@@ -130,12 +135,20 @@
 <label>Max tries before solution<input form="experiment-form" id="eval-max_tries_before_solution" type="number" min="1" max="1000" required aria-describedby="solution-tries-help"></label>
 </fieldset>
 <p id="solution-tries-help" class="small">Default: 6 agent turns without new progress. Applies only when progressive hints are enabled. The solution includes the walkthrough and answer for the first unsolved challenge. The trial still stops at its turn or time limit.</p>
-<p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
+<section class="experiment-settings" aria-labelledby="study-controls-title"><h3 id="study-controls-title">Experiment controls</h3>
+<label>Condition order seed<input id="condition-order-seed" form="experiment-form" type="number" min="-2147483648" max="2147483647" value="42" required></label>
+<label><input id="reset-each-trial" type="checkbox" checked> Reset the ScenarioForge lab and verify readiness before each trial</label>
+<label><input id="extra-reset-hooks" type="checkbox"> Run server-configured extra reset/readiness hooks</label><p class="small">Use extra hooks for persistent volumes or services outside ScenarioForge's deployment. A failed hook blocks the trial.</p>
+<p class="small">Reset redeploys the frozen scenario, including CORE targets. Changed objectives or answers block the trial. Agent budgets are identical across conditions; reset and judge time are reported separately.</p>
+<div id="condition-editor"></div><div class="result-actions"><button id="add-condition" type="button">Add condition</button><button id="baseline-helper-conditions" type="button">Compare baseline and HTTP helper</button></div>
+<p class="small">Leave conditions empty to use the experiment's default comparison. Each custom condition chooses its tools, supplied guidance and hint policy. The judge receives no condition labels.</p><p id="condition-editor-error" class="error" role="status"></p>
+<details><summary>Optional cost accounting (USD)</summary><p class="small">Leave unknown prices empty. Costs cover reported model calls; nested tool calls may be unavailable.</p><div class="evaluation-grid"><label>Participant input / million tokens<input id="price-participant-input" type="number" min="0" step="any"></label><label>Participant output / million tokens<input id="price-participant-output" type="number" min="0" step="any"></label><label>Judge input / million tokens<input id="price-judge-input" type="number" min="0" step="any"></label><label>Judge output / million tokens<input id="price-judge-output" type="number" min="0" step="any"></label><label>Recorded artifact generation cost<input id="price-generation" type="number" min="0" step="any"></label></div></details>
+</section><p id="eval-tools" class="small"></p><p id="eval-task-source" class="small"></p>
 </section></section>
 <section id="evaluation-page-judge" role="tabpanel" data-evaluation-page="judge" aria-labelledby="evaluation-tab-judge" hidden><section class="experiment-settings">
 <h3>Judge LLM</h3>
 <label><input id="judge-enabled" type="checkbox"> Use an LLM judge agent</label>
-<p class="small">Optional, off by default. Exact answer and flag checks can determine success without a judge. Enable it for additional review of cyber-agent-flow execution logs and the final answer. It uses read-only tools and must cite a log it read when logs are available. When enabled, passing requires both its verdict and the exact-answer checks. Judge failures leave success unverified.</p>
+<p class="small">Required for tasks using Judge review or Both. The judge assesses each rubric requirement using execution evidence it read. The host calculates success, partial, fail or unverified. Exact-only tasks can run without it. Judge failures leave success unverified. Automated judgments have not been human calibrated.</p>
 <label><input id="judge-inherit" type="checkbox" checked> Use the participant’s provider, endpoint and model for the judge</label>
 <fieldset id="judge-model-settings" class="evaluation-grid" disabled>
 <label>Judge provider<select id="judge-provider" form="experiment-form"><option value="openai">OpenAI-compatible</option><option value="ollama_direct">Ollama</option><option value="litellm">LiteLLM</option></select></label>

@@ -278,7 +278,7 @@ class ScenarioExperiments:
             config['use_participant_model'] = False
         return config
 
-    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False, progress=lambda step, message: None, judge=None):
+    def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False, progress=lambda step, message: None, judge=None, controls=None):
         progress(1, "Validating scenario, evaluation settings and VM access")
         if not re.fullmatch('[0-9a-f]{32}', request_id) or not re.fullmatch('[0-9a-f]{64}', selection_id):
             raise SampleRequestError('Choose a listed scenario and supply a valid request ID')
@@ -293,6 +293,11 @@ class ScenarioExperiments:
         progressive_hint_settings({}, provide_progressive_hints)
         if judge is not None:
             judge = self.judge_settings(judge, access)
+        if definitions and any(t.get('verification_mode') in {'judge','both'} for t in definitions) and not (judge or self.runtime.get('judge',{})).get('enabled'):
+            raise SampleRequestError('Enable Judge LLM for judge/both task verification')
+        if controls is not None:
+            from .experiment_controls import validate
+            controls = validate(controls, self.runtime)
         access.current()
         workspace = Workspace(self.root, access.username)
         run_id = 'scenario-' + request_id
@@ -317,6 +322,11 @@ class ScenarioExperiments:
             if not item or (not item['resolved_chain'] and _sample_id is None):
                 raise SampleRequestError('Choose a scenario with a saved resolved Flow chain')
             sf = self.cfg['scenarioforge']
+            authored = definitions
+            if authored is None and _sample_id is None:
+                authored = self.tasks(access, selection_id).get('tasks')
+            if authored and any(t.get('verification_mode') in {'judge','both'} for t in authored) and not (judge or self.runtime.get('judge',{})).get('enabled'):
+                raise SampleRequestError('Enable Judge LLM for the saved scenario rubric')
             progress(2, 'Connecting to ScenarioForge and freezing the selected scenario XML')
             with authorized_operations(access.qm):
                 captured = guest(self.runtime['backend']).call(roles['scenarioforge'], 'snapshot',
@@ -351,14 +361,22 @@ class ScenarioExperiments:
                 runtime['execution'].update({key: value for key, value in overrides.items() if key != 'repetitions'})
             if judge is not None:
                 runtime['judge'] = judge
+            if controls is not None:
+                from .experiment_controls import apply
+                apply(controls, runtime, cfg, workspace.path/'condition-inputs'/request_id, self.runtime, self.cfg)
             source = workspace.materialize(cfg, runtime, access, run_id)
             saved_runtime = yaml.safe_load((source.parent / 'runtime.yaml').read_text())
-            private_file(source.parent / 'baseline.json', baseline.read_bytes())
-            saved_runtime['conditions'][0]['catalog'] = str(source.parent / 'baseline.json')
-            if len(saved_runtime['conditions']) > 1:
-                helper = baseline.with_name('with-http-helper.json')
-                private_file(source.parent / 'with-http-helper.json', helper.read_bytes())
-                saved_runtime['conditions'][1]['catalog'] = str(source.parent / 'with-http-helper.json')
+            for condition in saved_runtime['conditions']:
+                if condition['id'] not in cfg.get('collect', {}):
+                    dest = source.parent / (condition['id'] + '-catalog.json')
+                    private_file(dest, Path(condition['catalog']).read_bytes())
+                    condition['catalog'] = str(dest)
+                guidance = []
+                for index, path in enumerate(condition.get('guidance_files', [])):
+                    dest = source.parent / (condition['id'] + '-guidance-' + str(index) + '.md')
+                    private_file(dest, Path(path).read_bytes())
+                    guidance.append(str(dest))
+                condition['guidance_files'] = guidance
             private_file(source.parent / 'runtime.yaml', yaml.safe_dump(saved_runtime).encode(), replace=True)
             cfg, runtime, _, identity = load(source)
             progress(4, 'Saving experiment inputs, reproduction source and workflow journal')
@@ -368,10 +386,14 @@ class ScenarioExperiments:
             self.capture_upload(workspace, captured, output)
             if definitions is not None:
                 private_file(output / 'inputs/evaluation-tasks.json', json.dumps(definitions, indent=2).encode())
-            ev.write_json(output / 'workflow.json', self.record(cfg, runtime, identity, captured, request_id))
+            record = self.record(cfg, runtime, identity, captured, request_id)
+            record['task_design'] = [{key:task.get(key, 'development' if key=='split' else None) for key in ('id','family','split')} for task in authored] if authored else [dict(id='collect-flags',family='flag-collection',split=cfg['scenarioforge']['split'])]
+            if _sample_id is not None:
+                record['task_design'] = [dict(id=_sample_id,family='http-discovery',split=cfg['scenarioforge']['split'])]
+            ev.write_json(output / 'workflow.json', record)
         return dict(run_id=run_id, status='ready')
 
-    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False, progress=lambda step, message: None, evaluation=None, judge=None):
+    def create_sample(self, access, sample_id, request_id, provide_progressive_hints=False, progress=lambda step, message: None, evaluation=None, judge=None, controls=None):
         progress(1, "Validating sample selection and VM access")
         overrides = evaluation_settings(evaluation) if evaluation is not None else None
         from .samples import CATALOG
@@ -399,7 +421,7 @@ class ScenarioExperiments:
         item = imported['items'][0]
         return self.create(access, item['id'], request_id,
             ','.join(self.runtime['execution']['network_policy']['allow']),
-            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints, evaluation=overrides, judge=judge,
+            ','.join(self.runtime['execution']['network_policy']['disallow']), _sample_id=sample_id, provide_progressive_hints=provide_progressive_hints, evaluation=overrides, judge=judge, controls=controls,
             progress=lambda step, message: progress(step + 4 if step > 1 else 5, message))
 
     def configure_sample(self, sample_id, cfg, runtime, captured, roles, token):
@@ -477,9 +499,11 @@ class ScenarioExperiments:
                 destination = workspace.path / 'inputs' / new_id
                 shutil.copytree(source.parent, destination)
                 saved_runtime = yaml.safe_load((destination / 'runtime.yaml').read_text())
-                saved_runtime['conditions'][0]['catalog'] = str(destination / 'baseline.json')
-                if len(saved_runtime['conditions']) > 1:
-                    saved_runtime['conditions'][1]['catalog'] = str(destination / 'with-http-helper.json')
+                for condition in saved_runtime['conditions']:
+                    for key in ('catalog', 'guidance_files'):
+                        paths = [condition[key]] if key == 'catalog' else condition.get(key, [])
+                        mapped = [str(destination / Path(p).relative_to(source.parent)) if Path(p).is_relative_to(source.parent) else p for p in paths]
+                        condition[key] = mapped[0] if key == 'catalog' else mapped
                 private_file(destination / 'runtime.yaml', yaml.safe_dump(saved_runtime).encode(), replace=True)
                 source = destination / 'workflow.yaml'
                 cfg, runtime, _, identity = load(source)
@@ -490,7 +514,9 @@ class ScenarioExperiments:
                 self.capture_upload(workspace, record['scenario_experiment'], output)
                 if record['scenario_experiment'].get('evaluation_tasks') is not None:
                     private_file(output / 'inputs/evaluation-tasks.json', json.dumps(record['scenario_experiment']['evaluation_tasks'], indent=2).encode())
+                task_design = record.get('task_design', [])
                 record = self.record(cfg, runtime, identity, record['scenario_experiment'], request_id)
+                record['task_design'] = task_design
             progress(4, 'Verifying access to all configured VMs and saving the launch journal')
             for vmid in workflow_vmids(record['workflow'], record['runtime']):
                 access.require_vm(vmid)

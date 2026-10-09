@@ -35,6 +35,7 @@ function renderRunConfiguration(config){
  for(const task of config.tasks||[]){
   const section=el('section',null,'run-task');
   section.append(el('h3',task.id),el('p',[task.family,task.scenario_id,task.split].filter(Boolean).join(' · '),'small'));
+  if(task.rubric)section.append(configurationDetails('Challenge rubric',task.rubric,'rubric-'+task.id));
   section.append(el('h4','Exact task prompt'),el('pre',task.prompt,'task-prompt'));target.append(section);
  }
  const settings=el('dl',null,'run-settings');
@@ -50,6 +51,7 @@ function renderRunConfiguration(config){
  for(const condition of config.conditions||[]){
   const section=el('section',null,'run-condition');section.append(el('h4',condition.id),
    el('p',condition.tools?.length?condition.tools.join(', '):'No tools'));
+  if(condition.provide_progressive_hints!==undefined)section.append(el('p','Progressive hints in this condition: '+(condition.provide_progressive_hints?'On':'Off'),'small'));
   if(condition.catalog_snapshot)section.append(configurationDetails('Exact tool catalog',condition.catalog_snapshot,'catalog-'+condition.id));
   if(condition.guidance_snapshot?.length)section.append(configurationDetails('Additional guidance',condition.guidance_snapshot,'guidance-'+condition.id));
   target.append(section);
@@ -58,7 +60,7 @@ function renderRunConfiguration(config){
  for(const [index,prompt] of (config.system_prompts||[]).entries())target.append(configurationDetails('Captured system prompt '+(index+1),prompt.text,'system-'+index));
  target.append(configurationDetails('All saved settings and provenance',{
   source:config.source,model:config.model,engine:config.engine,backend:config.backend,execution:config.execution,
-  judge:config.judge,repetitions:config.repetitions,order_seed:config.order_seed,schedule:config.schedule,
+  judge:config.judge,pricing:config.pricing,repetitions:config.repetitions,order_seed:config.order_seed,schedule:config.schedule,
   provenance:config.provenance,workflow:config.workflow},'settings'));
  const scenario=config.scenarioforge||{};
  target.append(el('h3','ScenarioForge'),el('p',scenario.message));

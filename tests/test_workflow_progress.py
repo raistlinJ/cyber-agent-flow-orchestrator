@@ -166,3 +166,21 @@ def test_stage_log_preview_is_bounded_redacted_and_cannot_escape_run(lab, tmp_pa
     path.symlink_to(outside)
     view = build(journal, 'completed', False, root=output)
     assert next(s for s in view['steps'] if s['id']=='artifact-generate')['log_tail'] is None
+
+
+def test_trial_reset_commands_keep_evaluation_progress_active(lab):
+    from cyber_agent_flow_orchestrator.workflow_progress import step, checkpoint
+    config,output,agent,_=lab
+    cfg,runtime,_,_=workflow.load(config);output.mkdir()
+    wf=workflow.Workflow(output,{'workflow':cfg,'runtime':runtime,'stages':{}},agent,progress=None)
+    with step(wf,'evaluate'):
+        with step(wf,'reset-trial-1'):
+            checkpoint(wf,'Reset command output observed','command-output')
+            current=build(wf.journal,'evaluating',True)
+            assert current['current_step']=='evaluate' and current['current']['active']
+            assert any('Reset command' in e['message'] for e in current['current']['events'])
+        assert wf.journal['current_step']=='evaluate'
+        checkpoint(wf,'CAF worker started')
+        assert wf.journal['progress_steps']['evaluate']['operation']=='CAF worker started'
+    assert wf.journal['progress_steps']['evaluate']['status']=='completed'
+    assert any('Reset command' in e['message'] for e in wf.journal['progress_steps']['evaluate']['events'])

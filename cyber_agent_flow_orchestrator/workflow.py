@@ -143,15 +143,19 @@ class Workflow:
                              if 'catalog' in remote else files[condition['catalog']].encode())
             condition['catalog'] = str(dest)
             captured.append(dest)
-            guidance = remote.get('guidance_files', condition['guidance_files'])
+            guidance = [(source, True) for source in remote.get('guidance_files', [])]
+            guidance.extend((source, False) for source in condition['guidance_files'])
             condition['guidance_files'] = []
-            for index, source in enumerate(guidance):
+            for index, (source, remote_source) in enumerate(guidance):
                 dest = folder / f'{name}-guidance-{index}.md'
                 dest.write_bytes(self.agent.get(runtime['backend']['participant_vmid'], source)
-                                 if 'guidance_files' in remote else files[source].encode())
+                                 if remote_source else files[source].encode())
                 condition['guidance_files'].append(str(dest))
                 captured.append(dest)
         runtime['orchestration'] = {'workflow_id': cfg['id'], 'workflow_hash': identity}
+        selection = self.journal.get('scenario_experiment', {})
+        if selection.get('sha256'):
+            runtime['orchestration']['scenario_definition_sha256'] = selection['sha256']
         dest = self.output / 'runtime.yaml'
         dest.write_text(yaml.safe_dump(runtime, sort_keys=False))
         captured.append(dest)
@@ -273,10 +277,14 @@ def run(config, output, *, resume=False, retry_steps=False, retry_failed=False, 
                 journal['phase'] = 'evaluating'
             wf.save()
             wf.notify('Running agent evaluation')
+            trial_options = {}
+            if cfg.get('reset_each_trial'):
+                from .trial_reset import callback
+                trial_options['prepare_trial'] = callback(wf, cfg, runtime, package)
             with step(wf, "evaluate"):
                 checkpoint(wf, 'Launching participant trials and collecting outputs for host scoring')
                 rows = evaluator(study, dataset, resume=(dataset / 'manifest.json').exists(),
-                                 retry_failed=retry_failed, reservation=reservation, progress=wf.notify)
+                                 retry_failed=retry_failed, reservation=reservation, progress=wf.notify, **trial_options)
             latest = {}
             for row in rows:
                 latest[row['trial_id']] = row

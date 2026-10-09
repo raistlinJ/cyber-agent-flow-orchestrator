@@ -201,6 +201,19 @@ def _scenario_task_details(scenario, state, bundle_tasks=None, bundle_files=None
         if hints:
             task['progressive_hints'] = hints
         suggested.append(task)
+    if not suggested and not isinstance(saved_tasks, list) and nodes:
+        criteria = []
+        for node, raw in zip(nodes, chain):
+            description = _text(raw.get('objective') or raw.get('description'))
+            target = node['name'] + (' at ' + node['ipv4'] if node['ipv4'] else '')
+            criteria.append(dict(id='step-' + str(node['position']),
+                requirement=description or 'Complete the intended challenge on ' + target + '. Review the guide and refine this requirement before running.',
+                evidence='Successful tool output demonstrating the required result on ' + target + '; claims or attempted commands alone are insufficient.',
+                essential=True, weight=1))
+        suggested.append(dict(id='investigate-challenges', family='scenario-investigation',
+            prompt='Investigate the saved ScenarioForge challenge sequence and demonstrate the required results. Report observed evidence for each challenge.',
+            verification_mode='judge', rubric=dict(version=1, criteria=criteria), required_checks=checks,
+            **({'progressive_hints':hints} if hints else {})))
 
     context = {
         'scenario': _text(scenario.get('name')),
@@ -622,6 +635,26 @@ def reference_details(data):
 
 
 def dispatch(data):
+    if data.get('op') in {'reset-start', 'reset-ready'}:
+        import pwd
+        token = data.get('token', '')
+        if not re.fullmatch('[0-9a-f]{32}', token):
+            raise ValueError('Invalid reset snapshot ID')
+        source = Path(data['source'])
+        repo = Path(data['repo']).resolve()
+        if source.is_symlink() or not source.is_file() or not source.resolve().is_relative_to(repo):
+            raise ValueError('Invalid reset source XML')
+        folder = source.parent
+        if folder.is_symlink():
+            raise ValueError('Invalid reset snapshot directory')
+        account = pwd.getpwnam(data['user'])
+        path = folder / ('.caf-reset-' + token + '.xml')
+        if data['op'] == 'reset-ready':
+            if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != data['sha256']:
+                raise ValueError('Reset XML identity mismatch')
+            path.chmod(0o600)
+            os.chown(path, account.pw_uid, account.pw_gid)
+        return dict(path=str(path))
     if data.get('op') == 'references':
         return reference_details(data)
     if data['op'].startswith('upload-'):

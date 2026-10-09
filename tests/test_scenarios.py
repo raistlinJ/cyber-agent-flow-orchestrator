@@ -1,3 +1,4 @@
+import json
 import hashlib
 import os
 from pathlib import Path
@@ -82,6 +83,9 @@ def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, m
                         sha256=hashlib.sha256(XML).hexdigest(), resolved_chain=True, chain_length=1, bytes=len(XML))
             if op == 'list':
                 return dict(items=[item], roots=data['roots'], truncated=False)
+            if op == 'tasks':
+                text=json.dumps({'tasks':None,'suggested_tasks':[],'context':{}})
+                return {'chunk':text,'total':len(text),'sha256':hashlib.sha256(text.encode()).hexdigest()}
             if op == 'snapshot':
                 return dict(item, snapshot_path='/opt/scenarioforge/outputs/caf-orchestrator/'+data['token']+'/scenario.xml')
             if self.changed:

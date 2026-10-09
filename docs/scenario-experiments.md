@@ -225,3 +225,9 @@ are exported from the selected saved XML, with a private copy preserving relativ
 artifact paths. Update ScenarioForge on the APP VM to support custom evaluation
 target chains with flag sequencing disabled. Restart the orchestrator after
 updating its code so the popup page and API routes are active.
+
+### Rubric tasks and controlled studies
+
+See [Rubric experiments and multi-scenario studies](rubric-experiments.md) for
+judge-only tasks without flags, structured criteria, evidence citations, per-trial
+lab resets, condition editing, study collections and publication exports.

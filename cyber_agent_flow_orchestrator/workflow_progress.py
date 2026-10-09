@@ -44,7 +44,11 @@ def checkpoint(workflow, message, kind='checkpoint'):
 @contextmanager
 def step(workflow, key):
     records = workflow.journal.setdefault('progress_steps', {})
+    previous = workflow.journal.get('current_step')
+    parent = previous if previous != key and records.get(previous, {}).get('status') == 'running' else None
     record = records.setdefault(key, {})
+    if parent:
+        record['parent_step'] = parent
     record.update(status='running', started_at=now(), ended_at=None, error=None)
     workflow.journal['current_step'] = key
     workflow.journal.setdefault('events', []).append(dict(at=record['started_at'], kind='stage', message=key+' started'))
@@ -61,6 +65,13 @@ def step(workflow, key):
         workflow.journal.setdefault('events', []).append(dict(at=record['ended_at'], kind='stage', message=key+' completed'))
         workflow.journal['events'] = workflow.journal['events'][-100:]
         checkpoint(workflow, 'Completed '+key)
+    finally:
+        if parent:
+            records[parent].setdefault('events', []).extend(record.get('events', []))
+            records[parent]['events'] = records[parent]['events'][-60:]
+            records[parent]['last_command'] = key
+            workflow.journal['current_step'] = parent
+            workflow.save()
 
 
 @contextmanager
@@ -140,10 +151,22 @@ def build(journal, state, active, root=None):
     definitions_, app, core, participant = definitions(journal)
     records = journal.get('progress_steps', {})
     current = journal.get('current_step')
+    child_key = current if records.get(current, {}).get('parent_step') else None
+    if child_key:
+        current = records[child_key]['parent_step']
     steps = []
     for key, label, vmid, description in definitions_:
         record = records.get(key, {})
         old = journal.get('stages', {}).get(key, {})
+        nested = child_key if key == current and child_key else record.get('last_command')
+        if nested:
+            child = records.get(nested, {})
+            record = dict(record)
+            if nested == child_key:
+                record['events'] = [*record.get('events', []), *child.get('events', [])][-60:]
+                record['operation'] = child.get('operation', record.get('operation'))
+                record['guest_observation'] = child.get('guest_observation')
+            old = journal.get('stages', {}).get(nested, old)
         status = record.get('status', old.get('status', 'pending'))
         attempt = (old.get('attempts') or [{}])[-1]
         if key == 'evaluate' and state in ('completed', 'completed_with_errors'):

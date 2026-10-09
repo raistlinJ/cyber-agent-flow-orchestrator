@@ -194,7 +194,7 @@ def configuration(root):
             {'id': 'scenario-evaluation', 'name': 'ScenarioForge evaluation ZIP',
              'description': 'The saved evaluation suite, including tasks, verifiers, readiness and attack graph.'}])
     return {'source': source, 'tasks': tasks, 'conditions': spec.get('conditions', []),
-            'model': spec.get('model'), 'judge': spec.get('judge', {'enabled':False}), 'engine': spec.get('engine'), 'execution': spec.get('execution'),
+            'model': spec.get('model'), 'judge': spec.get('judge', {'enabled':False}), 'pricing':spec.get('pricing'), 'engine': spec.get('engine'), 'execution': spec.get('execution'),
             'backend': spec.get('backend'), 'repetitions': spec.get('repetitions'), 'order_seed': spec.get('order_seed'),
             'schedule': manifest.get('schedule', []), 'system_prompts': system_prompts,
             'system_prompt_note': 'Exact initial system prompts from collected worker checkpoints.' if system_prompts else

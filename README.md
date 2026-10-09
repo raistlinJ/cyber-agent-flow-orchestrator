@@ -248,8 +248,8 @@ The resulting catalog must contain the baseline tools plus `lab_helper`:
 
 That snippet illustrates the added entry; retain all baseline entries in the
 actual collected catalog. Executables stay at the referenced guest paths.
-`collect.added-helper` replaces only that condition's catalog/guidance with frozen
-host copies. The baseline stays unchanged. Generation runs once before the
+`collect.added-helper` supplies that condition's frozen catalog and combines remote
+guidance with authored local guidance in the saved host inputs. The baseline stays unchanged. Generation runs once before the
 condition comparison; it is not repeated for each trial. Changing the artifacts
 requires a new workflow output directory.
 
@@ -642,3 +642,6 @@ The WebUI supports **New experiment → Saved ScenarioForge XML** to select an e
 New experiment also accepts local XML or ScenarioForge reproduction ZIP uploads, with downloadable fixed scenario packages and Send buttons for both demos. See [scenario imports and demo packages](docs/scenario-experiments.md#upload-from-new-experiment).
 
 For local VMware Fusion experiments, see [Fusion setup and execution](docs/fusion.md).
+
+
+For editable challenge rubrics, evidence-based judging, controlled conditions, lab resets, held-out multi-scenario Studies and downloadable comparison reports, see [Rubric experiments and studies](docs/rubric-experiments.md).

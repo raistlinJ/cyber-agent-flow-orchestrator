@@ -21,11 +21,13 @@ def job(value, backend):
 def load(path):
     path = Path(path).resolve()
     cfg = yaml.load(path.read_text(), Loader=ev.StrictLoader)
-    ev.fields(cfg, ['version', 'id', 'runtime', 'scenarioforge', 'prepare', 'artifacts', 'collect', 'max_readiness_age_seconds', 'monitoring'],
+    ev.fields(cfg, ['version', 'id', 'runtime', 'scenarioforge', 'prepare', 'artifacts', 'collect', 'max_readiness_age_seconds', 'monitoring', 'reset_each_trial'],
               ['version', 'id', 'runtime', 'scenarioforge'], 'workflow')
     if type(cfg['version']) is not int or cfg['version'] != 1:
         raise ValueError('Only workflow version 1 is supported')
     ev.identifier(cfg['id'])
+    if type(cfg.get('reset_each_trial', False)) is not bool:
+        raise ValueError('reset_each_trial must be boolean')
     runtime = ev.read_runtime(path.parent / cfg['runtime'])
     runtime['execution'].setdefault('auto_approve_dangerous', True)
     if runtime['backend']['type'] not in ('proxmox', 'fusion'):
@@ -124,11 +126,8 @@ def load(path):
                 condition['catalog'] = str(empty)
             else:
                 files[original['catalog']] = Path(original['catalog']).read_text()
-            if 'guidance_files' in assets:
-                condition['guidance_files'] = []
-            else:
-                for item in original['guidance_files']:
-                    files[item] = Path(item).read_text()
+            for item in original['guidance_files']:
+                files[item] = Path(item).read_text()
         validation.pop('suite', None)
         validation['tasks'] = [dict(id='validation', prompt='Schema validation only', family='validation',
                                     split='development', scenario_id='validation',

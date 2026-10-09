@@ -119,10 +119,16 @@ function renderResultSummary(data){
  for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
  for(const trial of data.evaluation.attempts||[])if(trial.provide_progressive_hints&&trial.progressive_hints_available===false)target.append(el('p',`${trial.trial_id} · Progressive hints unavailable: ${trial.progressive_hints_reason||'No usable guidance was supplied; ran unassisted.'}`,'notice'));
  for(const trial of data.evaluation.attempts||[])if(trial.judge_enabled){
-  const details=el('details'),summary=el('summary',`${trial.trial_id} · Judge: ${trial.judge_error?'error':trial.judge_passed?'pass':'fail'} · ${duration(trial.judge_seconds)}`);details.append(summary,el('p',trial.judge_error||trial.judge_reason||'Judge verdict recorded.'));details.append(el('p',`${trial.judge_calls??0} model calls · ${trial.judge_prompt_tokens??'unknown'} input / ${trial.judge_output_tokens??'unknown'} output tokens · Full evidence review: judge.json in the run bundle`,'small'));target.append(details);
+  const details=el('details'),summary=el('summary',`${trial.trial_id} · Judge: ${trial.judge_error?'error':trial.task_outcome|| (trial.judge_passed?'pass':'fail')} · ${duration(trial.judge_seconds)}`);details.append(summary,el('p',trial.judge_error||trial.judge_reason||'Judge verdict recorded.'));details.append(el('p',`${trial.judge_calls??0} model calls · ${trial.judge_prompt_tokens??'unknown'} input / ${trial.judge_output_tokens??'unknown'} output tokens · Full evidence review: judge.json in the run bundle`,'small'));target.append(details);
   if(trial.judge_evidence_warning)details.append(el('p',trial.judge_evidence_warning,'notice'));
   if(trial.judge_evidence_files?.length)details.append(el('p','Evidence read: '+trial.judge_evidence_files.join(', '),'small'));
  }
+ for(const trial of data.evaluation.attempts||[]){
+  const card=el('details'),summary=el('summary',trial.trial_id+' · '+(trial.task_outcome||'unverified')+' · execution: '+trial.status+' · assistance: '+(trial.assistance_level||'none'));card.append(summary);
+  for(const criterion of trial.criterion_results||[]){card.append(el('h4',criterion.id+' · '+criterion.status),el('p',criterion.reason),el('pre',JSON.stringify(criterion.evidence,null,2)));}
+  card.append(el('p','Participant cost: '+(trial.participant_cost_usd??'unknown')+' USD · judge cost: '+(trial.judge_cost_usd??'unknown')+' USD · reset: '+duration(trial.reset_seconds),'small'));target.append(card);
+ }
+ for(const comparison of data.evaluation.paired_comparisons||[]){target.append(el('p',comparison.condition+' vs '+comparison.baseline+' · success difference: '+(comparison.mean_success_difference??'unknown')+' · 95% interval: '+(comparison.confidence_interval_95?.join(' to ')||'not available')+' · '+comparison.independent_scenarios+' scenario clusters','small'));}
  renderTrialFailures(workflow,target,data.failure_diagnostics);
 
  const groups=Object.entries(data.evaluation.conditions||{});

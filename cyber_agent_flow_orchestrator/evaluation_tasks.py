@@ -6,7 +6,7 @@ from .samples import SampleRequestError
 
 MAX_TASK_BYTES = 64 * 1024
 FIELDS = {'id', 'family', 'split', 'prompt', 'flag_nodes', 'verifier', 'required_checks',
-          'discovery', 'starting_facts', 'discoverable_facts', 'objective_requires', 'progressive_hints'}
+          'discovery', 'starting_facts', 'discoverable_facts', 'objective_requires', 'progressive_hints', 'rubric', 'verification_mode'}
 
 
 def _answer_strings(value):
@@ -54,7 +54,21 @@ def validate_tasks(value):
         checks = task.get('required_checks')
         if not isinstance(checks, list) or not checks or any(not isinstance(c, str) or not c.strip() for c in checks):
             fail('at least one required readiness check is required')
-        if 'flag_nodes' in task:
+        from cyber_agent_flow_eval.rubric import MODES, validate_rubric
+        mode = task.get('verification_mode', 'exact')
+        if mode not in MODES:
+            fail('verification_mode must be exact, judge or both')
+        if 'rubric' in task:
+            try:
+                validate_rubric(task['rubric'])
+            except ValueError as exc:
+                fail(str(exc))
+        if mode in {'judge', 'both'} and 'rubric' not in task:
+            fail('judge/both mode requires a rubric')
+        if mode == 'judge':
+            if not task.get('prompt') or 'verifier' in task or 'flag_nodes' in task:
+                fail('judge-only tasks require a prompt and rubric, without an exact verifier or flag_nodes')
+        elif 'flag_nodes' in task:
             refs = task['flag_nodes']
             if 'verifier' in task or not isinstance(refs, list) or not refs or any(not isinstance(r, str) or not r for r in refs) or len(set(refs)) != len(refs):
                 fail('provide distinct flag node IDs without an explicit verifier')

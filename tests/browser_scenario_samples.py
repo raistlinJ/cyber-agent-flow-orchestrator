@@ -24,6 +24,13 @@ def main():
             if len(messages)==2:return json.dumps({'action':'read_evidence','file':'worker-result.json'}),{'prompt_tokens':10,'output_tokens':5}
             return json.dumps({'action':'verdict','passed':True,'score':1,'reason':'Reviewed the saved result.','evidence':['worker-result.json']}),{'prompt_tokens':10,'output_tokens':5}
         patch.setattr(judge,'_completion',completion)
+        from cyber_agent_flow_orchestrator import trial_reset
+        resets=[]
+        def reset_callback(*args):
+            def reset(directory,trial):
+                resets.append(trial['trial_id']);return {'passed':True,'method':'simulated frozen scenario reset'}
+            return reset
+        patch.setattr(trial_reset,'callback',reset_callback)
         with pve_server(root) as pve:
             pve[0]['resources']['operator@pve']=[vm(9402),vm(9403),vm(9404)]
             dashboard=UserDashboard(config,root/'runs',2,lambda b,a:Probe(b,a,[]))
@@ -147,6 +154,8 @@ def main():
                         records=[(path,json.loads(path.read_text())) for path in (root/'runs').rglob('workflow.json')]
                         path,record=next((p,r) for p,r in records if r.get('sample_id')==sample)
                         assert record['status']=='completed'
+                        assert record['workflow']['reset_each_trial']
+                        assert resets
                         assert record['runtime']['judge']['enabled']
                         assert record['runtime']['judge']['model']['name']==('independent-judge' if sample=='tools-vs-helper' else record['runtime']['model']['name'])
                         assert record['runtime']['judge']['max_turns']==4

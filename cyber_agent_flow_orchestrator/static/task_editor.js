@@ -1,6 +1,6 @@
 /* Task definitions remain separate from participant prompts and private verifiers. */
 let customTaskRows=[],scenarioTaskDefinitions=null,scenarioTaskSelection=null,scenarioTaskContext=null,scenarioTaskSuggested=false;
-const taskFields=new Set(['id','family','prompt','verifier','flag_nodes','required_checks','split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints']);
+const taskFields=new Set(['id','family','prompt','verifier','flag_nodes','required_checks','split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints','rubric','verification_mode']);
 const readinessChecks=[
  ['containers','Workloads started'],['services','Expected services running'],['ports','Expected ports listening'],
  ['injects','Required files placed'],['segmentation','Firewall rules applied'],['traffic','Traffic agents running'],
@@ -21,7 +21,11 @@ function validateTaskList(tasks){
   if('split' in task&&!['development','validation','test'].includes(task.split))fail('Invalid split.');
   if('prompt' in task&&(typeof task.prompt!=='string'||!task.prompt.trim()))fail('Enter a prompt.');
   if(!Array.isArray(task.required_checks)||!task.required_checks.length||task.required_checks.some(c=>typeof c!=='string'||!c.trim()))fail('Enter required readiness checks.');
-  if('flag_nodes' in task){
+  const mode=task.verification_mode||'exact';if(!['exact','judge','both'].includes(mode))fail('Choose exact, judge or both.');
+  if(task.rubric)validateRubric(task.rubric);
+  if(mode!=='exact'&&!task.rubric)fail('Judge review requires a rubric.');
+  if(mode==='judge'){if(!task.prompt||task.verifier||task.flag_nodes)fail('Judge-only tasks require a prompt and rubric without exact checks.');}
+  else if('flag_nodes' in task){
    if('verifier' in task||!Array.isArray(task.flag_nodes)||!task.flag_nodes.length||task.flag_nodes.some(n=>typeof n!=='string'||!n)||new Set(task.flag_nodes).size!==task.flag_nodes.length)fail('Use distinct flag node IDs without an explicit verifier.');
   }else{
    if(!task.prompt)fail('Enter a prompt.');
@@ -37,20 +41,21 @@ function validateTaskList(tasks){
  return tasks;
 }
 function taskRow(task){
- const {id='',family='custom',prompt='',required_checks=['containers','services','ports'],verifier,flag_nodes,progressive_hints,...extra}=task;
- return {id,family,prompt,hints:(progressive_hints||[]).join('\n'),hintsDeclared:progressive_hints!==undefined,checks:required_checks.join(', '),criteria:JSON.stringify(flag_nodes?{flag_nodes}:verifier||{type:'json_equals',expected:{}},null,2),extra:JSON.stringify(extra,null,2)};
+ const {id='',family='custom',prompt='',required_checks=['containers','services','ports'],verifier,flag_nodes,progressive_hints,rubric,verification_mode='exact',split='development',...extra}=task;
+ return {id,family,prompt,split,mode:verification_mode,rubric:JSON.stringify(rubric||defaultRubric(prompt)),hints:(progressive_hints||[]).join('\n'),hintsDeclared:progressive_hints!==undefined,checks:required_checks.join(', '),criteria:JSON.stringify(flag_nodes?{flag_nodes}:verifier||{type:'json_equals',expected:{}},null,2),extra:JSON.stringify(extra,null,2)};
 }
-function readTaskRows(){return [...$('task-editor').querySelectorAll('[data-task-row]')].map(row=>({...Object.fromEntries(['id','family','prompt','hints','checks','criteria','extra'].map(key=>[key,row.querySelector('[data-task-field="'+key+'"]').value])),hintsDeclared:row.dataset.hintsDeclared==='true'}));}
+function readTaskRows(){return [...$('task-editor').querySelectorAll('[data-task-row]')].map(row=>({...Object.fromEntries(['id','family','prompt','hints','checks','criteria','extra','mode','rubric','split'].map(key=>[key,row.querySelector('[data-task-field="'+key+'"]').value])),hintsDeclared:row.dataset.hintsDeclared==='true'}));}
 function parseTaskRows(rows){
  return validateTaskList(rows.map((row,index)=>{
   let criteria,extra;try{criteria=JSON.parse(row.criteria);extra=JSON.parse(row.extra||'{}');}catch{throw Error('Task '+(index+1)+': success criteria and advanced settings must be valid JSON.');}
   if(!criteria||Array.isArray(criteria)||typeof criteria!=='object'||!extra||Array.isArray(extra)||typeof extra!=='object')throw Error('Task '+(index+1)+': criteria and advanced settings must be JSON objects.');
   if(Object.keys(extra).some(k=>!['split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints'].includes(k)))throw Error('Task '+(index+1)+': unsupported advanced field.');
-  const scoring='flag_nodes' in criteria?criteria:{verifier:criteria};
+  const scoring=row.mode==='judge'?{}:'flag_nodes' in criteria?criteria:{verifier:criteria};
+  const review=row.mode&&row.mode!=='exact'?{verification_mode:row.mode,rubric:JSON.parse(row.rubric)}:{verification_mode:'exact'};
   if('flag_nodes' in criteria&&Object.keys(criteria).length!==1)throw Error('Task '+(index+1)+': flag_nodes criteria cannot contain other fields.');
   const hints=(row.hints||'').split('\n').map(h=>h.trim()).filter(Boolean);
   const hintFields=hints.length||row.hintsDeclared?{progressive_hints:hints}:{};
-  return {...extra,...hintFields,id:row.id.trim(),family:row.family.trim(),...(row.prompt.trim()?{prompt:row.prompt}:{}),required_checks:row.checks.split(',').map(s=>s.trim()).filter(Boolean),...scoring};
+  return {...extra,...hintFields,...review,split:row.split||extra.split||'development',id:row.id.trim(),family:row.family.trim(),...(row.prompt.trim()?{prompt:row.prompt}:{}),required_checks:row.checks.split(',').map(s=>s.trim()).filter(Boolean),...scoring};
  }));
 }
 function taskValidationMessage(){
@@ -94,12 +99,13 @@ function renderTaskRows(rows,editable){
  rows.forEach((row,index)=>{
   const fieldset=el('fieldset',null,'task-card');fieldset.dataset.taskRow=String(index);fieldset.dataset.hintsDeclared=String(Boolean(row.hintsDeclared));fieldset.disabled=!editable;
   fieldset.append(el('legend','Task '+(index+1)));
+  appendRubricEditor(fieldset,row,index);
   for(const [key,label,multiline] of [['id','Task ID',false],['family','Task family',false],['prompt','Task prompt',true],['hints','Progressive hints (one per line)',true],['criteria','Success verification',true],['extra','Advanced settings (JSON)',true]]){
    const input=el(multiline?'textarea':'input');input.id='task-'+index+'-'+key;input.dataset.taskField=key;input.value=row[key];if(multiline)input.rows=key==='prompt'?5:3;
    const caption=el('label',label);caption.htmlFor=input.id;fieldset.append(caption,input);
    if(key==='hints'){input.addEventListener('input',()=>{fieldset.dataset.hintsDeclared='true';});fieldset.append(el('p','Optional guidance released when the agent stalls. Use one hint per line; exclude flags, solutions and verifier answers.','small'));}
    if(key==='prompt')fieldset.append(el('p','Participant-facing instructions. A scenario draft starts with the resolved Flow targets and expected response shape; edit it to describe the intended objective.','small'));
-   if(key==='criteria'){
+   if(key==='criteria'){input.disabled=row.mode==='judge';
     const help=el('p',criteriaDescription(row.criteria),'small criteria-description');
     input.addEventListener('input',()=>{help.textContent=criteriaDescription(input.value);});
     fieldset.append(help,el('p','Formats: {"flag_nodes":["node-id"]}, {"type":"json_equals","expected":{...}}, or {"type":"contains_all","expected":["text"]}.','small'));
@@ -161,8 +167,8 @@ function taskScenarioChanged(){
 }
 function initTaskEditor(){
  $('task-editor').addEventListener('input',()=>{if($('task-source').value==='custom'){customTaskRows=readTaskRows();$('task-editor-error').textContent=taskValidationMessage();syncCreateExperiment();}});
- $('task-source').addEventListener('change',()=>{if($('task-source').value==='custom'&&!customTaskRows.length)customTaskRows=(scenarioTaskDefinitions||[{id:'task-1',family:'custom'}]).map(taskRow);renderTaskEditor();syncCreateExperiment();});
- $('add-task').addEventListener('click',()=>{let number=1;while(customTaskRows.some(row=>row.id==='task-'+number))number++;customTaskRows.push(taskRow({id:'task-'+number,family:'custom'}));renderTaskEditor();syncCreateExperiment();});
+ $('task-source').addEventListener('change',()=>{if($('task-source').value==='custom'&&!customTaskRows.length)customTaskRows=(scenarioTaskDefinitions||[{id:'task-1',family:'custom',verification_mode:'judge',rubric:defaultRubric('')}]).map(taskRow);renderTaskEditor();syncCreateExperiment();});
+ $('add-task').addEventListener('click',()=>{let number=1;while(customTaskRows.some(row=>row.id==='task-'+number))number++;customTaskRows.push(taskRow({id:'task-'+number,family:'custom',verification_mode:'judge',rubric:defaultRubric('')}));renderTaskEditor();syncCreateExperiment();});
  $('edit-scenario-tasks').addEventListener('click',()=>{try{validateTaskList(scenarioTaskDefinitions);customTaskRows=scenarioTaskDefinitions.map(taskRow);$('task-source').value='custom';renderTaskEditor();syncCreateExperiment();}catch(error){$('task-editor-error').textContent=error.message;}});
  $('task-import').addEventListener('change',async()=>{
   const file=$('task-import').files[0];if(!file)return;
@@ -193,4 +199,29 @@ function initTaskEditor(){
   }catch(error){$('task-editor-error').textContent=error.message;}
   finally{operation=null;syncBusy();schedulePoll();}
  });
+}
+
+function defaultRubric(prompt){return {version:1,criteria:[{id:'complete',requirement:prompt||'Complete the challenge objective.',evidence:'Successful tool output demonstrating the required result; a claim of completion alone is insufficient.',essential:true,weight:1}]};}
+function validateRubric(rubric){
+ if(rubric?.version!==1||!Array.isArray(rubric.criteria)||!rubric.criteria.length||rubric.criteria.length>32)throw Error('Rubric needs version 1 and 1–32 criteria.');
+ const ids=new Set();for(const c of rubric.criteria){if(!c.id||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(c.id)||ids.has(c.id))throw Error('Criterion IDs must be valid and unique.');ids.add(c.id);if(!c.requirement?.trim()||!c.evidence?.trim())throw Error('Each criterion needs a requirement and evidence description.');if(typeof (c.essential??true)!=='boolean'||!Number.isFinite(c.weight??1)||(c.weight??1)<=0||(c.weight??1)>100)throw Error('Invalid criterion weight or essential setting.');}
+ if(!rubric.criteria.some(c=>c.essential!==false))throw Error('At least one criterion must be essential.');return rubric;
+}
+function appendRubricEditor(fieldset,row,index){
+ const split=el('select');split.dataset.taskField='split';for(const name of ['development','validation','test'])split.add(new Option(name,name));split.value=row.split||'development';const splitLabel=el('label','Dataset split');splitLabel.append(split);fieldset.append(splitLabel,el('p','Use a specific scenario family above. A family must stay in one split across a study.','small'));
+
+ const modeLabel=el('label','Verification mode');modeLabel.htmlFor='task-'+index+'-mode';
+ const mode=el('select');mode.id=modeLabel.htmlFor;mode.dataset.taskField='mode';for(const [value,label] of [['exact','Exact checks'],['judge','Judge review'],['both','Exact checks and judge review']])mode.add(new Option(label,value));mode.value=row.mode||'exact';fieldset.append(modeLabel,mode);
+ const stored=el('input');stored.type='hidden';stored.dataset.taskField='rubric';stored.value=row.rubric||JSON.stringify(defaultRubric(row.prompt));fieldset.append(stored);
+ const review=el('section',null,'rubric-editor');fieldset.append(review);
+ const render=()=>{review.replaceChildren();review.hidden=mode.value==='exact';let rubric;try{rubric=JSON.parse(stored.value);}catch{rubric=defaultRubric(row.prompt);}
+  review.append(el('p','Essential criteria must be satisfied for success. Other criteria contribute partial credit. Private references are sent only to the judge.','small'));
+  rubric.criteria.forEach((criterion,n)=>{const card=el('div',null,'rubric-criterion');card.append(el('h4','Criterion '+(n+1)));
+   for(const [key,label] of [['id','Criterion ID'],['requirement','Required result'],['evidence','Acceptable evidence'],['weight','Weight'],['private_reference','Private reference / solution (optional)']]){const input=el(['requirement','evidence','private_reference'].includes(key)?'textarea':'input');input.value=criterion[key]??(key==='weight'?1:'');if(key==='weight'){input.type='number';input.min='0.01';input.max='100';input.step='0.01';}const caption=el('label',label);caption.append(input);card.append(caption);input.addEventListener('input',()=>{criterion[key]=key==='weight'?Number(input.value):input.value;stored.value=JSON.stringify(rubric);});}
+   const essential=el('input');essential.type='checkbox';essential.checked=criterion.essential!==false;const label=el('label',' Essential for success');label.prepend(essential);essential.addEventListener('change',()=>{criterion.essential=essential.checked;stored.value=JSON.stringify(rubric);});card.append(label);
+   const remove=el('button','Remove criterion');remove.type='button';remove.addEventListener('click',()=>{rubric.criteria.splice(n,1);stored.value=JSON.stringify(rubric);render();customTaskRows=readTaskRows();syncCreateExperiment();});card.append(remove);review.append(card);
+  });
+  const add=el('button','Add criterion');add.type='button';add.addEventListener('click',()=>{let n=1;while(rubric.criteria.some(c=>c.id==='criterion-'+n))n++;rubric.criteria.push({id:'criterion-'+n,requirement:'',evidence:'',essential:true,weight:1});stored.value=JSON.stringify(rubric);render();customTaskRows=readTaskRows();syncCreateExperiment();});review.append(add);
+ };
+ mode.addEventListener('change',()=>{const exact=fieldset.querySelector('[data-task-field="criteria"]');if(exact)exact.disabled=mode.value==='judge';render();customTaskRows=readTaskRows();syncCreateExperiment();});render();
 }

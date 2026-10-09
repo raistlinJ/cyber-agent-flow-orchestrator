@@ -30,6 +30,8 @@ class UserDashboard:
         self.samples = SampleManager(self.runtime, runs_root, samples)
         from .scenarios import ScenarioExperiments
         self.scenarios = ScenarioExperiments(self.cfg, self.runtime, runs_root, self.samples)
+        from .studies import Studies
+        self.studies = Studies(self)
         from .updates import UpdateManager
         self.updates = UpdateManager(self.cfg, self.runtime, runs_root, updates)
         from .model_config import ModelConfigs
@@ -39,6 +41,7 @@ class UserDashboard:
         pass  # Monitoring begins only with an authenticated request.
 
     def close(self):
+        self.studies.close()
         self.samples.close()
         self.updates.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
@@ -154,6 +157,9 @@ class UserDashboard:
                 ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window', 'max_tries_before_solution')}))
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         value['model_config_writable'] = self.runtime['backend']['type']=='fusion' or bool((value['updates'] or {}).get('can_update'))
+        from .experiment_controls import catalogue
+        value['condition_catalogs'] = {key:dict(tools=item['tools']) for key,item in catalogue(runtime).items()}
+        value['extra_reset_hooks_available'] = bool(runtime['backend'].get('before_trial'))
         access.current()
         return value
 
@@ -170,10 +176,16 @@ class UserDashboard:
         return value
 
     def run_sample(self, access, sample_id, request_id):
+        if self.studies.active(access.username):
+            from .samples import SampleBusy
+            raise SampleBusy('A study is running; use its Stop control before launching another experiment')
         created = self.scenarios.create_sample(access, sample_id, request_id)
         return self.scenarios.run_saved(access, created['run_id'], request_id)
 
     def experiment(self, access, action, data):
+        if action == 'run' and self.studies.active(access.username):
+            from .samples import SampleBusy
+            raise SampleBusy('A study is running; use its Stop control before launching another experiment')
         if action != 'run':
             return self._experiment(access, action, data)
         import re
