@@ -197,13 +197,29 @@ def _scenario_task_details(scenario, state, bundle_tasks=None, bundle_files=None
             from scenarioforge.evaluation.scaffold import draft_tasks, graph_from_flow
         except ImportError:
             raise ValueError('Update ScenarioForge on the APP VM to load its evaluation scaffold builder') from None
-        graph = graph_from_flow(dict(state, chain=chain), scenario.get('name'))
+        resolved_graph = graph_from_flow(dict(state, chain=chain), scenario.get('name'))
+        graph = resolved_graph
         if scaffold_context:
             selected, repo = scaffold_context
             generated = repo / 'outputs/caf-reference-previews' / selected['id']
             saved = _saved_reference(selected, generated, 'attack-graph')
             if saved:
                 graph = saved['graph']
+                # Persistent reference artifacts may predate a renderer fix or
+                # have been exported before Flow promoted generator-resolved
+                # target addresses into graph nodes. Keep the saved graph, but
+                # fill only missing addresses from the current frozen Flow.
+                resolved_nodes = {
+                    str(node.get('id')): node
+                    for node in resolved_graph.get('nodes', [])
+                    if isinstance(node, dict) and node.get('id') is not None
+                }
+                for node in graph.get('nodes', []):
+                    if not isinstance(node, dict) or node.get('ipv4'):
+                        continue
+                    resolved = resolved_nodes.get(str(node.get('id')), {})
+                    if resolved.get('ipv4'):
+                        node['ipv4'] = resolved['ipv4']
             guide = _saved_reference(selected, generated, 'facilitator-guide')
             saved_solutions = None
             if guide and (guide.get('markdown') or guide.get('html')):

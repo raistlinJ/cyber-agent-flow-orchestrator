@@ -130,6 +130,41 @@ def test_task_preview_builds_safe_editable_flow_draft(tmp_path, monkeypatch):
         'generator':'web-flag','has_flag':True,'hint_count':2}
 
 
+def test_cached_reference_graph_is_enriched_with_current_resolved_target(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]/'scenarioforge'))
+    state = {
+        'chain': [{'id': '7', 'name': 'web-target'}],
+        'flag_assignments': [{
+            'id': 'web-proof',
+            'node_id': '7',
+            'resolved_inputs': {'Knowledge(ip)': '10.77.0.10'},
+            'resolved_outputs': {'Proof(token)': 'private-proof'},
+        }],
+    }
+    cached_graph = {
+        'schema_version': 2,
+        'scenario': 'Generated Flow',
+        'chain_order': ['7'],
+        'nodes': [{'id': '7', 'label': 'web-target', 'ipv4': None, 'generator': state['flag_assignments'][0]}],
+        'edges': [],
+        'fact_dependencies': [],
+    }
+    monkeypatch.setattr(
+        scenario_guest,
+        '_saved_reference',
+        lambda _selected, _generated, kind: {'graph': cached_graph} if kind == 'attack-graph' else None,
+    )
+
+    suggested, _context = scenario_guest._scenario_task_details(
+        {'name': 'Generated Flow'},
+        state,
+        scaffold_context=({'id': 'a' * 64}, tmp_path),
+    )
+
+    requirement = suggested[0]['rubric']['criteria'][0]['requirement']
+    assert 'web-target at 10.77.0.10' in requirement
+
+
 def test_task_preview_uses_separate_uploaded_bundle_tasks_as_draft(tmp_path):
     upload=tmp_path/('caf-upload-'+'a'*32)
     upload.mkdir()

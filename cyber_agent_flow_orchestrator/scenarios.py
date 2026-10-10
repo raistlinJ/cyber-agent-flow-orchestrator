@@ -351,6 +351,7 @@ class ScenarioExperiments:
             runtime['execution']['network_policy'] = policy
             progressive_hint_settings(runtime['execution'], provide_progressive_hints)
             runtime['backend']['before_trial'] = []
+            runtime['backend']['route_allowed_targets'] = True
             runtime['repetitions'] = 1
             baseline = Path(__file__).with_name('sample_data') / 'baseline.json'
             runtime['conditions'] = [dict(id='baseline', catalog=str(baseline), tools=['nmap', 'curl', 'python3'], guidance_files=[])]

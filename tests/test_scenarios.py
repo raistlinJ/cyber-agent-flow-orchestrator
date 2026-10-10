@@ -119,6 +119,7 @@ def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, m
         record = ev.read_json(output / 'workflow.json')
         assert record['runtime']['conditions'][0]['tools'] == ['nmap', 'curl', 'python3']
         assert record['runtime']['backend']['before_trial'] == []
+        assert record['runtime']['backend']['route_allowed_targets'] is True
         assert record['runtime']['repetitions'] == 2
         assert all(record['runtime']['execution'][key] == value for key, value in settings.items() if key != 'repetitions')
         assert controller.create(user, 'a'*64, 'b'*32, '10.77.0.0/24', '') == reply
