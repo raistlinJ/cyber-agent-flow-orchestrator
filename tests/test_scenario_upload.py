@@ -112,9 +112,12 @@ def test_binary_upload_http_auth_scope_validation_and_selection(pve, lab, tmp_pa
                     sha256=hashlib.sha256(XML).hexdigest(),resolved_chain=True,chain_length=1,bytes=len(XML))],
                     path='/safe/scenario.xml',kind='xml',fidelity='definition')
             if op == 'tasks':
-                text=json.dumps({'tasks':None,'suggested_tasks':[],'context':{}})
+                text=json.dumps({'tasks':None,'suggested_tasks':[dict(id='inventory', family='inventory',
+                    prompt='Read the service title.', verifier=dict(type='contains_all', expected=['Demo']),
+                    required_checks=['services'])],'context':{}})
                 return {'chunk':text,'total':len(text),'sha256':hashlib.sha256(text.encode()).hexdigest()}
             if op == 'snapshot':
+                assert data['tasks'][0]['id'] == 'inventory'
                 return dict(id='a'*64,path='/safe/scenario.xml',scenario='Uploaded lab',
                             sha256=hashlib.sha256(XML).hexdigest(),resolved_chain=True,chain_length=1,
                             snapshot_path='/safe/snapshot.xml')

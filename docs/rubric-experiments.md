@@ -186,6 +186,8 @@ For a resolved ScenarioForge Flow without saved evaluation tasks, **New → Eval
 
 Choose **Edit loaded tasks** to review the draft. The public rubric states what must be accomplished and what evidence supports it. Private references include resolved outputs and guide solutions. No predetermined final JSON or output directory is needed. Generated descriptions are drafts: where the scenario has no explicit objective or solution, refine the requirement instead of treating topology as ground truth.
 
+Creating an experiment freezes its effective task definitions into the selected XML and run inputs. If no explicit task edits are submitted, the server uses saved tasks, separate bundle tasks or the generated scaffold in that order. Missing tasks or a Judge task without an enabled Judge LLM block creation before deployment; a non-flag scenario does not fall back to flag collection. Create a new experiment to capture updated tasks; reruns retain the original frozen definitions.
+
 A private version 1 `challenge_plan` maps every rubric criterion to a step, its graph node, prerequisites, ordered hints and a walkthrough. The editor shows the step mapping; advanced settings preserve it. When changing criterion IDs, update their mapping too. The [plan schema](../../cyber-agent-flow-eval/schemas/challenge-plan-v1.schema.json) is also shipped independently by ScenarioForge.
 
 Under **Evaluation → Judge LLM**, **Judge intermediate progress when progressive hints are enabled** is on by default. It uses a separate checkpoint conversation with the configured judge model. Uncheck **Use the participant's provider, endpoint and model** to select a separate judge provider/model, including an OpenAI endpoint. Credentials remain configured on the orchestrator host.

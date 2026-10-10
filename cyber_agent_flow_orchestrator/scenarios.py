@@ -324,7 +324,15 @@ class ScenarioExperiments:
             sf = self.cfg['scenarioforge']
             authored = definitions
             if authored is None and _sample_id is None:
-                authored = self.tasks(access, selection_id).get('tasks')
+                details = self.tasks(access, selection_id)
+                authored = details.get('tasks')
+                if authored is None:
+                    authored = details.get('suggested_tasks')
+                if not authored:
+                    raise SampleRequestError('Load or define evaluation tasks before creating the experiment')
+                # Freeze the same saved/bundled/generated task contract that was
+                # validated here. Export must never fall back to collect-flags.
+                definitions = validate_tasks(authored)
             if authored and any(t.get('verification_mode') in {'judge','both'} for t in authored) and not (judge or self.runtime.get('judge',{})).get('enabled'):
                 raise SampleRequestError('Enable Judge LLM for the saved scenario rubric')
             progress(2, 'Connecting to ScenarioForge and freezing the selected scenario XML')

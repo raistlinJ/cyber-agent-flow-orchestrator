@@ -224,6 +224,71 @@ def test_hints_off_compatible_with_older_evaluator(monkeypatch):
     assert execution == {'max_turns': 6}
 
 
+@pytest.mark.parametrize('task_source', ['saved', 'bundle', 'generated', 'missing'])
+def test_create_without_explicit_tasks_freezes_effective_contract(pve, lab, tmp_path, monkeypatch, task_source):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / 'scenarioforge'))
+    monkeypatch.setattr(ev, 'GuestAgent', lambda backend: lab[2])
+    pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403)]
+    user = access(pve)
+    workspace = Workspace(tmp_path / 'runs', user.username)
+    workspace.save_roles(dict(scenarioforge=9402, participant=9403, core=None), user)
+    cfg, runtime, _, _ = load(lab[0])
+    cfg.setdefault('monitoring', {}).update(scenarioforge_path=str(tmp_path), scenarioforge_xml_roots=[str(tmp_path)])
+    cfg['scenarioforge']['user'] = pwd.getpwuid(os.getuid()).pw_name
+    manager = samples.SampleManager(runtime, tmp_path / 'runs')
+    controller = scenarios.ScenarioExperiments(cfg, runtime, tmp_path / 'runs', manager)
+    path = source(tmp_path)
+    if task_source != 'saved':
+        root = ET.parse(path)
+        node = root.find('./Scenario/FlowState')
+        state = json.loads(node.text)
+        del state['evaluation_tasks']
+        # No flag: completion must come from the scenario-derived rubric.
+        state['flag_assignments'] = [dict(node_id='7', resolved_outputs={'Proof(token)': 'private-proof'})]
+        node.text = json.dumps(state)
+        root.write(path)
+    if task_source == 'bundle':
+        with zipfile.ZipFile(tmp_path / 'source', 'w') as archive:
+            archive.writestr('evaluation-tasks.json', json.dumps(TASKS))
+        # Emulate a separate bundled task file after import, with no XML tasks.
+        monkeypatch.setattr(scenario_guest, '_uploaded_bundle_details', lambda path: (TASKS, ['evaluation tasks']))
+    calls = []
+    class Remote:
+        def call(self, vmid, op, **data):
+            calls.append(op)
+            return scenario_guest.dispatch(dict(data, op=op))
+    monkeypatch.setattr(scenarios, 'guest', lambda backend: Remote())
+    try:
+        selection = next(i for i in controller.catalogue(user)['items'] if i['path'] == str(path) and i['scenario'] == 'Selected')
+        details = controller.tasks(user, selection['id'])
+        effective = validate_tasks(details['tasks'] if details['tasks'] is not None else details['suggested_tasks'])
+        if task_source == 'missing':
+            monkeypatch.setattr(controller, 'tasks', lambda *args: dict(tasks=None, suggested_tasks=[]))
+            with pytest.raises(SampleRequestError, match='define evaluation tasks'):
+                controller.create(user, selection['id'], 'b'*32, '10.77.0.0/24', '')
+            assert 'snapshot' not in calls
+            return
+        if task_source == 'generated':
+            assert effective[0]['verification_mode'] == 'judge'
+            assert 'flag_nodes' not in effective[0] and 'verifier' not in effective[0]
+            with pytest.raises(SampleRequestError, match='Enable Judge LLM'):
+                controller.create(user, selection['id'], 'a'*32, '10.77.0.0/24', '')
+            assert 'snapshot' not in calls
+            from cyber_agent_flow_eval.judge import resolve_judge
+            runtime['judge'] = resolve_judge(dict(enabled=True, use_participant_model=True), runtime['model'])
+        result = controller.create(user, selection['id'], 'b'*32, '10.77.0.0/24', '')
+        output = workspace.run_path(result['run_id'])
+        record = ev.read_json(output / 'workflow.json')
+        frozen = json.loads(ET.parse(record['workflow']['scenarioforge']['xml']).find('./Scenario/FlowState').text)
+        assert frozen['evaluation_tasks'] == effective
+        assert ev.read_json(output / 'inputs/evaluation-tasks.json') == effective
+        assert record['scenario_experiment']['evaluation_tasks'] == effective
+        assert [t['id'] for t in record['task_design']] == [t['id'] for t in effective]
+        assert json.loads(ET.parse(path).find('./Scenario/FlowState').text).get('evaluation_tasks') == (effective if task_source == 'saved' else None)
+    finally:
+        manager.close()
+
+
 def test_authored_hint_cannot_include_an_explicit_verifier_answer():
     import copy
     task=copy.deepcopy(TASKS[0])
