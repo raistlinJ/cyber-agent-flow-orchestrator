@@ -142,7 +142,12 @@ function renderTaskContext(){
  if(!flags.length&&scenarioTaskDefinitions===null)target.append(el('p','This scenario does not expose a safe machine-verifiable answer in its Flow data. Add an explicit expected result before using a custom task.','notice task-context-warning'));
  target.append(el('p','The attack graph and participant guide are derived from this same saved Flow state. When building a draft from Flow data, facilitator answers and resolved secret values are excluded.','small'));
 }
+function syncTaskSourceTooltip(){
+ const source=$('task-source'),option=source.selectedOptions[0];
+ if(option?.title)source.title=option.title;
+}
 function renderTaskEditor(){
+ syncTaskSourceTooltip();
  const editable=$('task-source').value==='custom';
  $('task-edit-actions').hidden=!editable;
  $('edit-scenario-tasks').hidden=!Array.isArray(scenarioTaskDefinitions)||editable;
