@@ -537,7 +537,9 @@ $('load-scenarios').addEventListener('click',async()=>{
   const response=await apiFetch('/api/scenarios/list',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({query:''})});
   const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to load scenarios');
   showScenarioChoices(result);
-  $('scenario-selection-info').textContent=result.items.length?(result.truncated?'Showing the 50 most recently modified scenarios found on VM '+result.vmid+'.':'Choose a scenario from VM '+result.vmid+'; newest files are listed first.'):'No saved XML found in '+result.roots.join(', ')+'.';
+  const newest=scenarioChoices.find(item=>item.resolved_chain);
+  if(newest){$('scenario-selection').value=newest.id;describeScenarioSelection();taskScenarioChanged();$('scenario-selection-info').textContent='Selected newest resolved scenario on VM '+result.vmid+': '+newest.path+' · '+newest.scenario+' · modified '+scenarioModifiedLabel(newest)+' · '+newest.chain_length+' Flow steps'+(result.truncated?' · searched the 50 newest matches':'');}
+  else $('scenario-selection-info').textContent=result.items.length?'Saved XML files were found on VM '+result.vmid+', but none has a resolved Flow chain. Finish and save Flag Sequencing, then Generate Preview Plan and reload.':'No saved XML found in '+result.roots.join(', ')+'.';
  }catch(error){$('scenario-selection-info').textContent=error.message;}
  finally{operation=null;syncBusy();schedulePoll();}
 });
