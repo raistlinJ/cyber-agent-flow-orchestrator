@@ -33,7 +33,13 @@ def _flow_state(scenario):
 
 def _flow_chain(state):
     """Read both FlowState representations emitted by ScenarioForge Save XML."""
-    if state.get('flow_enabled') is False or state.get('topology_dirty'):
+    if state.get('topology_dirty'):
+        return []
+    # A fixed scenario can disable generator execution while retaining reviewed
+    # evaluation tasks and their resolved target chain (including non-flag tasks).
+    # ScenarioForge's execution/export contract supports this representation.
+    tasks = state.get('evaluation_tasks')
+    if state.get('flow_enabled') is False and not (isinstance(tasks, list) and tasks):
         return []
     entries = state.get('chain') if isinstance(state.get('chain'), list) else []
     nodes = {}

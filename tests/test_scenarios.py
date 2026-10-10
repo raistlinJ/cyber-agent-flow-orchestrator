@@ -193,6 +193,32 @@ def test_disabled_or_dirty_sequence_is_not_listed_as_resolved(tmp_path, flag):
     assert guest.inspect(source)[0]['resolved_chain'] is False
 
 
+@pytest.mark.parametrize('dirty', [False, True])
+def test_fixed_tasks_can_disable_generators_but_cannot_use_dirty_topology(tmp_path, dirty):
+    state = dict(flow_enabled=False, topology_dirty=dirty, chain=[dict(id='web', ipv4='10.77.0.10')],
+                 evaluation_tasks=[dict(id='web-task', family='web', prompt='Read the title.',
+                    verifier=dict(type='contains_all', expected=['Demo']), required_checks=['ports'])])
+    path = tmp_path / 'fixed.xml'
+    path.write_text('<Scenario name="Fixed"><FlowState>' + json.dumps(state) + '</FlowState></Scenario>')
+    row = guest.inspect(path)[0]
+    assert row['resolved_chain'] is (not dirty)
+    if not dirty:
+        captured = guest.dispatch(dict(op='snapshot', roots=[str(tmp_path)], repo=str(tmp_path),
+            path=str(path), token='f'*32, selection_id=row['id'], user=pwd.getpwuid(os.getuid()).pw_name))
+        assert Path(captured['snapshot_path']).read_bytes() == path.read_bytes()
+
+
+def test_five_reviewed_bundles_are_selectable_without_running_generators(tmp_path, monkeypatch):
+    import runpy
+    importer = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scenarioforge/webapp/reproduction_bundle.py'))['import_scenario_file']
+    bundles = sorted((Path(__file__).resolve().parents[1] / 'ScenarioForge-Bundles').glob('*.zip'))
+    assert len(bundles) == 5
+    for bundle in bundles:
+        imported = importer(str(bundle), str(tmp_path / bundle.stem))
+        rows = guest.inspect(Path(imported.xml_path))
+        assert len(rows) == 1 and rows[0]['resolved_chain'], bundle.name
+
+
 @pytest.mark.parametrize('limit',[0,1001,True,'6'])
 def test_invalid_max_tries_before_solution(limit):
     settings = dict(repetitions=1,max_turns=9,wall_seconds=300,tool_timeout=30,context_window=8192,
