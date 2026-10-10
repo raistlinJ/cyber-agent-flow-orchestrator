@@ -160,7 +160,8 @@ def test_scope_uses_saved_topology_and_ignores_access_networks(tmp_path):
     assert guest.target_subnets(scenario) == ['10.77.0.5/32']
 
 
-def test_saved_preview_chain_ids_are_listed_and_snapshot_without_rewriting(tmp_path):
+def test_saved_preview_chain_ids_are_listed_and_snapshot_without_rewriting(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]/'scenarioforge'))
     import json
     state = dict(chain_ids=['docker-1'], flag_assignments=[
         dict(node_id='docker-1', id='131', flag_value='flag-observed', type='flag-node-generator')])
@@ -173,7 +174,8 @@ def test_saved_preview_chain_ids_are_listed_and_snapshot_without_rewriting(tmp_p
     scenario = ET.parse(source).getroot().find('Scenario')
     tasks, context = guest._scenario_task_details(scenario, state)
     assert context['chain'][0]['id'] == 'docker-1'
-    assert tasks[0]['flag_nodes'] == ['docker-1']
+    assert tasks[0]['verification_mode'] == 'judge'
+    assert tasks[0]['challenge_plan']['steps'][0]['node_id'] == 'docker-1'
     saved = guest.dispatch(dict(op='snapshot', roots=[str(tmp_path)], repo=str(tmp_path), path=str(source),
         token='c' * 32, selection_id=row['id'], user=pwd.getpwuid(os.getuid()).pw_name))
     assert Path(saved['snapshot_path']).read_bytes() == source.read_bytes()

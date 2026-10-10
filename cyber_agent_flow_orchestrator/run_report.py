@@ -335,6 +335,11 @@ def render(report, *, root=None, recorded_at=None):
         judge_config = config.get('judge') or {}
         doc.table(['Judge setting','Value'], [[key,value] for key,value in judge_config.items() if key != 'model'] +
                   [['model.' + key,value] for key,value in (judge_config.get('model') or {}).items()])
+    if any(r.get('progress_monitor_enabled') for r in rows):
+        doc.heading('Intermediate challenge progress')
+        doc.table(['Trial','Checks','Unverified checks','Checkpoint time','Model calls','Checkpoint USD'],[[r['trial_id'],r.get('progress_monitor_checks'),r.get('progress_monitor_errors'),seconds(r.get('progress_monitor_seconds')),r.get('progress_monitor_calls'),r.get('progress_monitor_cost_usd')] for r in rows if r.get('progress_monitor_enabled')])
+        doc.table(['Trial','Criterion','Checkpoint finding','Reason','Saved review'],[[r['trial_id'],key,finding['status'],finding['reason'],finding.get('audit')] for r in rows for key,finding in r.get('progress_monitor',{}).get('criteria',{}).items()])
+        doc.paragraph('Checkpoint findings direct progressive assistance. They are cumulative milestones, not final trial scores. The final judge independently reviews the complete execution. Checkpoint time consumes the worker wall-clock budget.')
     doc.heading('Challenge outcomes and evidence')
     doc.table(['Trial','Task outcome','Execution status','Assistance','Reset time'],[[r['trial_id'],r.get('task_outcome',outcome(r)),r.get('execution_status',r.get('status')),r.get('assistance_level','none'),seconds(r.get('reset_seconds'))] for r in rows])
     doc.table(['Trial','Criterion','Finding','Reason','Evidence read'],[[r['trial_id'],c['id'],c['status'],c['reason'],c['evidence']] for r in rows for c in r.get('criterion_results',[])])

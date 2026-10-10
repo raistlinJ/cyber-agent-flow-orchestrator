@@ -161,6 +161,9 @@
 <label>Judge time limit (seconds)<input id="judge-timeout_seconds" form="experiment-form" type="number" min="1" max="3600" value="120" required></label>
 <label>Judge output tokens per call<input id="judge-max_tokens" form="experiment-form" type="number" min="1" max="16384" value="2048" required></label>
 </fieldset>
+<label><input id="judge-monitor_progress" type="checkbox" checked> Judge intermediate progress when progressive hints are enabled</label>
+<p class="small">A separate checkpoint review uses this judge model and saved tool output to check challenge milestones. Hints target the first eligible unfinished step. Missing evidence remains unverified; a monitor error releases no assistance. Checkpoint calls consume trial wall time and are reported separately from final scoring.</p>
+<div id="progress-monitor-limits" class="evaluation-grid"><label>Maximum time per progress check (seconds)<input id="judge-progress_timeout_seconds" form="experiment-form" type="number" min="1" max="120" value="20" required></label><label>Maximum progress checks per trial<input id="judge-progress_max_checks" form="experiment-form" type="number" min="1" max="1000" value="32" required></label></div>
 <p class="small">The endpoint must be reachable from the orchestrator host. Host credentials configured for that endpoint are reused; participant VM API keys are not copied. These judge settings are saved for reruns.</p>
 </section>
 </section></section></div><div class="experiment-dialog-footer"><p class="small">Creating an experiment saves its participant VM and model settings without starting it. Reruns reuse those settings.</p>

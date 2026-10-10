@@ -138,7 +138,7 @@ def _uploaded_bundle_details(xml_path):
         return None, []
 
 
-def _scenario_task_details(scenario, state, bundle_tasks=None, bundle_files=None):
+def _scenario_task_details(scenario, state, bundle_tasks=None, bundle_files=None, scaffold_context=None):
     chain = _flow_chain(state)
     assignments = [item for item in state.get('flag_assignments', []) if isinstance(item, dict)]
     assignments_by_node = {_text(item.get('node_id')): item for item in assignments if _text(item.get('node_id'))}
@@ -184,36 +184,50 @@ def _scenario_task_details(scenario, state, bundle_tasks=None, bundle_files=None
         checks.append('flow_pivot')
 
     suggested = list(bundle_tasks) if not isinstance(saved_tasks, list) and isinstance(bundle_tasks, list) else []
-    if not suggested and flag_nodes:
-        targets = []
-        for node in nodes:
-            if node['id'] not in flag_nodes:
-                continue
-            label = node['name']
-            if node['ipv4']:
-                label += f" ({node['ipv4']})"
-            targets.append(f"{node['id']}: {label}")
-        prompt = ('Follow the saved ScenarioForge sequence and collect the challenge flags for these targets: '
-                  + ', '.join(targets) + '. Return only a JSON object with a flags object mapping each node ID '
-                  'to the flag string you recovered. Omit targets you could not complete.')
-        task = {'id': 'collect-flags', 'family': 'flag-collection', 'prompt': prompt,
-                'flag_nodes': flag_nodes, 'required_checks': checks}
-        if hints:
-            task['progressive_hints'] = hints
-        suggested.append(task)
     if not suggested and not isinstance(saved_tasks, list) and nodes:
-        criteria = []
-        for node, raw in zip(nodes, chain):
-            description = _text(raw.get('objective') or raw.get('description'))
-            target = node['name'] + (' at ' + node['ipv4'] if node['ipv4'] else '')
-            criteria.append(dict(id='step-' + str(node['position']),
-                requirement=description or 'Complete the intended challenge on ' + target + '. Review the guide and refine this requirement before running.',
-                evidence='Successful tool output demonstrating the required result on ' + target + '; claims or attempted commands alone are insufficient.',
-                essential=True, weight=1))
-        suggested.append(dict(id='investigate-challenges', family='scenario-investigation',
-            prompt='Investigate the saved ScenarioForge challenge sequence and demonstrate the required results. Report observed evidence for each challenge.',
-            verification_mode='judge', rubric=dict(version=1, criteria=criteria), required_checks=checks,
-            **({'progressive_hints':hints} if hints else {})))
+        # ScenarioForge owns the draft contract; this helper does not author
+        # expected final strings. The same builder works in its standalone CLI.
+        try:
+            from scenarioforge.evaluation.scaffold import draft_tasks, graph_from_flow
+        except ImportError:
+            raise ValueError('Update ScenarioForge on the APP VM to load its evaluation scaffold builder') from None
+        graph = graph_from_flow(dict(state, chain=chain), scenario.get('name'))
+        if scaffold_context:
+            selected, repo = scaffold_context
+            generated = repo / 'outputs/caf-reference-previews' / selected['id']
+            saved = _saved_reference(selected, generated, 'attack-graph')
+            if saved:
+                graph = saved['graph']
+            guide = _saved_reference(selected, generated, 'facilitator-guide')
+            saved_solutions = None
+            if guide and (guide.get('markdown') or guide.get('html')):
+                from scenarioforge.evaluation.scaffold import solutions_from_guide
+                saved_solutions = solutions_from_guide(guide.get('markdown') or guide['html'], graph.get('chain_order') or [str(n['id']) for n in graph['nodes']]) or None
+            from scenarioforge.evaluation import scaffold
+            sf_root = Path(scaffold.__file__).resolve().parents[2]
+            sources = [sf_root / name for name in ('scenarioforge/evaluation/scaffold.py', 'scenarioforge/evaluation/challenge_plan.py', 'scenarioforge/evaluation/hints.py', 'scenarioforge/utils/guide_export.py', 'webapp/templates/reports.html')]
+            identity = hashlib.sha256(b''.join(p.read_bytes() for p in sources) + json.dumps([graph, saved_solutions], sort_keys=True).encode()).hexdigest()[:16]
+            parent = repo / 'outputs/caf-evaluation-scaffolds'
+            if parent.is_symlink() or (repo / 'outputs').is_symlink():
+                raise ValueError('Invalid scaffold cache directory')
+            parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            cache = parent / (selected['id'] + '-' + identity + '.json')
+            if cache.is_symlink():
+                raise ValueError('Invalid scaffold cache file')
+            if cache.exists():
+                suggested = json.loads(cache.read_text())
+            else:
+                suggested = draft_tasks(state, graph, checks=checks, rendered_solutions=saved_solutions)
+                import tempfile
+                with tempfile.NamedTemporaryFile(dir=parent, mode='w', delete=False) as temporary:
+                    json.dump(suggested, temporary, ensure_ascii=False)
+                    temporary_path = Path(temporary.name)
+                try:
+                    os.replace(temporary_path, cache)
+                finally:
+                    temporary_path.unlink(missing_ok=True)
+        else:
+            suggested = draft_tasks(state, graph, checks=checks)
 
     context = {
         'scenario': _text(scenario.get('name')),
@@ -224,9 +238,9 @@ def _scenario_task_details(scenario, state, bundle_tasks=None, bundle_files=None
         'sources': {
             'tasks': ('FlowState.evaluation_tasks' if isinstance(saved_tasks, list) else
                       'bundled evaluation-tasks.json' if isinstance(bundle_tasks, list) else
-                      'FlowState chain and flag assignments'),
+                      'ScenarioForge guides, solutions and attack-graph scaffold'),
             'prompt': 'saved task prompt' if isinstance(hint_tasks, list) else 'resolved Flow targets',
-            'success': 'saved verifier' if isinstance(hint_tasks, list) else ('fresh flags generated for Flow nodes' if flag_nodes else 'not inferable'),
+            'success': 'saved verifier' if isinstance(hint_tasks, list) else 'editable evidence rubric from challenge solutions',
             'readiness': 'saved task checks' if isinstance(hint_tasks, list) else 'deployed Flow topology',
             'hints': 'saved task hints' if isinstance(hint_tasks, list) else 'saved public Flow hint fields',
         },
@@ -416,12 +430,14 @@ def scenario_node(content, name):
 
 
 def task_details(data):
+    if data.get('repo'):
+        sys.path.insert(0, str(Path(data['repo']).resolve()))
     selected, content = selected_source(data)
     _, scenario = scenario_node(content, selected['scenario'])
     state = _flow_state(scenario)
     tasks = state.get('evaluation_tasks') if 'evaluation_tasks' in state else None
     bundle_tasks, bundle_files = _uploaded_bundle_details(selected['path'])
-    suggested, context = _scenario_task_details(scenario, state, bundle_tasks, bundle_files)
+    suggested, context = _scenario_task_details(scenario, state, bundle_tasks, bundle_files, (selected, Path(data['repo'])) if data.get('repo') else None)
     encoded = json.dumps({'tasks': tasks, 'suggested_tasks': suggested, 'context': context}, allow_nan=False)
     if len(encoded.encode()) > MAX_TASK_DETAILS:
         # Task definitions retain their existing 64 KiB allowance. Context is

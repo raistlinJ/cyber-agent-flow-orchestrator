@@ -645,3 +645,5 @@ For local VMware Fusion experiments, see [Fusion setup and execution](docs/fusio
 
 
 For editable challenge rubrics, evidence-based judging, controlled conditions, lab resets, held-out multi-scenario Studies and downloadable comparison reports, see [Rubric experiments and studies](docs/rubric-experiments.md).
+
+ScenarioForge task loading can draft an editable, Judge-based challenge scaffold from resolved Flow data and guide solutions. Progressive hints can use separate intermediate evidence reviews to select the current unfinished step. See [scaffolds and intermediate progress](docs/rubric-experiments.md#scenario-derived-scaffold-and-intermediate-progress) for configuration, limits and audit files.

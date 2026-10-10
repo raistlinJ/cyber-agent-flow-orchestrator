@@ -179,3 +179,32 @@ No ScenarioForge application import is needed in the evaluator, and none of thes
 features require the orchestrator for standalone use.
 
 For a task using Both, rubric completion credit is retained even if the final answer fails the exact check. Verified success still requires both checks to pass; a criterion score of 1 does not override an incorrect JSON answer. The rubric scaffold preserves the task's required final response format and uses the recorded execution logs for evidence when the task requires JSON only.
+
+## Scenario-derived scaffold and intermediate progress
+
+For a resolved ScenarioForge Flow without saved evaluation tasks, **New → Evaluation → Load tasks from ScenarioForge** now drafts a Judge task from the Flow, attack graph and participant/facilitator guide data. Saved per-step guide sections are reused when available; otherwise ScenarioForge's shared guide renderer supplies structured hints and solutions. The draft is persistently cached by XML, graph and producer-source identity. Existing authored task definitions remain authoritative.
+
+Choose **Edit loaded tasks** to review the draft. The public rubric states what must be accomplished and what evidence supports it. Private references include resolved outputs and guide solutions. No predetermined final JSON or output directory is needed. Generated descriptions are drafts: where the scenario has no explicit objective or solution, refine the requirement instead of treating topology as ground truth.
+
+A private version 1 `challenge_plan` maps every rubric criterion to a step, its graph node, prerequisites, ordered hints and a walkthrough. The editor shows the step mapping; advanced settings preserve it. When changing criterion IDs, update their mapping too. The [plan schema](../../cyber-agent-flow-eval/schemas/challenge-plan-v1.schema.json) is also shipped independently by ScenarioForge.
+
+Under **Evaluation → Judge LLM**, **Judge intermediate progress when progressive hints are enabled** is on by default. It uses a separate checkpoint conversation with the configured judge model. Uncheck **Use the participant's provider, endpoint and model** to select a separate judge provider/model, including an OpenAI endpoint. Credentials remain configured on the orchestrator host.
+
+At each CAF between-turn callback, the host freezes actual execution evidence. On Proxmox and Fusion this uses the same bounded guest pack/read transport; the hint-request preview is not treated as the full transcript. The monitor assesses rubric criteria with cited tool output and retains evidenced milestones. New unrelated output or a final completion claim does not establish progress. Each step can be completed, partial, unmet or unverified. Prerequisites choose the first eligible unfinished step for assistance; a valid alternative approach is accepted unless the rubric requires a method.
+
+Ordinary hints are released after two turns without newly satisfied criteria. The configured max-tries threshold releases only that current step's walkthrough and answer. Known future flags are withheld. Hints and solutions do not mark a challenge complete; the monitor still needs observed execution evidence. Once essential criteria are complete, assistance stops. In Both mode, an incorrect final format can receive a format-only retry without revealing the answer.
+
+A missing trace, invalid verdict, exceeded monitor limit or unavailable judge leaves checkpoint status unverified and releases no assistance for that checkpoint. Monitor errors do not manufacture a pass or replace the final scorer. Turning monitoring off retains the basic hint policy; it does not provide rubric-verified intermediate status.
+
+Checkpoint inference and transfers consume the trial's wall-clock budget. Defaults are 20 seconds per check (including evidence capture), at most 32 model-reviewed checkpoints, and an 8 MiB evidence snapshot limit. Judge turn/token limits also bound each review. Configure enough trial time for these calls. Checkpoint time, calls, usage, optional priced cost and errors are reported separately; final judging still happens after worker collection.
+
+Results JSON, CSV, live progress and Markdown/HTML reports contain intermediate findings. `reference-material.json` gives the judge read-only access to private guide walkthroughs and resolved graph outputs, including details too large for a rubric summary. Reference content cannot prove an action occurred and is never uploaded as worker input. `progress-monitor.json` summarizes milestones; `progress-checks/turn-XXXX/` preserves frozen evidence, its hashes and that checkpoint's `judge.json`. The ordinary attempt `judge.json` remains the independent **final** review. Milestone completion is historical, not proof of persistent current VM state; the final rubric must specify and evaluate any required end state. Both roles are automated judgments and remain uncalibrated against human labels.
+
+Standalone ScenarioForge can produce the same editable scaffold without CAF or the orchestrator:
+
+```sh
+python -m scenarioforge.cli evaluation-scaffold \
+  --xml scenario.xml --scenario "My Scenario" --output-dir evaluation-draft
+```
+
+Review `evaluation-draft/evaluation-tasks.json`, then supply it using `--evaluation-tasks` during execute/evaluation-export. The standalone evaluator consumes that version 4 package and the same optional judge/monitor configuration.

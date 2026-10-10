@@ -1,6 +1,6 @@
 /* Task definitions remain separate from participant prompts and private verifiers. */
 let customTaskRows=[],scenarioTaskDefinitions=null,scenarioTaskSelection=null,scenarioTaskContext=null,scenarioTaskSuggested=false;
-const taskFields=new Set(['id','family','prompt','verifier','flag_nodes','required_checks','split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints','rubric','verification_mode']);
+const taskFields=new Set(['id','family','prompt','verifier','flag_nodes','required_checks','split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints','rubric','verification_mode','challenge_plan']);
 const readinessChecks=[
  ['containers','Workloads started'],['services','Expected services running'],['ports','Expected ports listening'],
  ['injects','Required files placed'],['segmentation','Firewall rules applied'],['traffic','Traffic agents running'],
@@ -23,6 +23,7 @@ function validateTaskList(tasks){
   if(!Array.isArray(task.required_checks)||!task.required_checks.length||task.required_checks.some(c=>typeof c!=='string'||!c.trim()))fail('Enter required readiness checks.');
   const mode=task.verification_mode||'exact';if(!['exact','judge','both'].includes(mode))fail('Choose exact, judge or both.');
   if(task.rubric)validateRubric(task.rubric);
+  if(task.challenge_plan){const mapped=new Set((task.challenge_plan.steps||[]).flatMap(s=>s.criterion_ids||[]));if(task.challenge_plan.version!==1||!mapped.size||!task.rubric?.criteria.every(c=>mapped.has(c.id)))fail('Challenge plan must map the rubric criterion IDs. Update the advanced plan when changing IDs.');}
   if(mode!=='exact'&&!task.rubric)fail('Judge review requires a rubric.');
   if(mode==='judge'){if(!task.prompt||task.verifier||task.flag_nodes)fail('Judge-only tasks require a prompt and rubric without exact checks.');}
   else if('flag_nodes' in task){
@@ -47,11 +48,11 @@ function taskRow(task){
 function readTaskRows(){return [...$('task-editor').querySelectorAll('[data-task-row]')].map(row=>({...Object.fromEntries(['id','family','prompt','hints','checks','criteria','extra','mode','rubric','split'].map(key=>[key,row.querySelector('[data-task-field="'+key+'"]').value])),hintsDeclared:row.dataset.hintsDeclared==='true'}));}
 function parseTaskRows(rows){
  return validateTaskList(rows.map((row,index)=>{
-  let criteria,extra;try{criteria=JSON.parse(row.criteria);extra=JSON.parse(row.extra||'{}');}catch{throw Error('Task '+(index+1)+': success criteria and advanced settings must be valid JSON.');}
+  let criteria,extra;try{criteria=row.mode==='judge'?{}:JSON.parse(row.criteria);extra=JSON.parse(row.extra||'{}');}catch{throw Error('Task '+(index+1)+': success criteria and advanced settings must be valid JSON.');}
   if(!criteria||Array.isArray(criteria)||typeof criteria!=='object'||!extra||Array.isArray(extra)||typeof extra!=='object')throw Error('Task '+(index+1)+': criteria and advanced settings must be JSON objects.');
-  if(Object.keys(extra).some(k=>!['split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints'].includes(k)))throw Error('Task '+(index+1)+': unsupported advanced field.');
+  if(Object.keys(extra).some(k=>!['split','discovery','starting_facts','discoverable_facts','objective_requires','progressive_hints','challenge_plan'].includes(k)))throw Error('Task '+(index+1)+': unsupported advanced field.');
   const scoring=row.mode==='judge'?{}:'flag_nodes' in criteria?criteria:{verifier:criteria};
-  const review=row.mode&&row.mode!=='exact'?{verification_mode:row.mode,rubric:JSON.parse(row.rubric)}:{verification_mode:'exact'};
+  const review=row.mode&&row.mode!=='exact'?{verification_mode:row.mode,rubric:JSON.parse(row.rubric)}:{verification_mode:'exact',...(extra.challenge_plan?{rubric:JSON.parse(row.rubric)}:{})};
   if('flag_nodes' in criteria&&Object.keys(criteria).length!==1)throw Error('Task '+(index+1)+': flag_nodes criteria cannot contain other fields.');
   const hints=(row.hints||'').split('\n').map(h=>h.trim()).filter(Boolean);
   const hintFields=hints.length||row.hintsDeclared?{progressive_hints:hints}:{};
@@ -104,14 +105,15 @@ function renderTaskRows(rows,editable){
    const input=el(multiline?'textarea':'input');input.id='task-'+index+'-'+key;input.dataset.taskField=key;input.value=row[key];if(multiline)input.rows=key==='prompt'?5:3;
    const caption=el('label',label);caption.htmlFor=input.id;fieldset.append(caption,input);
    if(key==='hints'){input.addEventListener('input',()=>{fieldset.dataset.hintsDeclared='true';});fieldset.append(el('p','Optional guidance released when the agent stalls. Use one hint per line; exclude flags, solutions and verifier answers.','small'));}
-   if(key==='prompt')fieldset.append(el('p','Participant-facing instructions. A scenario draft starts with the resolved Flow targets and expected response shape; edit it to describe the intended objective.','small'));
+   if(key==='prompt')fieldset.append(el('p','Participant-facing instructions. A scenario draft uses the guides, solutions and challenge graph. Review its objectives; Judge mode permits a free-form evidence report.','small'));
    if(key==='criteria'){input.disabled=row.mode==='judge';
     const help=el('p',criteriaDescription(row.criteria),'small criteria-description');
     input.addEventListener('input',()=>{help.textContent=criteriaDescription(input.value);});
     fieldset.append(help,el('p','Formats: {"flag_nodes":["node-id"]}, {"type":"json_equals","expected":{...}}, or {"type":"contains_all","expected":["text"]}.','small'));
    }
-   if(key==='extra')fieldset.append(el('p','Optional split, discovery, starting_facts, discoverable_facts and objective_requires. Imported settings are preserved.','small'));
+   if(key==='extra')fieldset.append(el('p','Optional discovery and fact declarations. A challenge_plan maps rubric criteria to steps and prerequisites for progress monitoring; keep its criterion IDs in sync when editing the rubric.','small'));
   }
+  try{const plan=JSON.parse(row.extra||'{}').challenge_plan;if(plan){const detail=el('details');detail.append(el('summary','Intermediate challenge scaffold · '+plan.steps.length+' steps'));for(const step of plan.steps)detail.append(el('p',step.id+' · '+step.title+' · criteria: '+step.criterion_ids.join(', ')+' · prerequisites: '+(step.requires.join(', ')||'none'),'small'));detail.append(el('p','Private solutions stay on the evaluator host. Review these generated objectives before running.','small'));fieldset.append(detail);}}catch{}
   appendReadinessEditor(fieldset,row,index);
   if(editable){const remove=el('button','Remove task');remove.type='button';remove.addEventListener('click',()=>{customTaskRows.splice(index,1);renderTaskEditor();syncCreateExperiment();});fieldset.append(remove);}
   target.append(fieldset);

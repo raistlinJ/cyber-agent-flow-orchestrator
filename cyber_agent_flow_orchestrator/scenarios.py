@@ -123,7 +123,7 @@ class ScenarioExperiments:
             remote = guest(self.runtime['backend'])
             for _ in range(25):
                 result = remote.call(vmid, 'tasks', roots=catalogue['roots'], path=item['path'],
-                                     selection_id=selection_id, offset=len(content), timeout=40)
+                                     selection_id=selection_id, repo=catalogue['repo'], offset=len(content), timeout=70)
                 if not isinstance(result.get('chunk'), str) or not 0 <= result.get('total', -1) <= 96 * 1024:
                     raise SampleRequestError('Invalid scenario task response')
                 if identity is not None and identity != result['sha256']:

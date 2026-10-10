@@ -59,7 +59,7 @@ def main():
         from cyber_agent_flow_eval import integration as ev
         patch.setattr(ev, 'GuestAgent', lambda backend: Guest())
         with pve_server(root) as pve:
-            pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403)]
+            pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403), vm(9404)]
             dashboard = UserDashboard(root / 'examples/01-reuse-export.yaml', root / 'runs', 2, lambda b,a: Probe(b,a,[]))
             try:
                 with secure_server(dashboard, root / 'web', auth=make_auth(pve)) as server, sync_playwright() as pw:
@@ -100,7 +100,7 @@ def main():
                     expect(page.locator('#sample-sf-use')).to_be_disabled()
                     expect(page.locator('#sample-sf-use')).to_have_value('Required · deploy, readiness check and evaluation export')
                     expect(page.locator('#sample-prompt')).to_have_value('Fetch http://<deployed-host>/ and read the service token from its response body. Return only JSON with service_token set to the exact observed token.')
-                    expect(page.locator('#eval-max_turns')).to_be_disabled()
+                    expect(page.locator('#eval-max_turns')).to_be_enabled()
                     expect(page.locator('#eval-max_turns')).to_have_value('6')
                     page.get_by_role('tab',name="Experiment",exact=True).click()
                     page.get_by_label('Experiment type', exact=True).select_option('tools-vs-helper')
@@ -258,8 +258,9 @@ def main():
                     assert saved['runtime']['execution']['provide_progressive_hints'] is True
                     assert saved['runtime']['execution']['max_turns'] == 9
                     assert saved['runtime']['repetitions'] == 2
-                    assert saved['scenario_experiment']['evaluation_tasks'] == imported
-                    assert json.loads((journals[0].parent/'inputs/evaluation-tasks.json').read_text()) == imported
+                    expected_tasks=[dict(t,verification_mode='exact',split=t.get('split','development')) for t in imported]
+                    assert saved['scenario_experiment']['evaluation_tasks'] == expected_tasks
+                    assert json.loads((journals[0].parent/'inputs/evaluation-tasks.json').read_text()) == expected_tasks
                     assert not errors, errors
                     browser.close()
             finally:

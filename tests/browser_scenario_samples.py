@@ -75,6 +75,12 @@ def main():
                         expect(page.locator('#judge-enabled')).not_to_be_checked()
                         page.locator('#judge-enabled').check()
                         expect(page.locator('#judge-inherit')).to_be_checked()
+                        expect(page.locator('#judge-monitor_progress')).to_be_checked()
+                        page.locator('#judge-monitor_progress').uncheck()
+                        expect(page.locator('#judge-progress_timeout_seconds')).to_be_disabled()
+                        page.locator('#judge-monitor_progress').check()
+                        page.locator('#judge-progress_timeout_seconds').fill('12')
+                        page.locator('#judge-progress_max_checks').fill('8')
                         expect(page.locator('#judge-url')).to_be_disabled()
                         page.locator('#judge-max_turns').fill('4')
                         page.locator('#judge-timeout_seconds').fill('45')
@@ -158,6 +164,9 @@ def main():
                         assert resets
                         assert record['runtime']['judge']['enabled']
                         assert record['runtime']['judge']['model']['name']==('independent-judge' if sample=='tools-vs-helper' else record['runtime']['model']['name'])
+                        assert record['runtime']['judge']['monitor_progress'] is True
+                        assert record['runtime']['judge']['progress_timeout_seconds']==12
+                        assert record['runtime']['judge']['progress_max_checks']==8
                         assert record['runtime']['judge']['max_turns']==4
                         assert record['runtime']['judge']['timeout_seconds']==45
                         assert record['runtime']['repetitions']==2
@@ -189,6 +198,15 @@ def main():
                     page.keyboard.press('Home');expect(overview).to_be_focused()
                     page.get_by_label('Experiment type',exact=True).select_option('scenarioforge-xml')
                     page.get_by_role('tab',name='Evaluation',exact=True).click()
+                    scaffold=dict(id='challenge',family='web',prompt='Read the challenge proof and report evidence.',verification_mode='judge',
+                        rubric=dict(version=1,criteria=[dict(id='recover',requirement='Recover the proof.',evidence='Successful HTTP tool output.',private_reference='PRIVATE_PROOF')]),
+                        challenge_plan=dict(version=1,steps=[dict(id='first',node_id='web',title='HTTP proof',criterion_ids=['recover'],requires=[],hints=['Inspect the response.'],solution='PRIVATE_PROOF')]),required_checks=['ports'])
+                    page.evaluate("task=>{document.getElementById('task-source').value='custom';customTaskRows=[taskRow(task)];renderTaskEditor();}",scaffold)
+                    expect(page.get_by_text('Intermediate challenge scaffold · 1 steps',exact=True)).to_be_visible()
+                    expect(page.locator('#task-0-criteria')).to_be_disabled()
+                    # A judge-only task never needs a handcrafted final JSON check.
+                    page.evaluate("()=>{customTaskRows=readTaskRows();customTaskRows[0].criteria='{not-json';}")
+                    assert page.evaluate("()=>parseTaskRows(customTaskRows)[0].challenge_plan.steps[0].id")=='first'
                     page.locator('#eval-repetitions').fill('0')
                     overview.click()
                     expect(page.get_by_role('button',name='Create experiment',exact=True)).to_be_disabled()

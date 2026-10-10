@@ -96,7 +96,9 @@ function renderProgress(run){
   if(trial){
    card.append(el('h4','Current trial on participant VM '+(run.saved_settings?.participant_vmid??'—')));
    card.append(el('p','Task: '+trial.task_id,'small'));
-   if(trial.hints_released!=null)card.append(el('p',`${trial.hints_released} hints released · ${trial.facts_revealed??0} required facts revealed`,'small'));
+   if(trial.progress_monitor){const m=trial.progress_monitor;const complete=Object.values(m.criteria).filter(s=>s==='satisfied').length;card.append(el('p',`${complete} / ${m.planned_criteria??Object.keys(m.criteria).length} criteria observed complete · ${m.checks} progress checks · ${m.latest?.status||'pending'}`,'small'));if(trial.completed_steps?.length)card.append(el('p','Completed steps: '+trial.completed_steps.join(', '),'small'));if(trial.progress_monitor_error)card.append(el('p','Intermediate status unverified: '+trial.progress_monitor_error,'notice'));}
+   if(trial.progress_monitor?.steps?.length)for(const step of trial.progress_monitor.steps)card.append(el('p',step.id+' · '+step.title+' · '+step.status+(step.eligible?'':' · prerequisites pending'),'small'));
+   if(trial.hints_released!=null)card.append(el('p',`${trial.hints_released} hints released · ${trial.solutions_released??0} solutions provided · ${trial.facts_revealed??0} required facts revealed`,'small'));
    card.append(el('p',`${trial.trial_id} · ${trial.condition_id} · repetition ${trial.repetition} · attempt ${trial.attempt}`));
    const timing=el('p',null,'small');timing.append(document.createTextNode('Trial elapsed (includes setup and collection): '),timer(trial.elapsed_seconds,p.observed_at,p.active,true));card.append(timing);
    if(transport?.files_total)card.append(el('p',`Inputs transferred: ${transport.files_uploaded} / ${transport.files_total} files · ${(transport.bytes_uploaded??0).toLocaleString()} / ${(transport.bytes_total??0).toLocaleString()} bytes acknowledged`,'small'));
@@ -118,6 +120,12 @@ function renderResultSummary(data){
  if(!data.evaluation){target.append(el('p','Trial results will appear here once evaluation starts.','small'));return;}
  for(const trial of data.evaluation.attempts||[])for(const error of trial.errors||[])target.append(el('p',`${trial.trial_id} · ${trial.status}: ${error}`,'error'));
  for(const trial of data.evaluation.attempts||[])if(trial.provide_progressive_hints&&trial.progressive_hints_available===false)target.append(el('p',`${trial.trial_id} · Progressive hints unavailable: ${trial.progressive_hints_reason||'No usable guidance was supplied; ran unassisted.'}`,'notice'));
+ for(const trial of data.evaluation.attempts||[])if(trial.progress_monitor_enabled){
+  const detail=el('details');detail.append(el('summary',`${trial.trial_id} · Intermediate progress · ${trial.progress_monitor_checks??0} checks · ${trial.progress_monitor_errors??0} unverified checks`));
+  for(const check of trial.progress_monitor?.checks||[])detail.append(el('p',`Turn ${check.turn}: ${check.status}${check.error?' · '+check.error:' · '+(check.completed_steps||[]).join(', ')}`,'small'));
+  for(const [id,finding] of Object.entries(trial.progress_monitor?.criteria||{}))detail.append(el('p',id+' · '+finding.status+' · '+finding.reason,'small'));
+  detail.append(el('p',`Checkpoint time: ${duration(trial.progress_monitor_seconds)} · cost: ${trial.progress_monitor_cost_usd??'unknown'} USD · Full reviews: progress-checks/ in the run bundle`,'small'));target.append(detail);
+ }
  for(const trial of data.evaluation.attempts||[])if(trial.judge_enabled){
   const details=el('details'),summary=el('summary',`${trial.trial_id} · Judge: ${trial.judge_error?'error':trial.task_outcome|| (trial.judge_passed?'pass':'fail')} · ${duration(trial.judge_seconds)}`);details.append(summary,el('p',trial.judge_error||trial.judge_reason||'Judge verdict recorded.'));details.append(el('p',`${trial.judge_calls??0} model calls · ${trial.judge_prompt_tokens??'unknown'} input / ${trial.judge_output_tokens??'unknown'} output tokens · Full evidence review: judge.json in the run bundle`,'small'));target.append(details);
   if(trial.judge_evidence_warning)details.append(el('p',trial.judge_evidence_warning,'notice'));

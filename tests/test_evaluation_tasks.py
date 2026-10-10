@@ -87,7 +87,8 @@ def test_task_preview_is_bounded_and_detects_stale_selection(tmp_path):
         scenario_guest.dispatch(dict(args,op='tasks'))
 
 
-def test_task_preview_builds_safe_editable_flow_draft(tmp_path):
+def test_task_preview_builds_safe_editable_flow_draft(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]/'scenarioforge'))
     path=tmp_path/'generated.xml'
     root=ET.Element('Scenarios')
     scenario=ET.SubElement(root,'Scenario',name='Generated Flow')
@@ -102,11 +103,27 @@ def test_task_preview_builds_safe_editable_flow_draft(tmp_path):
     ET.ElementTree(root).write(path)
     args=snapshot_args(tmp_path,path)
     result=scenario_guest.dispatch(dict(args,op='tasks'))
-    details=json.loads(result['chunk'])
+    encoded=result['chunk']
+    while len(encoded)<result['total']:
+        encoded+=scenario_guest.dispatch(dict(args,op='tasks',offset=len(encoded)))['chunk']
+    details=json.loads(encoded)
     assert details['tasks'] is None
-    assert details['suggested_tasks'][0]['flag_nodes']==['7']
+    assert details['suggested_tasks'][0]['verification_mode']=='judge'
+    assert 'flag_nodes' not in details['suggested_tasks'][0]
+    assert details['suggested_tasks'][0]['challenge_plan']['steps'][0]['node_id']=='7'
+    assert 'FLAG{private}' not in details['suggested_tasks'][0]['prompt']
     assert details['suggested_tasks'][0]['required_checks']==['containers','services','ports']
-    assert details['suggested_tasks'][0]['progressive_hints']==['Inspect the web root.','Try curl against port 80.']
+    assert details['suggested_tasks'][0]['challenge_plan']['steps'][0]['hints']
+    assert all('FLAG{private}' not in h for h in details['suggested_tasks'][0]['challenge_plan']['steps'][0]['hints'])
+    validate_tasks(details['suggested_tasks'])
+    original = details['suggested_tasks']
+    from scenarioforge.evaluation import scaffold
+    monkeypatch.setattr(scaffold, 'draft_tasks', lambda *a,**k: pytest.fail('Cached scaffold was regenerated'))
+    response=scenario_guest.dispatch(dict(args,op='tasks'))
+    encoded=response['chunk']
+    while len(encoded)<response['total']:
+        encoded+=scenario_guest.dispatch(dict(args,op='tasks',offset=len(encoded)))['chunk']
+    assert json.loads(encoded)['suggested_tasks']==original
     assert 'FLAG{private}' not in json.dumps(details['context'])
     assert details['context']['chain'][0]=={
         'position':1,'id':'7','name':'web-target','ipv4':'10.77.0.10','is_vuln':True,

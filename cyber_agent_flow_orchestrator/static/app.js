@@ -412,7 +412,7 @@ function validateExperimentFields(form){
 function judgeSettings(){
  const enabled=$('judge-enabled').checked;
  if(!enabled)return {enabled:false};
- const settings={enabled:true,use_participant_model:$('judge-inherit').checked,...Object.fromEntries(['max_turns','timeout_seconds','max_tokens'].map(key=>[key,Number($('judge-'+key).value)]))};
+ const settings={enabled:true,monitor_progress:$('judge-monitor_progress').checked,use_participant_model:$('judge-inherit').checked,...Object.fromEntries(['max_turns','timeout_seconds','max_tokens','progress_timeout_seconds','progress_max_checks'].map(key=>[key,Number($('judge-'+key).value)]))};
  if(!settings.use_participant_model)settings.model={provider:$('judge-provider').value,url:$('judge-url').value.trim(),name:$('judge-name').value.trim(),ssl_verify:$('judge-ssl').checked};
  return settings;
 }
@@ -422,18 +422,21 @@ function syncJudge(){
  $('judge-model-settings').disabled=!enabled||$('judge-inherit').checked;
  if(enabled&&$('judge-inherit').checked&&$('model-config-participant')){const current=modelFormSettings('participant');$('judge-provider').value=current.provider;$('judge-url').value=current.url;$('judge-name').value=current.model;$('judge-ssl').checked=current.ssl_verify;}
  $('judge-limits').disabled=!enabled;
+ $('judge-monitor_progress').disabled=!enabled;
+ for(const key of ['progress_timeout_seconds','progress_max_checks'])$('judge-'+key).disabled=!enabled||!$('judge-monitor_progress').checked;
 }
 function resetJudge(){
  const config=snapshot?.experiment_defaults?.judge;
  $('judge-enabled').checked=config?.enabled===true;
+ $('judge-monitor_progress').checked=config?.monitor_progress!==false;
  $('judge-inherit').checked=config?.use_participant_model??!config?.model;
  const model=config?.model||snapshot?.experiment_defaults?.model||{};
  $('judge-provider').value=['openai','litellm','ollama_direct'].includes(model.provider)?model.provider:'openai';
  $('judge-url').value=model.url||'';$('judge-name').value=model.name||'';$('judge-ssl').checked=model.ssl_verify!==false;
- for(const [key,value] of Object.entries({max_turns:6,timeout_seconds:120,max_tokens:2048}))$('judge-'+key).value=config?.[key]??value;
+ for(const [key,value] of Object.entries({max_turns:6,timeout_seconds:120,max_tokens:2048,progress_timeout_seconds:20,progress_max_checks:32}))$('judge-'+key).value=config?.[key]??value;
  syncJudge();
 }
-for(const id of ['judge-enabled','judge-inherit'])$(id).addEventListener('change',()=>{syncJudge();syncCreateExperiment();});
+for(const id of ['judge-enabled','judge-inherit','judge-monitor_progress'])$(id).addEventListener('change',()=>{syncJudge();syncCreateExperiment();});
 
 let customEvaluation={};
 const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window','max_tries_before_solution'];

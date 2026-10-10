@@ -6,7 +6,7 @@ from .samples import SampleRequestError
 
 MAX_TASK_BYTES = 64 * 1024
 FIELDS = {'id', 'family', 'split', 'prompt', 'flag_nodes', 'verifier', 'required_checks',
-          'discovery', 'starting_facts', 'discoverable_facts', 'objective_requires', 'progressive_hints', 'rubric', 'verification_mode'}
+          'discovery', 'starting_facts', 'discoverable_facts', 'objective_requires', 'progressive_hints', 'rubric', 'verification_mode', 'challenge_plan'}
 
 
 def _answer_strings(value):
@@ -63,6 +63,12 @@ def validate_tasks(value):
                 validate_rubric(task['rubric'])
             except ValueError as exc:
                 fail(str(exc))
+        if 'challenge_plan' in task:
+            from cyber_agent_flow_eval.challenge_plan import validate_plan
+            try:
+                validate_plan(task['challenge_plan'], task['rubric'])
+            except (ValueError, KeyError) as exc:
+                fail('Invalid challenge plan: ' + str(exc))
         if mode in {'judge', 'both'} and 'rubric' not in task:
             fail('judge/both mode requires a rubric')
         if mode == 'judge':

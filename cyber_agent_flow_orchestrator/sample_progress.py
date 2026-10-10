@@ -55,10 +55,16 @@ def build(root, journal, report, state, coordinator):
         assistance = reporting.within(root / 'evaluation', root / 'evaluation' / row['attempt_path'] / 'assistance.json')
         if assistance.is_file():
             audit = ev.read_json(assistance)
-            trial['hints_released'] = len(audit.get('events', []))
+            trial['hints_released'] = sum(not e.get('solution') for e in audit.get('events', []))
+            trial['solutions_released'] = sum(bool(e.get('solution')) for e in audit.get('events', []))
+            trial['completed_steps'] = audit.get('completed_steps', [])
+            trial['progress_monitor_error'] = audit.get('progress_monitor_error')
             trial['facts_revealed'] = len(audit.get('revealed_fact_ids', []))
             for event in audit.get('events', []):
                 events.append(dict(at=event['at'], kind='hint', message=f"{row['trial_id']} · hint after turn {event['turn']} ({event['reason']}): {clean(event['text'])}"))
+        if row.get('progress_monitor_enabled'):
+            monitor = row.get('progress_monitor', {})
+            trial['progress_monitor'] = dict(planned_criteria=monitor.get('planned_criteria'), steps=monitor.get('steps', []), checks=len(monitor.get('checks', [])), latest=monitor.get('checks', [{}])[-1] if monitor.get('checks') else None, criteria={key:value['status'] for key,value in monitor.get('criteria', {}).items()})
         if row['status'] == 'running':
             if active: current = trial
             else: trial.update(status='unconfirmed', elapsed_seconds=None)
