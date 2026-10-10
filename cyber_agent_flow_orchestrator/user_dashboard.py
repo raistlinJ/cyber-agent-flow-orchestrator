@@ -153,8 +153,8 @@ class UserDashboard:
             engine=dict(path=runtime['engine']['path'], python=runtime['engine']['python']),
             model={key: runtime['model'].get(key) for key in ('provider', 'name', 'url', 'ssl_verify')},
             judge={key:value for key,value in runtime.get('judge', {}).items() if key!='model'} | ({'model':{key:value for key,value in runtime['judge']['model'].items() if key!='api_key_env'}} if runtime.get('judge', {}).get('model') else {}),
-            evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192,'max_tries_before_solution':6}.get(key)) for key in
-                ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window', 'max_tries_before_solution')}))
+            evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192,'hint_stalled_turns':2,'max_tries_before_solution':6}.get(key)) for key in
+                ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window', 'hint_stalled_turns', 'max_tries_before_solution')}))
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         value['model_config_writable'] = self.runtime['backend']['type']=='fusion' or bool((value['updates'] or {}).get('can_update'))
         from .experiment_controls import catalogue

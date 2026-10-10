@@ -155,6 +155,10 @@ than failing. Results record `progressive_hints_available`, the unavailable
 reason, released hints/facts, and assisted versus unassisted success. Existing
 hints and facts still use the same release policy and verifier-answer protection.
 
+**Turns without progress before a hint** is editable beside the toggle. It
+defaults to 2 and must be smaller than **Maximum agent turns**. The saved value
+applies to every condition and is preserved for reruns and reports.
+
 
 
 The Evaluation tab includes **Max tries before solution**, editable for samples

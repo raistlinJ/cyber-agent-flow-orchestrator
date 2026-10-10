@@ -50,18 +50,20 @@ def networks(text, required=False):
 
 
 EVALUATION_LIMITS = dict(repetitions=(1, 100), max_turns=(1, 1000), wall_seconds=(1, 86400),
-                         tool_timeout=(1, 3600), context_window=(1, 1000000), max_tries_before_solution=(1, 1000))
+                         tool_timeout=(1, 3600), context_window=(1, 1000000), hint_stalled_turns=(1, 1000),
+                         max_tries_before_solution=(1, 1000))
 
 
 def evaluation_settings(value):
-    if not isinstance(value, dict) or set(value) - set(EVALUATION_LIMITS) or set(EVALUATION_LIMITS) - {'max_tries_before_solution'} - set(value):
+    optional = {'hint_stalled_turns', 'max_tries_before_solution'}
+    if not isinstance(value, dict) or set(value) - set(EVALUATION_LIMITS) or set(EVALUATION_LIMITS) - optional - set(value):
         raise SampleRequestError('Supply repetitions, max_turns, wall_seconds, tool_timeout and context_window')
     for name, (minimum, maximum) in EVALUATION_LIMITS.items():
         if name not in value:
             continue
         if type(value[name]) is not int or not minimum <= value[name] <= maximum:
             raise SampleRequestError(f'{name} must be an integer from {minimum} to {maximum}')
-    return dict(value)
+    return dict(value, hint_stalled_turns=value.get('hint_stalled_turns', 2))
 
 
 class ScenarioExperiments:
@@ -291,6 +293,11 @@ class ScenarioExperiments:
         if _sample_id is not None and definitions is not None:
             raise SampleRequestError('Sample tasks are fixed')
         progressive_hint_settings({}, provide_progressive_hints)
+        if provide_progressive_hints:
+            max_turns = (overrides or {}).get('max_turns', self.runtime['execution']['max_turns'])
+            stalled_turns = (overrides or {}).get('hint_stalled_turns', self.runtime['execution'].get('hint_stalled_turns', 2))
+            if stalled_turns >= max_turns:
+                raise SampleRequestError('Turns without progress before a hint must be less than maximum agent turns')
         if judge is not None:
             judge = self.judge_settings(judge, access)
         if definitions and any(t.get('verification_mode') in {'judge','both'} for t in definitions) and not (judge or self.runtime.get('judge',{})).get('enabled'):

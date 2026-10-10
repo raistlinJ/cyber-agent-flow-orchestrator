@@ -439,9 +439,19 @@ function resetJudge(){
 for(const id of ['judge-enabled','judge-inherit','judge-monitor_progress'])$(id).addEventListener('change',()=>{syncJudge();syncCreateExperiment();});
 
 let customEvaluation={};
-const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window','max_tries_before_solution'];
+const evaluationKeys=['repetitions','max_turns','wall_seconds','tool_timeout','context_window','hint_stalled_turns','max_tries_before_solution'];
+function syncHintThreshold(){
+ const input=$('eval-hint_stalled_turns'),enabled=$('provide-progressive-hints').checked,maxTurns=Number($('eval-max_turns').value);
+ input.disabled=!enabled;
+ input.max=String(Math.max(1,maxTurns-1));
+ input.setCustomValidity(enabled&&maxTurns<=1?'Maximum agent turns must be at least 2 when progressive hints are enabled.':enabled&&Number(input.value)>=maxTurns?'Turns without progress before a hint must be less than maximum agent turns.':'');
+}
+function rememberEvaluationSettings(){
+ if(!$('evaluation-settings').disabled)customEvaluation[$('experiment-sample').value]=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));
+ updateEvaluationBudget();
+}
 function renderEvaluationSettings(scenario,sample){
- const defaults={max_tries_before_solution:6,...(snapshot?.experiment_defaults?.evaluation||{repetitions:1,max_turns:snapshot?.scenarios?.max_turns||20,wall_seconds:snapshot?.scenarios?.wall_seconds||300,tool_timeout:60,context_window:8192})};
+ const defaults={hint_stalled_turns:2,max_tries_before_solution:6,...(snapshot?.experiment_defaults?.evaluation||{repetitions:1,max_turns:snapshot?.scenarios?.max_turns||20,wall_seconds:snapshot?.scenarios?.wall_seconds||300,tool_timeout:60,context_window:8192})};
  const preset=scenario?defaults:{...defaults,repetitions:sample?.profile?.repetitions||1,max_turns:sample?.max_turns||3,wall_seconds:sample?.wall_seconds||120,tool_timeout:sample?.profile?.tool_timeout||30};
  const values=customEvaluation[$('experiment-sample').value]||preset;
  for(const key of evaluationKeys)$('eval-'+key).value=values[key];
@@ -454,8 +464,9 @@ function renderEvaluationSettings(scenario,sample){
   $('sample-sf-use').value=sample?.profile?.scenarioforge_used?'Required · deploy, readiness check and evaluation export':'Not used by this bundled sample';
   $('sample-sf-companion').value=(sample?.profile?.companion_xml||'Unavailable')+' · fixed sample XML';
   $('sample-environment').value=sample?.profile?.environment||'Sample-defined environment';
-  $('sample-prompt').value=sample?.profile?.prompt||'Sample-defined prompt';
+ $('sample-prompt').value=sample?.profile?.prompt||'Sample-defined prompt';
  }
+ syncHintThreshold();
  $('eval-settings-note').textContent=scenario?'These settings are saved with this experiment. Reruns reuse them.':'Sample defaults are prefilled. Trial settings are editable and saved with this experiment; reruns reuse them. Sample tasks and tools remain fixed.';
  $('eval-tools').textContent='Tools / conditions: '+(scenario?'Baseline — nmap, curl, python3. Custom tool conditions are not editable here yet.':sample?.profile?.tools||'Sample-defined');
  $('eval-task-source').textContent=scenario?'ScenarioForge exports the selected task definitions after deployment. Prompts and private verifiers are captured in Results.':'The deployed host address and fresh token/flags are resolved at run time. Exact prompts and XML are captured in Results.';
@@ -464,7 +475,9 @@ function updateEvaluationBudget(){
  const selection=$('experiment-sample').value;
  $('experiment-budget').textContent=selection==='scenarioforge-xml'?'Baseline tools · configure repetitions and trial limits below':`${Number($('eval-repetitions').value)*(selection==='tools-vs-helper'?2:1)} trials · up to ${$('eval-max_turns').value} turns and ${$('eval-wall_seconds').value}s per trial`;
 }
-$('evaluation-settings').addEventListener('input',()=>{if(!$('evaluation-settings').disabled){customEvaluation[$('experiment-sample').value]=Object.fromEntries(evaluationKeys.map(key=>[key,Number($('eval-'+key).value)]));updateEvaluationBudget();}});
+$('evaluation-settings').addEventListener('input',()=>{syncHintThreshold();rememberEvaluationSettings();});
+$('eval-hint_stalled_turns').addEventListener('input',rememberEvaluationSettings);
+$('provide-progressive-hints').addEventListener('change',()=>{syncHintThreshold();rememberEvaluationSettings();syncCreateExperiment();});
 
 function describeSample(){
  const scenario=$('experiment-sample').value==='scenarioforge-xml',sample=snapshot?.samples?.items.find(s=>s.id===$('experiment-sample').value);

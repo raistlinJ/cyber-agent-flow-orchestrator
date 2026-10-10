@@ -112,7 +112,8 @@ def test_saved_scenario_create_launch_and_changed_snapshot(pve, lab, tmp_path, m
     monkeypatch.setattr(service, 'run', run)
     try:
         controller.catalogue(user)
-        settings = dict(repetitions=2, max_turns=7, wall_seconds=45, tool_timeout=15, context_window=4096,max_tries_before_solution=4)
+        settings = dict(repetitions=2, max_turns=7, wall_seconds=45, tool_timeout=15, context_window=4096,
+                        hint_stalled_turns=3, max_tries_before_solution=4)
         reply = controller.create(user, 'a'*64, 'b'*32, '10.77.0.0/24', '', evaluation=settings)
         output = workspace.run_path(reply['run_id'])
         assert reply['status'] == 'ready' and not launched
@@ -228,8 +229,18 @@ def test_invalid_max_tries_before_solution(limit):
         scenarios.evaluation_settings(settings)
 
 
-def test_evaluation_settings_accept_legacy_clients_and_custom_solution_limit():
+@pytest.mark.parametrize('limit',[0,1001,True,'2'])
+def test_invalid_hint_stalled_turns(limit):
+    settings = dict(repetitions=1,max_turns=9,wall_seconds=300,tool_timeout=30,context_window=8192,
+                    hint_stalled_turns=limit)
+    with pytest.raises(samples.SampleRequestError,match='hint_stalled_turns'):
+        scenarios.evaluation_settings(settings)
+
+
+def test_evaluation_settings_add_hint_default_and_accept_custom_limits():
     settings = dict(repetitions=1,max_turns=9,wall_seconds=300,tool_timeout=30,context_window=8192)
-    assert scenarios.evaluation_settings(settings) == settings
+    assert scenarios.evaluation_settings(settings) == dict(settings, hint_stalled_turns=2)
+    settings['hint_stalled_turns'] = 3
     settings['max_tries_before_solution'] = 7
+    assert scenarios.evaluation_settings(settings)['hint_stalled_turns'] == 3
     assert scenarios.evaluation_settings(settings)['max_tries_before_solution'] == 7

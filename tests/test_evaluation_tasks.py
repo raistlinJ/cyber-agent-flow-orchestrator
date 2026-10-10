@@ -229,9 +229,18 @@ def test_tasks_create_preview_and_rerun_preserve_definitions(pve,lab,tmp_path,mo
         preview=controller.tasks(user,selection['id'])
         assert preview['tasks']==[TASKS[0]]
         assert preview['context']['chain'][0]['id']=='7'
-        result=controller.create(user,selection['id'],'b'*32,'10.77.0.0/24','',tasks=TASKS,provide_progressive_hints=True)
+        with pytest.raises(samples.SampleRequestError, match='less than maximum agent turns'):
+            controller.create(user,selection['id'],'f'*32,'10.77.0.0/24','',tasks=TASKS,
+                provide_progressive_hints=True,
+                evaluation=dict(repetitions=1,max_turns=3,wall_seconds=120,tool_timeout=30,
+                    context_window=4096,hint_stalled_turns=3,max_tries_before_solution=6))
+        result=controller.create(user,selection['id'],'b'*32,'10.77.0.0/24','',tasks=TASKS,
+            provide_progressive_hints=True,
+            evaluation=dict(repetitions=1,max_turns=7,wall_seconds=120,tool_timeout=30,
+                context_window=4096,hint_stalled_turns=3,max_tries_before_solution=6))
         output=workspace.run_path(result['run_id'])
         assert ev.read_json(output/'workflow.json')['runtime']['execution']['provide_progressive_hints'] is True
+        assert ev.read_json(output/'workflow.json')['runtime']['execution']['hint_stalled_turns'] == 3
         assert ev.read_json(output/'inputs/evaluation-tasks.json')==TASKS
         assert ev.read_json(output/'workflow.json')['scenario_experiment']['evaluation_tasks']==TASKS
         controller.run_saved(user,result['run_id'],'c'*32)

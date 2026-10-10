@@ -265,6 +265,7 @@ class Studies:
                         "tool_timeout",
                         "context_window",
                         "provide_progressive_hints",
+                        "hint_stalled_turns",
                         "max_tries_before_solution",
                         "auto_approve_dangerous",
                     )

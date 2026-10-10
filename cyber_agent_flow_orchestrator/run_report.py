@@ -357,7 +357,7 @@ def render(report, *, root=None, recorded_at=None):
             doc.code(__import__('json').dumps(task['rubric'],indent=2))
     doc.heading('Recorded limits and provenance')
     execution = config.get('execution') or {}
-    doc.table(['Setting','Value'],[[key,execution.get(key)] for key in ('max_turns','wall_seconds','tool_timeout','context_window','provide_progressive_hints','max_tries_before_solution')] +
+    doc.table(['Setting','Value'],[[key,execution.get(key)] for key in ('max_turns','wall_seconds','tool_timeout','context_window','provide_progressive_hints','hint_stalled_turns','max_tries_before_solution')] +
               [['Allowed targets',', '.join((execution.get('network_policy') or {}).get('allow') or [])],
                ['Excluded targets',', '.join((execution.get('network_policy') or {}).get('disallow') or [])],
                ['Spec hash',evaluation.get('spec_hash')],['Scenario package hash',scenario.get('package_hash')]])
