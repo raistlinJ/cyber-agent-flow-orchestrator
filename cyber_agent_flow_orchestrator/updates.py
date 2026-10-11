@@ -68,7 +68,7 @@ def require_maintenance(access, group):
     access.current()
 
 
-def package(source, ref, base, destination, *, trace=None):
+def package(source, ref, base, destination, *, trace=None, allow_same=False):
     """Download on the host; send only missing Git objects when base is an ancestor."""
     repository = destination / 'source.git'
     def git(*args, timeout=300, check=True):
@@ -99,6 +99,8 @@ def package(source, ref, base, destination, *, trace=None):
     excludes = []
     if re.fullmatch('[0-9a-f]{40}', base) and git('-C', str(repository), 'merge-base', '--is-ancestor', base, revision, check=False).returncode == 0:
         excludes = ['^' + base]
+    if revision == base and allow_same:
+        return revision, None
     if revision == base:
         raise UpdateError('The selected revision is already installed')
     bundle = destination / 'source.bundle'
@@ -159,7 +161,7 @@ class UpdateManager:
         return dict(can_update=permitted, group=self.config['group'], desktop=self.desktop, jobs=rows,
                     applications=[dict(role=role, vmid=roles.get(role), **self.config[role]) for role in ('participant', 'scenarioforge')])
 
-    def submit(self, access, role, action, ref, request_id, process_confirmation=None):
+    def submit(self, access, role, action, ref, request_id, process_confirmation=None, force_confirmation=None):
         if self.config is None or role not in ('participant', 'scenarioforge') or action not in ('inspect', 'update', 'rollback'):
             raise UpdateError('This application maintenance action is not enabled')
         ref_name(ref)
@@ -189,12 +191,30 @@ class UpdateManager:
                     any(type(p.get('pid')) is not int or p['pid'] <= 1 or
                         not re.fullmatch('[0-9a-f]{64}', p.get('identity', '')) for p in approved)):
                 raise UpdateError('Check version and confirm a fresh process list for this application')
+        force_expected = None
+        if force_confirmation is not None:
+            if action != 'update' or not isinstance(force_confirmation, str) or not re.fullmatch('[0-9a-f]{32}', force_confirmation):
+                raise UpdateError('Force confirmation requires an update and a valid inspection ID')
+            prior_path = workspace.path / 'updates' / force_confirmation / 'job.json'
+            if not prior_path.is_file():
+                raise UpdateError('Check version before forcing an update')
+            prior = ev.read_json(prior_path)
+            info = prior.get('installed', {})
+            if (prior.get('action') != 'inspect' or prior.get('status') != 'completed'
+                    or any(prior.get(k) != v for k, v in dict(role=role, vmid=vmid, root=root).items())
+                    or not info.get('modified') or not re.fullmatch('[0-9a-f]{40}', info.get('revision', ''))
+                    or type(info.get('modified_file_count')) is not int
+                    or not isinstance(info.get('modified_files'), list)):
+                raise UpdateError('Check version again before forcing an update')
+            force_expected = {key: info[key] for key in ('revision', 'modified_file_count', 'modified_files')}
         python = self.runtime['engine']['python'] if role == 'participant' else self.cfg['scenarioforge'].get('python', root + '/.venv/bin/python')
         job = dict(id=request_id, role=role, action=action, ref=ref, vmid=vmid, root=root,
                    source=self.config[role]['url'],
                    status='queued', created_at=now(), message='Waiting for maintenance worker')
         if approved:
             job.update(process_confirmation=process_confirmation, stop_processes=approved)
+        if force_expected:
+            job.update(force_confirmation=force_confirmation, force_expected=force_expected)
         directory = workspace.path / 'updates' / request_id
         with self.lock:
             if directory.exists():
@@ -203,6 +223,8 @@ class UpdateManager:
                     raise UpdateError('Request ID already belongs to another operation')
                 if old.get('process_confirmation') != process_confirmation:
                     raise UpdateError('Request ID already belongs to another process confirmation')
+                if old.get('force_confirmation') != force_confirmation:
+                    raise UpdateError('Request ID already belongs to another force confirmation')
                 return {'id': request_id}
             self.jobs = {key: future for key, future in self.jobs.items() if not future.done()}
             if self.closed or access.username in self.jobs or len(self.jobs) >= 2:
@@ -220,14 +242,14 @@ class UpdateManager:
             trace.emit('status', message, force=True)
         def authorize(args):
             start = time.monotonic()
-            label = 'desktop inventory authorization' if self.desktop else 'PVE authorization'
+            label = 'Desktop inventory authorization' if self.desktop else 'PVE authorization'
             trace.emit('authorization', f'Checking current {label}', force=True)
             try:
                 access.qm(args, required_group=(self.config['group'] if job['action'] != 'inspect' and not self.desktop else None))
             except Exception:
-                trace.emit('error', f'{label.capitalize()} failed after {time.monotonic()-start:.2f}s', force=True)
+                trace.emit('error', f'{label} failed after {time.monotonic()-start:.2f}s', force=True)
                 raise
-            trace.emit('authorization', f'{label.capitalize()} passed in {time.monotonic()-start:.2f}s')
+            trace.emit('authorization', f'{label} passed in {time.monotonic()-start:.2f}s')
         agent = trace.instrument(ev.GuestAgent(self.runtime['backend'], authorize=authorize))
         agent.script = Path(__file__).with_name('update_guest.py').read_text()
         vmid = job['vmid']
@@ -243,7 +265,10 @@ class UpdateManager:
                     save('Installed revision and compatibility checked')
                     return
                 replace_tools = job['action'] == 'update' and installed.get('tools_config_replaceable')
-                if installed.get('modified') and not replace_tools:
+                force_expected = job.get('force_expected')
+                if force_expected and any(installed.get(key) != value for key, value in force_expected.items()):
+                    raise UpdateError('Tracked local edits changed after confirmation; check version again before forcing the update.')
+                if installed.get('modified') and not replace_tools and not force_expected:
                     raise UpdateError('Tracked local edits exist; review the changed files under Check version and preserve/commit them before retrying. No source bundle downloaded or transferred; application files unchanged.')
                 approved = job.get('stop_processes')
                 if approved:
@@ -259,23 +284,28 @@ class UpdateManager:
                         raise UpdateError('Server stopped before maintenance began')
                     self.require_update_access(access, vmid)
                     update = dict(args, token=job['id'], expected_revision=installed['revision'], python=python, service=service)
+                    if force_expected:
+                        update['force'] = True
                     if approved:
                         update['stop_processes'] = approved
                     if job['action'] == 'update':
                         save('Downloading the selected source revision on the host')
-                        revision, bundle = package(self.config[job['role']], job['ref'], installed['revision'], directory, trace=trace)
-                        if bundle.stat().st_size > self.runtime['backend']['max_transfer_bytes']:
-                            raise UpdateError('Source bundle exceeds the configured transfer limit')
+                        revision, bundle = package(self.config[job['role']], job['ref'], installed['revision'], directory,
+                                                   trace=trace, allow_same=bool(force_expected))
                         job['revision'] = revision
-                        save('Transferring source through the guest agent')
-                        upload = agent.call(vmid, 'app_stage', **args, token=job['id'])
-                        # Standard transfer RPC uses its own helper, with the same authorization callback.
-                        transfer = trace.instrument(ev.GuestAgent(self.runtime['backend'], authorize=authorize))
-                        content = bundle.read_bytes()
-                        job['bundle_sha256'] = hashlib.sha256(content).hexdigest()
-                        save('Transferring verified source bundle through the guest agent')
-                        transfer.put(vmid, upload['path'], content)
-                        update.update(revision=revision, sha256=job['bundle_sha256'])
+                        update['revision'] = revision
+                        if bundle is not None:
+                            if bundle.stat().st_size > self.runtime['backend']['max_transfer_bytes']:
+                                raise UpdateError('Source bundle exceeds the configured transfer limit')
+                            save('Transferring source through the guest agent')
+                            upload = agent.call(vmid, 'app_stage', **args, token=job['id'])
+                            # Standard transfer RPC uses its own helper, with the same authorization callback.
+                            transfer = trace.instrument(ev.GuestAgent(self.runtime['backend'], authorize=authorize))
+                            content = bundle.read_bytes()
+                            job['bundle_sha256'] = hashlib.sha256(content).hexdigest()
+                            save('Transferring verified source bundle through the guest agent')
+                            transfer.put(vmid, upload['path'], content)
+                            update['sha256'] = job['bundle_sha256']
                     save('Validating and activating application source; preserving configuration and data')
                     if self.closed:
                         raise UpdateError('Server stopped before activation; application source was not changed')

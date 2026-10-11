@@ -37,6 +37,8 @@ def main():
             if op == 'app_stage': return {'path': '/tmp/test-source.bundle'}
             if op == 'app_update' and vmid in activation_failures: raise ValueError('Tracked local edits appeared before activation. No files changed.')
             if op == 'app_update':
+                if vmid in dirty and vmid not in replaceable:
+                    assert data.get('force') is True
                 if data.get('stop_processes'):
                     assert data['stop_processes'] == process_blockers[vmid]
                     process_blockers.pop(vmid)
@@ -53,7 +55,7 @@ def main():
                 assert finish_upload.wait(90)
             self.call(vmid, 'write', path=path, offset=midpoint, content=base64.b64encode(content[midpoint:]).decode())
         patch.setattr(agent, 'put', put)
-        def package(source, ref, base, directory, *, trace=None):
+        def package(source, ref, base, directory, *, trace=None, allow_same=False):
             file = directory / 'source.bundle'
             file.write_bytes(b'simulated guest transfer; real Git packaging has separate integration tests')
             if trace:
@@ -95,15 +97,15 @@ def main():
                     expect(status).to_contain_text('Please wait: Submitting application maintenance')
                     expect(button('participant', 'inspect')).to_be_disabled()
                     expect(page.locator('#download-console')).to_be_enabled()
-                    page.locator('#debug-console summary').click()
-                    expect(page.locator('#console-output')).not_to_be_visible()
-                    page.locator('#debug-console summary').click()
-                    expect(page.locator('#console-output')).to_be_visible()
                     page.wait_for_timeout(100)
                     assert len(pending) == 1
                     pending.pop().continue_()
                     page.unroute('**/api/applications')
                     expect(page.locator('#update-cards')).to_contain_text('Missing evaluator controls', timeout=30000)
+                    page.locator('#debug-console summary').click()
+                    expect(page.locator('#console-output')).not_to_be_visible()
+                    page.locator('#debug-console summary').click()
+                    expect(page.locator('#console-output')).to_be_visible()
                     expect(button('participant', 'inspect')).to_be_enabled(timeout=30000)
                     expect(page.locator('#console-output')).to_contain_text('app_inspect completed')
                     expect(page.locator('#console-output')).to_contain_text('PVE authorization passed')
@@ -133,14 +135,30 @@ def main():
                     button('participant', 'update').click()
                     expect(page.locator('#update-message')).to_contain_text('update: failed', timeout=30000)
                     expect(page.locator('#update-message')).to_contain_text('No source bundle downloaded or transferred')
-                    expect(page.locator('#update-cards')).to_contain_text('Tracked local edits block updates')
+                    expect(page.locator('#update-cards')).to_contain_text('Tracked local edits require a Force update')
                     expect(page.locator('#update-cards')).to_contain_text('mcp_client.py')
+                    expect(button('participant', 'update')).to_have_text('Force update')
                     expect(page.locator('#loading-label')).to_contain_text('participant update failed')
                     expect(page.locator('#loading-progress')).to_be_hidden()
                     assert 'complete' not in (page.locator('#loading-status').get_attribute('class') or '').split()
                     assert [op for _, op, _ in calls[before:]] == ['app_inspect']
                     expect(button('participant', 'inspect')).to_be_enabled()
-                    dirty.clear()
+                    button('participant', 'inspect').click()
+                    expect(button('participant', 'update')).to_have_text('Force update', timeout=30000)
+                    before_force = len(calls)
+                    before_force_updates = sum(op == 'app_update' for _, op, _ in calls)
+                    def cancel_force(dialog):
+                        assert 'permanently discards' in dialog.message
+                        assert 'mcp_client.py' in dialog.message
+                        assert 'not saved in rollback' in dialog.message
+                        dialog.dismiss()
+                    page.once('dialog', cancel_force)
+                    button('participant', 'update').click()
+                    assert sum(op == 'app_update' for _, op, _ in calls) == before_force_updates
+                    page.once('dialog', lambda dialog: dialog.accept())
+                    button('participant', 'update').click()
+                    expect(page.locator('#update-message')).to_contain_text('update: completed', timeout=30000)
+                    assert any(op == 'app_update' and data.get('force') is True for _, op, data in calls[before_force:])
                     activation_failures.add(9403)
                     button('participant', 'update').click()
                     expect(page.locator('#update-message')).to_contain_text('Tracked local edits appeared before activation', timeout=30000)
@@ -149,7 +167,7 @@ def main():
                     expect(latest).to_contain_text('Upload checksum verified')
                     expect(latest).to_contain_text('Activation not confirmed')
                     expect(latest).to_contain_text('Target revision: ' + 'b' * 40)
-                    expect(page.locator('#update-cards article').filter(has=button('participant', 'update'))).to_contain_text('Installed revision (last checked): aaaaaaaaaaaa')
+                    expect(page.locator('#update-cards article').filter(has=button('participant', 'update'))).to_contain_text('Installed revision (last checked): bbbbbbbbbbbb')
                     expect(page.locator('#loading-label')).to_contain_text('participant update failed')
                     process_blockers[9403] = [{'pid': 4242, 'name': 'python3', 'reason': 'working directory is in checkout', 'identity': 'a' * 64}]
                     before_process_check = len(calls)

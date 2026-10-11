@@ -45,6 +45,14 @@ session and imported VM inventory. Local operator model configuration is also
 supported. API keys should be
 saved in the participant configuration, not the host inventory or runtime YAML.
 
+After **Check version**, a dirty checkout changes the action to **Force update**.
+The confirmation names the tracked paths and states that those edits will be
+permanently discarded. The server binds that confirmation to the inspected VM,
+revision and changed-file list, rechecks them immediately before packaging, and
+the guest resets tracked edits only after validating the selected revision.
+Rollback restores committed revisions; it cannot recover discarded local edits.
+Untracked files are never deleted by Force update.
+
 Transport and WebUI tests use simulated guest operations. A complete live three-VM experiment still needs verification after provisioning.
 Local startup and automatic dashboard access have been checked on the Mac.
 

@@ -137,6 +137,11 @@ The shorthand automatically selects the imported Fusion profile and its
 not request an application login or operator-group membership, and listens only
 on localhost. The **Applications** page can check, update, and roll back the
 ScenarioForge and cyber-agent-flow checkouts through the Fusion guest agent.
+If a version check finds tracked local edits, **Force update** requires an
+explicit destructive confirmation and a fresh inspection before it resets those
+edits and activates the selected revision. Discarded edits are not included in
+the application rollback record; untracked files are retained and can still
+block activation if they collide with the target revision.
 Omit `--local` for Proxmox deployments.
 
 

@@ -298,6 +298,9 @@ def dispatch(data):
     directory = state_dir(root)
     journal = directory / 'state.json'
     op = data['op']
+    force = data.get('force', False)
+    if type(force) is not bool or (force and op != 'app_update'):
+        raise ValueError('Force is supported only for application updates')
     if 'stop_processes' in data and op != 'app_update':
         raise ValueError('Confirmed process stopping is only supported for updates')
     if op == 'app_inspect':
@@ -333,7 +336,7 @@ def dispatch(data):
             raise ValueError('Interrupted maintenance needs rollback before another update')
         before = current['revision']
         replace_tools = op == 'app_update' and current['tools_config_replaceable']
-        if current['modified'] and not replace_tools:
+        if current['modified'] and not replace_tools and not force:
             raise ValueError('Tracked local edits exist; preserve/commit them before updating. No files changed.')
         if op == 'app_rollback':
             previous = pending if pending else read(directory / 'last-success.json')
@@ -346,15 +349,16 @@ def dispatch(data):
             target = data['revision']
             if not re.fullmatch('[0-9a-f]{40}', target):
                 raise ValueError('Invalid target revision')
-            bundle = directory / (token + '.bundle')
-            if not bundle.is_file() or bundle.is_symlink():
-                raise ValueError('Source bundle is missing')
-            if hashlib.sha256(bundle.read_bytes()).hexdigest() != data['sha256']:
-                raise ValueError('Source bundle checksum mismatch')
-            git(root, 'bundle', 'verify', str(bundle))
-            git(root, 'fetch', '--no-tags', str(bundle), 'refs/heads/caf-release', timeout=120)
-            if value(root, 'rev-parse', 'FETCH_HEAD') != target:
-                raise ValueError('Fetched revision does not match the approved source')
+            if before != target:
+                bundle = directory / (token + '.bundle')
+                if not bundle.is_file() or bundle.is_symlink():
+                    raise ValueError('Source bundle is missing')
+                if hashlib.sha256(bundle.read_bytes()).hexdigest() != data.get('sha256'):
+                    raise ValueError('Source bundle checksum mismatch')
+                git(root, 'bundle', 'verify', str(bundle))
+                git(root, 'fetch', '--no-tags', str(bundle), 'refs/heads/caf-release', timeout=120)
+                if value(root, 'rev-parse', 'FETCH_HEAD') != target:
+                    raise ValueError('Fetched revision does not match the approved source')
         if before == target:
             if pending and op == 'app_rollback':
                 if previous.get('service_was_active') and service:
@@ -364,7 +368,8 @@ def dispatch(data):
                 previous.update(status='recovered', ended_at=time.time())
                 save(journal, previous)
                 return dict(identity(root, role), root=str(root), update=previous)
-            raise ValueError('This revision is already installed')
+            if not force:
+                raise ValueError('This revision is already installed')
         # Local edits remain untouched. Git checkout also refuses untracked-file collisions.
         staging = directory / ('stage-' + token)
         staging.mkdir(mode=0o700)
@@ -372,11 +377,15 @@ def dispatch(data):
         stage = staging / 'checkout'
         record = dict(status='validating', token=token, role=role, previous_revision=before, revision=target,
                       service=service, python=str(python), service_was_active=False, started_at=time.time())
+        if force:
+            record.update(forced=True, discarded_modified_files=current['modified_files'],
+                          discarded_modified_file_count=current['modified_file_count'])
         save(journal, record)
         switched = False
         try:
             git(root, 'worktree', 'add', '--detach', str(stage), target)
-            validate_checkout(stage, root, python, role, rollback=op == 'app_rollback')
+            if before != target:
+                validate_checkout(stage, root, python, role, rollback=op == 'app_rollback')
             # Keep both revisions reachable even after normal Git reflog expiry/GC.
             for revision in (before, target):
                 git(root, 'update-ref', 'refs/caf-orchestrator/releases/' + revision, revision)
@@ -413,6 +422,10 @@ def dispatch(data):
                 save(journal, record)
                 save(PENDING, dict(record, root=str(root)))
                 git(root, 'restore', '--worktree', '--', 'kali_tools.json')
+            if force:
+                # The user explicitly confirmed this irreversible step. Keep
+                # untracked files; checkout still fails on collisions.
+                git(root, 'reset', '--hard', 'HEAD')
             record['status'] = 'activating'
             save(journal, record)
             git(root, 'checkout', '--detach', target)

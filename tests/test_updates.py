@@ -302,7 +302,7 @@ def test_manager_revocation_after_inspection_prevents_download_or_update(pve, la
         pve[0]['groups'] = 'caf-orchestration'
         return {'revision': 'a' * 40}
     monkeypatch.setattr(agent, 'call', call)
-    monkeypatch.setattr(updates, 'package', lambda *args: pytest.fail('Download after permission revocation'))
+    monkeypatch.setattr(updates, 'package', lambda *args, **kwargs: pytest.fail('Download after permission revocation'))
     cfg, runtime, _, _ = load(lab[0])
     manager = updates.UpdateManager(cfg, runtime, tmp_path / 'runs')
     try:
@@ -371,6 +371,75 @@ def test_manager_dirty_preflight_stops_before_download_or_transfer(pve, lab, tmp
         assert row['installed']['modified_files'] == [' M "mcp_client.py"']
         assert [op for _, op, _ in calls] == ['app_inspect']
         assert not (workspace.path / 'updates' / ('a' * 32) / 'source.bundle').exists()
+    finally:
+        manager.close()
+
+
+def test_force_update_discards_confirmed_tracked_edits(installation, tmp_path):
+    role, _, root, original, _ = installation
+    args = stage(installation, tmp_path)
+    tracked = root / ('mcp_client.py' if role == 'participant' else 'scenarioforge/cli.py')
+    tracked.write_text(tracked.read_text() + '# local VM edit that must be discarded\n')
+    assert guest.identity(root, role)['modified']
+    result = guest.dispatch(dict(args, op='app_update', force=True))
+    assert result['revision'] == args['revision']
+    assert result['modified'] is False
+    assert result['update']['forced'] is True
+    assert result['update']['discarded_modified_file_count'] == 1
+    assert 'local VM edit' not in tracked.read_text()
+    restored = guest.dispatch(dict(args, op='app_rollback', expected_revision=result['revision'], token='f' * 32))
+    assert restored['revision'] == original
+    assert 'local VM edit' not in tracked.read_text()
+
+
+def test_force_update_can_clean_the_current_revision(installation, tmp_path):
+    role, _, root, original, _ = installation
+    tracked = root / ('mcp_client.py' if role == 'participant' else 'scenarioforge/cli.py')
+    tracked.write_text(tracked.read_text() + '# discard without a newer revision\n')
+    result = guest.dispatch({
+        'op': 'app_update', 'role': role, 'root': str(root), 'token': '9' * 32,
+        'python': sys.executable, 'service': 'demo.service',
+        'expected_revision': original, 'revision': original, 'force': True,
+    })
+    assert result['revision'] == original and result['modified'] is False
+    assert result['update']['forced'] is True
+
+
+def test_manager_requires_fresh_inspection_for_force_update(pve, lab, tmp_path, monkeypatch):
+    pve[0]['groups'] += ',caf-maintainers'
+    pve[0]['resources']['operator@pve'] = [vm(9403)]
+    user = access(pve)
+    workspace = Workspace(tmp_path / 'runs', user.username)
+    workspace.save_roles(dict(scenarioforge=None, participant=9403, core=None), user)
+    calls, agent, _ = install_backend(monkeypatch, tmp_path)
+    original = agent.call
+    installed = {'revision': 'a' * 40, 'modified': True,
+                 'modified_files': [' M "mcp_client.py"'], 'modified_file_count': 1,
+                 'tools_config_replaceable': False, 'processes': []}
+    def call(self, vmid, op, **data):
+        original(self, vmid, op, **data)
+        return dict(installed)
+    monkeypatch.setattr(agent, 'call', call)
+    packages = []
+    def package(*args, **kwargs):
+        packages.append(kwargs)
+        raise updates.UpdateError('Reached packaging after force confirmation')
+    monkeypatch.setattr(updates, 'package', package)
+    cfg, runtime, _, _ = load(lab[0])
+    manager = updates.UpdateManager(cfg, runtime, tmp_path / 'runs')
+    try:
+        with pytest.raises(updates.UpdateError, match='Check version'):
+            manager.submit(user, 'participant', 'update', 'main', 'b' * 32, force_confirmation='a' * 32)
+        manager.submit(user, 'participant', 'inspect', 'main', 'a' * 32)
+        manager.jobs[user.username].result(timeout=10)
+        manager.submit(user, 'participant', 'update', 'main', 'b' * 32, force_confirmation='a' * 32)
+        manager.jobs[user.username].result(timeout=10)
+        row = ev.read_json(workspace.path / 'updates' / ('b' * 32) / 'job.json')
+        assert row['force_confirmation'] == 'a' * 32
+        assert row['force_expected']['modified_files'] == [' M "mcp_client.py"']
+        assert len(packages) == 1 and packages[0]['allow_same'] is True
+        assert isinstance(packages[0]['trace'], Trace)
+        assert 'Reached packaging after force confirmation' in row['error']
     finally:
         manager.close()
 
