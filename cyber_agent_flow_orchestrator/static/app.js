@@ -433,7 +433,7 @@ function resetJudge(){
  const model=config?.model||snapshot?.experiment_defaults?.model||{};
  $('judge-provider').value=['openai','litellm','ollama_direct'].includes(model.provider)?model.provider:'openai';
  $('judge-url').value=model.url||'';$('judge-name').value=model.name||'';$('judge-ssl').checked=model.ssl_verify!==false;
- for(const [key,value] of Object.entries({max_turns:6,timeout_seconds:120,max_tokens:2048,progress_timeout_seconds:20,progress_max_checks:32}))$('judge-'+key).value=config?.[key]??value;
+ for(const [key,value] of Object.entries({max_turns:6,timeout_seconds:600,max_tokens:2048,progress_timeout_seconds:20,progress_max_checks:32}))$('judge-'+key).value=config?.[key]??value;
  syncJudge();
 }
 for(const id of ['judge-enabled','judge-inherit','judge-monitor_progress'])$(id).addEventListener('change',()=>{syncJudge();syncCreateExperiment();});

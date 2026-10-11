@@ -35,3 +35,16 @@ def test_transcript_bounded_and_scope_checked(tmp_path):
     (attempt / 'live-events.jsonl').unlink()
     (attempt / 'live-events.jsonl').symlink_to('/etc/passwd')
     assert trial_transcript.build(tmp_path, row, True)['warning']
+
+
+def test_judge_stream_includes_progress_reviews_and_final_review(tmp_path):
+    attempt=tmp_path/'trials/attempt'
+    progress=attempt/'progress-checks/turn-0001'
+    progress.mkdir(parents=True)
+    (progress/'judge-events.jsonl').write_text(json.dumps({'type':'response','text':'Intermediate','purpose':'progress'})+'\n')
+    (attempt/'judge-events.jsonl').write_text(''.join(json.dumps({'type':'response','text':t,'purpose':'final','turn':1})+'\n' for t in ['Final ','verdict']))
+    row={'attempt_path':'trials/attempt','status':'running'}
+    result=trial_transcript.build(tmp_path,row,True,judge=True)
+    assert result['live'] and len(result['events'])==2
+    assert 'Intermediate' in result['events'][0]['text']
+    assert 'Final verdict' in result['events'][1]['text']

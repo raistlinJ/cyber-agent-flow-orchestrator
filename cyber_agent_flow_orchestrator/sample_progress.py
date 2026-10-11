@@ -70,6 +70,7 @@ def build(root, journal, report, state, coordinator, *, include_transcript=False
             if active: current = trial
             else: trial.update(status='unconfirmed', elapsed_seconds=None)
         if include_transcript and row in rows[-10:]:
+            trial['judge_transcript'] = trial_transcript.build(root / 'evaluation', row, active, judge=True)
             trial['transcript'] = trial_transcript.build(root / 'evaluation', row, active)
             if transport.is_file():
                 trial['transcript']['updated_at'] = record.get('transcript_updated_at')
@@ -86,5 +87,5 @@ def build(root, journal, report, state, coordinator, *, include_transcript=False
                 verified_successes=sum(row.get('verified_success') is True for row in rows),
                 errors=sum(row['status'] not in ('completed', 'running') for row in rows),
                 max_turns=item.get('max_turns'), wall_seconds=item.get('wall_seconds'),
-                current_trial={key:value for key,value in current.items() if key != 'transcript'} if current else None,
+                current_trial={key:value for key,value in current.items() if key not in ('transcript','judge_transcript')} if current else None,
                 trials=trials, events=events[-100:])

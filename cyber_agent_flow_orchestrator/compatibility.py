@@ -20,6 +20,7 @@ def check_evaluator():
             'fusion': ('vm_lock_path',),
             'rubric': ('validate_rubric', 'participant_scaffold', 'aggregate'),
             'judge': ('resolve_judge', '_completion', '_json_action'),
+            'judge_stream': ('EventLog', 'completion_response'),
             'studies': ('compare', 'summarize'),
             'usage': ('validate_pricing',),
         }
@@ -28,6 +29,9 @@ def check_evaluator():
             for symbol in symbols:
                 if not hasattr(module, symbol):
                     raise ImportError(f'cyber_agent_flow_eval.{name}.{symbol} is missing')
+        judge = importlib.import_module('cyber_agent_flow_eval.judge')
+        if 'on_delta' not in inspect.signature(judge._completion).parameters:
+            raise ImportError('Evaluator judge lacks streaming completion support')
         runner = importlib.import_module('cyber_agent_flow_eval.runner')
         if 'prepare_trial' not in inspect.signature(runner.run).parameters:
             raise ImportError('Evaluator runner.run lacks per-trial preparation support')

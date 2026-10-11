@@ -255,8 +255,7 @@ A failed required check stops the launch before scenario preparation, deployment
 or trial execution. Disabled judges are skipped; time-budget mismatches are
 shown as warnings. Model probes use only synthetic prompts, never scenario
 solutions or saved transcripts, and return no credential values. They can use a
-small number of model tokens. Generation probes have a 60-second ceiling (or
-the configured judge limit if shorter); a busy or slow model can block preflight.
+small number of model tokens. Participant generation probes have a 60-second ceiling; a busy or slow model can block preflight.
 The full trial and judge-review budgets are unchanged. Results are saved in
 `input-preflight.json` and the workflow journal for review and export.
 
@@ -264,3 +263,5 @@ Actual target services and challenge artifacts can be verified only after the
 scenario has been deployed. The existing readiness gate still checks them
 before trials. Passing preflight establishes configuration/access readiness;
 it does not guarantee a task will be solved or that the model stays available.
+
+Judge preflight and final review honor the configured judge time limit (default 600 seconds). In the progress modal, step 1 has a Judge output dropdown for the synthetic check, and step 9 has one for final and intermediate reviews. Compatible OpenAI and Ollama providers stream responses; servers returning a normal JSON response remain supported. Provider-emitted reasoning is shown when available. Private reference answers may appear in judge output, which remains owner-scoped and is included in the run bundle. The modal refreshes these incremental outputs every five seconds.

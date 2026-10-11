@@ -80,9 +80,11 @@ def status(output, *, include_transcript=False):
     if stages_progress and sample_progress:
         for stage in stages_progress['steps']:
             if stage['id'] == 'evaluate':
-                stage['trials'] = [{key:value for key,value in trial.items() if key != 'transcript'} for trial in sample_progress['trials']]
+                stage['trials'] = [{key:value for key,value in trial.items() if key not in ('transcript','judge_transcript')} for trial in sample_progress['trials']]
                 stage['events'] = (stage['events'] + [event for event in sample_progress['events'] if event.get('kind') in ('trial', 'hint')])[-60:]
-    return {'output': str(root), 'workflow_id': data['workflow']['id'],
+    from .trial_transcript import read_file
+    judge_preflight = read_file(root, root/'judge-preflight-events.jsonl', coordinator_active and data.get('progress_steps',{}).get('preflight',{}).get('status')=='running') if include_transcript else None
+    return {'judge_preflight_transcript':judge_preflight, 'output': str(root), 'workflow_id': data['workflow']['id'],
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,
             'coordinator_active': coordinator_active,
             'sample_id': data.get('sample_id'), 'scenario_experiment': data.get('scenario_experiment'), 'message': 'Stop requested; finishing the current stage or trial and collecting results' if stopping else data.get('message'),

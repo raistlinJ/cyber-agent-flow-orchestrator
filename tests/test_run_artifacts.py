@@ -48,6 +48,7 @@ def test_results_expose_frozen_prompts_tools_settings_and_checkpoints(lab):
 def test_download_bundle_includes_exact_inputs_evidence_and_reimport(lab):
     config, output, agent, _ = lab
     workflow.run(config, output, agent=agent)
+    (output/'judge-preflight-events.jsonl').write_text('{"type":"status","text":"Synthetic check"}\n')
     for artifact in ['scenario-reproduction', 'scenario-evaluation', 'run-bundle']:
         with run_artifacts.download(output, artifact) as (stream, mime, name):
             assert mime == 'application/zip'
@@ -63,6 +64,8 @@ def test_download_bundle_includes_exact_inputs_evidence_and_reimport(lab):
             else:
                 assert archive.read('study.yaml') == (output / 'study.yaml').read_bytes()
                 assert 'evaluation/manifest.json' in archive.namelist()
+                assert archive.read('input-preflight.json') == (output/'input-preflight.json').read_bytes()
+                assert archive.read('judge-preflight-events.jsonl') == (output/'judge-preflight-events.jsonl').read_bytes()
                 assert 'scenarioforge-reproduction.zip' in archive.namelist()
                 assert 'experiment-summary.md' in archive.namelist()
                 assert '<svg' in archive.read('experiment-summary.html').decode()

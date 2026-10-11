@@ -20,7 +20,9 @@ def main():
         config,_,agent,manifest=lab.__wrapped__(root,patch)
         install_transport(patch,agent,manifest)
         from cyber_agent_flow_eval import judge
-        def completion(config,messages,timeout):
+        def completion(config,messages,timeout, **kwargs):
+            if kwargs.get('on_delta'):
+                kwargs['on_delta']('reasoning','Synthetic fixture judge output.')
             if messages[0]['content'].startswith('Synthetic preflight'):
                 return json.dumps({'action':'verdict','passed':False,'score':0,'reason':'Synthetic','evidence':[]}),{}
             if len(messages)==2:return json.dumps({'action':'read_evidence','file':'worker-result.json'}),{'prompt_tokens':10,'output_tokens':5}
@@ -194,11 +196,16 @@ def main():
                     expect(progress_page.locator('.workflow-vms')).to_contain_text('VM 9404')
                     expect(progress_page.locator('.workflow-readiness')).to_contain_text('containers: pass')
                     preflight=progress_page.locator('.workflow-step').first
-                    preflight.locator('summary').click()
+                    preflight.get_by_text('Stage details and output',exact=True).click()
                     expect(preflight).to_contain_text('Judge endpoint and host credentials · pass')
                     expect(preflight).to_contain_text('Participant model, guest credentials and connectivity · pass')
                     expect(preflight).to_contain_text('CORE upload paths and HITL interface · pass')
-                    progress_page.screenshot(path='/tmp/caf-detailed-progress.png',full_page=True)
+                    preflight.get_by_text('Judge output',exact=True).click()
+                    expect(preflight.locator('[aria-label="Judge output output"]')).to_contain_text('Synthetic fixture judge output.')
+                    judge_output=progress_page.locator('.workflow-step').last.locator('details').filter(has=progress_page.get_by_text('Judge output',exact=True))
+                    judge_output.locator('summary').click()
+                    expect(judge_output.locator('[aria-label="Judge output output"]')).to_contain_text('Synthetic fixture judge output.')
+                    progress_page.screenshot(path='/tmp/caf-judge-streaming-progress.png',full_page=True)
                     progress_page.set_viewport_size({'width':390,'height':844})
                     assert progress_page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     progress_page.close()

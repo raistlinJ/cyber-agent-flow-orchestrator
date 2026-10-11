@@ -15,7 +15,7 @@ def judge_runtime(variable='TEST_PREFLIGHT_KEY'):
 
 def test_missing_judge_key_fails_before_any_model_request(monkeypatch):
     monkeypatch.delenv('TEST_PREFLIGHT_KEY',raising=False)
-    monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',lambda *args:pytest.fail('No request with missing credentials'))
+    monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',lambda *args, **kwargs:pytest.fail('No request with missing credentials'))
     with pytest.raises(ValueError,match='host credential.*missing'):
         input_preflight.check_judge(judge_runtime())
 
@@ -23,7 +23,7 @@ def test_missing_judge_key_fails_before_any_model_request(monkeypatch):
 def test_judge_probe_is_synthetic_and_validates_contract(monkeypatch):
     monkeypatch.setenv('TEST_PREFLIGHT_KEY','never-log-this-key')
     calls=[]
-    def completion(config,messages,timeout):
+    def completion(config,messages,timeout, **kwargs):
         calls.append((config,messages,timeout))
         return json.dumps({'action':'verdict','passed':False,'score':0,'reason':'probe','evidence':[]}),{}
     monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',completion)
@@ -31,7 +31,7 @@ def test_judge_probe_is_synthetic_and_validates_contract(monkeypatch):
     assert 'authenticated' in result['message']
     assert 'never-log-this-key' not in json.dumps(calls)
     assert all('Synthetic' in m['content'] or 'preflight' in m['content'] for m in calls[0][1])
-    monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',lambda *args:('{"action":"read_evidence","file":"anything"}',{}))
+    monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',lambda *args, **kwargs:('{"action":"read_evidence","file":"anything"}',{}))
     with pytest.raises(ValueError,match='usable JSON verdict'):
         input_preflight.check_judge(judge_runtime())
 
@@ -135,3 +135,19 @@ def test_virtualenv_python_symlink_is_valid_input(tmp_path,monkeypatch):
         returncode=0
     monkeypatch.setattr(guest.subprocess,'run',lambda *args,**kwargs:Result())
     guest.access(alias,'participant',executable=True)
+
+
+def test_judge_preflight_honors_600_second_budget_and_persists_stream(tmp_path,monkeypatch):
+    monkeypatch.setenv('TEST_PREFLIGHT_KEY','private-key')
+    runtime=judge_runtime()
+    runtime['judge']['timeout_seconds']=600
+    def completion(config,messages,timeout,on_delta):
+        assert timeout==600
+        on_delta('reasoning','Synthetic check only.')
+        on_delta('response','{"action":"verdict","passed":false,"score":0,"reason":"preflight","evidence":[]}')
+        return '{"action":"verdict","passed":false,"score":0,"reason":"preflight","evidence":[]}',{}
+    monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',completion)
+    input_preflight.check_judge(runtime,tmp_path)
+    events=(tmp_path/'judge-preflight-events.jsonl').read_text()
+    assert 'Synthetic check only.' in events and 'passed' in events
+    assert 'private-key' not in events

@@ -15,7 +15,7 @@ class InputPreflightError(ValueError):
     pass
 
 
-def check_judge(runtime):
+def check_judge(runtime, output=None):
     from cyber_agent_flow_eval.judge import resolve_judge, _completion, _json_action
     config = resolve_judge(runtime.get('judge'), runtime['model'])
     if not config['enabled']:
@@ -26,11 +26,18 @@ def check_judge(runtime):
     probe = dict(config, max_tokens=min(config['max_tokens'],512))
     messages = [{'role':'system','content':'Synthetic preflight only; no experiment data. Return exactly one JSON action, without calling tools.'},
                 {'role':'user','content':'Return {"action":"verdict","passed":false,"score":0,"reason":"synthetic preflight","evidence":[]}.'}]
-    timeout = min(60,config['timeout_seconds'])
+    timeout = config['timeout_seconds']
+    from cyber_agent_flow_eval.judge_stream import EventLog
+    log = EventLog(output/'judge-preflight-events.jsonl') if output is not None else None
+    if log: log.emit('status', text=f'Synthetic judge check started; timeout {timeout}s')
     started = time.monotonic()
     try:
-        text, _ = _completion(probe, messages, timeout)
+        try:
+            text, _ = _completion(probe, messages, timeout, **({'on_delta':log.delta} if log else {}))
+        finally:
+            if log: log.flush()
     except ValueError as exc:
+        if log: log.emit('error', text=str(exc))
         if time.monotonic()-started >= timeout * .95:
             raise ValueError(f'Judge synthetic generation probe exceeded {timeout}s; check judge server load and generation settings before deployment. The full review budget is unchanged.') from None
         raise
@@ -39,6 +46,7 @@ def check_judge(runtime):
             or type(action.get('score')) not in (int,float) or not 0 <= action['score'] <= 1
             or not isinstance(action.get('reason'),str) or not isinstance(action.get('evidence'),list)):
         raise ValueError('Judge did not return a usable JSON verdict for the synthetic probe; check model/provider compatibility and token limits')
+    if log: log.emit('status', text='Synthetic judge check passed')
     return {'message':'Judge authenticated from the orchestrator host and returned a usable synthetic JSON verdict'}
 
 
@@ -104,7 +112,7 @@ def run(workflow):
             checkpoint(workflow,label+' · '+row['status']+': '+row['message'])
             persist()
     check('inputs','Saved experiment inputs',lambda:check_inputs(workflow))
-    check('judge','Judge endpoint and host credentials',lambda:check_judge(runtime))
+    check('judge','Judge endpoint and host credentials',lambda:check_judge(runtime, workflow.output))
     remote = copy(workflow.agent)
     remote.script = Path(__file__).with_name('input_probe_guest.py').read_text()
     participant = runtime['backend']['participant_vmid']
