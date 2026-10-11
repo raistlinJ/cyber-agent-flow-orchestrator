@@ -680,3 +680,13 @@ For local VMware Fusion experiments, see [Fusion setup and execution](docs/fusio
 For editable challenge rubrics, evidence-based judging, controlled conditions, lab resets, held-out multi-scenario Studies and downloadable comparison reports, see [Rubric experiments and studies](docs/rubric-experiments.md).
 
 ScenarioForge task loading can draft an editable, Judge-based challenge scaffold from resolved Flow data and guide solutions. Progressive hints can use separate intermediate evidence reviews to select the current unfinished step. See [scaffolds and intermediate progress](docs/rubric-experiments.md#scenario-derived-scaffold-and-intermediate-progress) for configuration, limits and audit files.
+
+
+While an experiment runs, open **Progress → step 9 → Cyber-agent-flow transcript**
+to view emitted prompts, responses, tool calls/results and status. The scrollable
+dropdown updates every five seconds even when dashboard refresh is set to Never.
+Choose among the latest ten trial attempts. Scrolling up pauses automatic scrolling;
+return to the bottom to follow new events. Common credential fields are redacted,
+and displayed history is bounded; the full transcript remains in the run bundle.
+Participant transcript bytes travel with the existing guest status checks for both
+Fusion and Proxmox. Provider reasoning is shown only when CAF emits it.

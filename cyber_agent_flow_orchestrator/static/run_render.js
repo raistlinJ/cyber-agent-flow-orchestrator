@@ -1,5 +1,42 @@
 const stageDetailExpansion=new Map();
 const stageDetailScroll=new Map();
+const transcriptSelection=new Map();
+function renderTranscript(run,parent){
+ const key=run.output+'|transcript',trials=(run.sample_progress?.trials||[]).filter(t=>t.transcript);
+ const details=el('details',null,'stage-details transcript-details');details.dataset.stageKey=key;
+ details.open=stageDetailExpansion.get(key)||false;
+ details.addEventListener('toggle',()=>stageDetailExpansion.set(key,details.open));
+ details.append(el('summary','Cyber-agent-flow transcript'));
+ const label=el('label','Trial / attempt ','small'),select=el('select');select.setAttribute('aria-label','Transcript trial');
+ for(const trial of trials)select.add(new Option(`${trial.trial_id} · ${trial.condition_id} · attempt ${trial.attempt}`,trial.trial_id+'|'+trial.attempt));
+ const selected=transcriptSelection.get(key),current=run.sample_progress?.current_trial;
+ select.value=trials.some(t=>t.trial_id+'|'+t.attempt===selected)?selected:current?current.trial_id+'|'+current.attempt:select.options[select.options.length-1]?.value||'';
+ label.append(select);details.append(label);
+ const status=el('p',null,'small'),output=el('div',null,'stage-output transcript-output');output.tabIndex=0;output.setAttribute('role','region');output.setAttribute('aria-label','Cyber-agent-flow transcript output');
+ details.append(status,output);
+ let restoring=false;
+ function draw(){
+  restoring=true;
+  const trial=trials.find(t=>t.trial_id+'|'+t.attempt===select.value),transcript=trial?.transcript;
+  const scrollKey=key+'|'+select.value,previous=stageDetailScroll.get(scrollKey);
+  output.replaceChildren();
+  status.textContent=transcript?.live?'Live · updates with the progress window every 5 seconds':transcript?'Saved trial transcript':'Waiting for participant trials to start.';
+  if(transcript?.updated_at)status.textContent+=' · Last received '+new Date(transcript.updated_at).toLocaleTimeString();
+  if(transcript?.warning)output.append(el('p',transcript.warning,'notice'));
+  if(transcript?.truncated)output.append(el('p','Showing recent events. The full transcript is included in the run bundle.','small'));
+  for(const event of transcript?.events||[]){
+   output.append(el('h4',(event.elapsed_seconds==null?'':duration(event.elapsed_seconds)+' · ')+event.type),el('pre',event.text+(event.truncated?'\n[Event shortened; full content in run bundle]':'')));
+  }
+  if(!transcript?.events?.length)output.append(el('p',transcript?.live?'Waiting for cyber-agent-flow to emit transcript events…':'No transcript events collected yet.','small'));
+  const restore=()=>{output.scrollTop=previous?.follow!==false?output.scrollHeight:previous.top;stageDetailScroll.set(scrollKey,{top:output.scrollTop,follow:output.scrollHeight-output.clientHeight-output.scrollTop<40});restoring=false;};
+  if(output.isConnected)restore();else requestAnimationFrame(restore);
+ }
+ output.addEventListener('scroll',()=>{if(!restoring&&output.isConnected)stageDetailScroll.set(key+'|'+select.value,{top:output.scrollTop,follow:output.scrollHeight-output.clientHeight-output.scrollTop<40});});
+ select.addEventListener('change',()=>{transcriptSelection.set(key,select.value);draw();});draw();
+ details.append(el('p','Emitted prompts, responses, tool calls/results, and status. Provider reasoning appears only if emitted by cyber-agent-flow. Common credential fields are redacted. The selector shows the latest 10 attempts.','small'));
+ parent.append(details);
+}
+
 function renderWorkflowProgress(run,target){
  const p=run.workflow_progress;if(!p)return;
  const section=el('section',null,'workflow-progress');section.setAttribute('aria-label','Workflow stages and VM activity');
@@ -71,6 +108,7 @@ function renderWorkflowProgress(run,target){
   details.append(output);
   requestAnimationFrame(()=>{output.scrollTop=stageDetailScroll.get(key)||0;});
   item.append(details);
+  if(stage.id==='evaluate')renderTranscript(run,item);
   list.append(item);
  }
  section.append(list);target.append(section);
@@ -105,7 +143,7 @@ function renderProgress(run){
    if(transport?.service?.SubState)card.append(el('p',`Last observed guest service: ${transport.service.SubState}${transport.service.ExecMainPID?' · PID '+transport.service.ExecMainPID:''}`,'small'));
    if(transport?.updated_at)card.append(el('p',`Guest stage last recorded: ${new Date(transport.updated_at).toLocaleTimeString()}`,'small'));
   }
-  card.append(el('p',`Per-trial limits: ${p.max_turns} turns · ${p.wall_seconds}s worker budget. Live model tokens and tool calls are not streamed; scores appear after collection.`,'small'));
+  card.append(el('p',`Per-trial limits: ${p.max_turns} turns · ${p.wall_seconds}s worker budget. The transcript is available under step 9; scores appear after collection.`,'small'));
   if(p.trials.length){const wrap=el('div',null,'scroll'),table=el('table'),header=el('tr'),thead=el('thead'),body=el('tbody');for(const title of ['Trial','Condition','Status','Verified','Score'])header.append(el('th',title));thead.append(header);for(const trial of p.trials){const row=el('tr');for(const value of [trial.trial_id,trial.condition_id,trial.status,trial.verified_success===true?'Yes':trial.verified_success===false?'No':trial.status==='running'?'Pending':'Unavailable',trial.score??'—'])row.append(el('td',value));body.append(row);}table.append(thead,body);wrap.append(table);card.append(wrap);}
   for(const trial of p.trials)for(const error of trial.errors||[])card.append(el('p',`${trial.trial_id} · ${error}`,'error'));
   if(run.error)card.append(el('p',run.error,'error'));

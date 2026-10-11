@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from cyber_agent_flow_eval import integration as ev, reporting
 from .samples import CATALOG
 from .diagnostics import clean
+from . import trial_transcript
 
 PHASES = {'preparing': 'Preparing the guest workspace', 'uploading': 'Transferring worker and trial inputs',
           'starting': 'Starting the guest worker', 'executing': 'Guest worker executing',
@@ -20,7 +21,7 @@ def elapsed(start, end=None):
         return None
 
 
-def build(root, journal, report, state, coordinator):
+def build(root, journal, report, state, coordinator, *, include_transcript=False):
     item = CATALOG.get(journal.get('sample_id'), {})
     if journal.get('scenario_experiment'):
         item = dict(journal.get('runtime', {}).get('execution', {}), name=journal['scenario_experiment']['scenario'])
@@ -68,6 +69,12 @@ def build(root, journal, report, state, coordinator):
         if row['status'] == 'running':
             if active: current = trial
             else: trial.update(status='unconfirmed', elapsed_seconds=None)
+        if include_transcript and row in rows[-10:]:
+            trial['transcript'] = trial_transcript.build(root / 'evaluation', row, active)
+            if transport.is_file():
+                trial['transcript']['updated_at'] = record.get('transcript_updated_at')
+                if record.get('transcript_warning'):
+                    trial['transcript']['warning'] = clean(record['transcript_warning'])
         trials.append(trial)
     events.sort(key=lambda event: event['at'])
     return dict(name=item.get('name', journal.get('sample_id', 'Scenario experiment')), active=active, phase=journal.get('phase', state),
@@ -79,4 +86,5 @@ def build(root, journal, report, state, coordinator):
                 verified_successes=sum(row.get('verified_success') is True for row in rows),
                 errors=sum(row['status'] not in ('completed', 'running') for row in rows),
                 max_turns=item.get('max_turns'), wall_seconds=item.get('wall_seconds'),
-                current_trial=current, trials=trials, events=events[-100:])
+                current_trial={key:value for key,value in current.items() if key != 'transcript'} if current else None,
+                trials=trials, events=events[-100:])

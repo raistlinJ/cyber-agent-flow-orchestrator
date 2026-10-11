@@ -36,7 +36,7 @@ def journal(output):
     return root, ev.read_json(root / 'workflow.json')
 
 
-def status(output):
+def status(output, *, include_transcript=False):
     root, data = journal(output)
     evaluation = root / 'evaluation'
     browser_experiment = bool(data.get('sample_id') or data.get('scenario_experiment'))
@@ -64,7 +64,7 @@ def status(output):
         evaluation_status = reporting.results(evaluation) if browser_experiment else reporting.status(evaluation)
     if browser_experiment:
         from .sample_progress import build
-        sample_progress = build(root, data, evaluation_status, state, coordinator_active)
+        sample_progress = build(root, data, evaluation_status, state, coordinator_active, include_transcript=include_transcript)
         if evaluation_status:
             from .failure_details import trial_failures, collected_failures
             attempts = evaluation_status.pop('attempts', [])
@@ -80,7 +80,7 @@ def status(output):
     if stages_progress and sample_progress:
         for stage in stages_progress['steps']:
             if stage['id'] == 'evaluate':
-                stage['trials'] = sample_progress['trials']
+                stage['trials'] = [{key:value for key,value in trial.items() if key != 'transcript'} for trial in sample_progress['trials']]
                 stage['events'] = (stage['events'] + [event for event in sample_progress['events'] if event.get('kind') in ('trial', 'hint')])[-60:]
     return {'output': str(root), 'workflow_id': data['workflow']['id'],
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,

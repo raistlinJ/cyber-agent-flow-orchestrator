@@ -171,7 +171,7 @@ class UserDashboard:
             from .run_artifacts import configuration
             value = {'workflow': service.status(path), 'evaluation': None, 'run_configuration': configuration(path)}
         else:
-            value = service.results(path) if kind == 'results' else service.status(path)
+            value = service.results(path) if kind == 'results' else service.status(path, include_transcript=True)
         access.current()
         return value
 

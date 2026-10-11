@@ -11,14 +11,14 @@ from cyber_agent_flow_eval import integration as ev
 from .guest_monitor import redact
 
 
-def clean(value):
+def clean(value, limit=1200):
     text = str(value)
     text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
     text = re.sub(r'(https?://)[^/\s@]+@', r'\1[redacted]@', text)
     text = re.sub(r'(?i)(authorization\s*[:=]\s*)[^\r\n]+', r'\1[redacted]', text)
     text = re.sub(r'(?i)(["\']?(?:password|passwd|api[-_]?key|token|secret|ticket|cookie)["\']?\s*[:=]\s*)(?:"[^"\r\n]*"|\'[^\'\r\n]*\'|[^\s,;&}]+)', r'\1[redacted]', text)
     text = re.sub(r'PVE(?:AuthCookie|APIToken)?=[^\s;]+|PVE:[^\s"\']+', '[redacted]', text)
-    return ''.join(c for c in text if c in '\n\t' or ord(c) >= 32)[:1200]
+    return ''.join(c for c in text if c in '\n\t' or ord(c) >= 32)[:limit]
 
 
 class Trace:
