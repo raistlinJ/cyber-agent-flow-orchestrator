@@ -31,7 +31,7 @@ let refreshPromise=null, sessionPromise=null, csrfToken=null, wasBusy=false, bus
 let experimentCreating=false;
 let blockingRefresh=false, foregroundChecks=true, pollTimer=null;
 const clientLog=[];
-const pages={studies:['Studies','Controlled comparisons across ScenarioForge scenarios.'],overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Check versions, update application source, and review maintenance.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
+const pages={studies:['Studies','Controlled comparisons across ScenarioForge scenarios.'],overview:['Overview','Live machines, application processes, and workflow activity.'],experiments:['Experiments','Run a sample, follow its progress, and explore or export results.'],applications:['Applications','Inspect selected application VMs and manage source when maintenance is enabled.'],setup:['Lab setup','Choose your virtual machines and set your refresh preferences.']};
 function routePage(focus=false){
  const route=location.hash.slice(1),page=Object.hasOwn(pages,route)?route:'overview';
  if(page!==route)history.replaceState(null,'','#'+page);
@@ -642,7 +642,36 @@ function syncUpdateControls(loadingLabel){
  }
 }
 function renderUpdates(data){
- const updates=data.updates;$('updates-panel').hidden=!updates;$('applications-unavailable').hidden=Boolean(updates);if(!updates)return;
+ const updates=data.updates;
+ $('updates-panel').hidden=false;$('applications-unavailable').hidden=true;
+ if(!updates){
+  $('updates-title').textContent='Local applications';$('updates-mode').textContent='Fusion inventory · guest-agent status';
+  $('updates-context').textContent='Applications selected from the local Fusion inventory. Source update and rollback are unavailable in desktop mode; status comes from the latest guest-agent scan.';
+  $('maintenance-history').hidden=true;$('update-message').textContent='';
+  const cards=$('update-cards');cards.replaceChildren();
+  const applications=['scenarioforge','participant'].map(role=>{
+   const observed=(data.vms||[]).find(vm=>vm.role===role);if(observed)return observed;
+   const vmid=data.roles?.[role],available=(data.available_vms||[]).find(vm=>vm.vmid===vmid);
+   return {role,vmid,name:available?.name,power:vmid?'checking':'not selected',guest_access:vmid?'Checking':'Not checked',application_present:null,processes:[],services:[]};
+  });
+  for(const vm of applications){
+   const card=el('article',null,'card update-card'),title=vm.role==='participant'?'Cyber-agent-flow':'ScenarioForge';
+   card.append(el('h3',title),el('p',vm.vmid?`VM ${vm.vmid}${vm.name?' · '+vm.name:''}`:'No VM selected','small'));
+   const power=vm.qmp_status==='paused'?'paused':vm.power;
+   card.append(badge(power,power==='running'?'good':power==='unknown'?'warn':''));
+   const details=el('dl');
+   detail(details,'Guest agent',vm.guest_access||'Not checked');
+   detail(details,'Application',vm.application_present==null?'Not checked':vm.application_present?'Present':'Not found');
+   detail(details,'Processes observed',vm.guest_access==='reachable'?String((vm.processes||[]).length):'Unknown');
+   card.append(details);
+   if(vm.root)card.append(el('p',`Configured path: ${vm.root}`,'small'));
+   for(const service of vm.services||[]){if(service.unit===vm.unit)card.append(el('p',`${service.unit} · ${service.error?'Check unavailable':service.LoadState==='not-found'?'not found':service.ActiveState+' / '+service.SubState}`,'small'));}
+   if(vm.error||vm.guest_error)card.append(el('div',vm.error||vm.guest_error,'error'));
+   cards.append(card);
+  }
+  return;
+ }
+ $('updates-title').textContent='Application versions';$('updates-mode').textContent='Host downloads · guest-agent transfer';$('maintenance-history').hidden=false;
  $('maintenance-count').textContent=`${updates.jobs?.length||0} recent jobs`;
  $('updates-context').textContent=updates.can_update?'Updates preserve local data and reuse installed dependencies. The application must be idle; its configured service is restarted when necessary.':`Check installed versions here. Updates and rollback require membership in the ${updates.group} PVE group.`;
  const cards=$('update-cards');

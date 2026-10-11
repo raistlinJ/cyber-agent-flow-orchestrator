@@ -36,9 +36,9 @@
 <div class="study-design-grid"><label>Study name<input id="study-name" maxlength="120" placeholder="Generated helpers on held-out scenarios"></label><label>Baseline condition ID<input id="study-baseline" value="baseline"></label></div>
 <h3>Experiment members</h3><div id="study-members"></div><h3>Optional successful reference runs</h3><div id="study-references"></div><label><input id="study-require-references" type="checkbox"> Require reference completion for every scenario definition</label><p class="small">References establish an automated successful execution of the saved scenario definition; they do not establish human-calibrated judge accuracy.</p><button id="create-study" type="button">Create study from selected experiments</button><p id="study-message" role="status"></p><div id="studies-list"></div></section></div>
 <div data-page="applications" hidden><p id="applications-unavailable" class="empty" hidden>Application maintenance is unavailable for this server configuration.</p><section id="updates-panel" aria-labelledby="updates-title" hidden>
-<div class="section-title"><h2 id="updates-title">Application versions</h2><span>Host downloads · guest-agent transfer</span></div>
+<div class="section-title"><h2 id="updates-title">Application versions</h2><span id="updates-mode">Host downloads · guest-agent transfer</span></div>
 <p id="updates-context" class="small"></p><div id="update-cards" class="sample-cards"></div>
-<p id="update-message" class="small" role="status" aria-live="polite"></p><details class="history-panel"><summary>Maintenance history <span id="maintenance-count" class="small"></span></summary><div id="update-jobs" class="panel"></div></details>
+<p id="update-message" class="small" role="status" aria-live="polite"></p><details id="maintenance-history" class="history-panel"><summary>Maintenance history <span id="maintenance-count" class="small"></span></summary><div id="update-jobs" class="panel"></div></details>
 </section>
 </div>
 <div data-page="setup" hidden><p id="roles-unavailable" class="empty" hidden>VM roles are managed by this server’s workflow configuration.</p><section id="role-panel" aria-labelledby="roles-title" hidden>
