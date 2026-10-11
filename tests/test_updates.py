@@ -178,18 +178,56 @@ def test_maintenance_group_and_vm_permission_rechecked(pve):
     with pytest.raises(AccessDenied): updates.require_maintenance(user, 'caf-maintainers')
 
 
-def test_fusion_maintenance_uses_session_and_inventory_access(tmp_path):
+def test_fusion_maintenance_uses_session_inventory_and_user_lock(tmp_path, monkeypatch):
     calls = []
+    vmx = tmp_path / 'participant.vmx'
+    vmx.write_text('config.version = "8"\n')
+    inventory = tmp_path / 'fusion.json'
+    inventory.write_text(json.dumps({'version': 1, 'vms': {'9403': {
+        'vmx': str(vmx), 'username': 'tester', 'password': 'secret',
+    }}}))
+    inventory.chmod(0o600)
+    backend = {'type': 'fusion', 'inventory_file': str(inventory)}
     class LocalAccess:
         def current(self):
             calls.append(('current', None))
         def require_vm(self, vmid):
             calls.append(('require_vm', vmid))
-    manager = updates.UpdateManager({}, {'backend': {'type': 'fusion'}}, tmp_path, {})
+    from contextlib import nullcontext
+    leases = []
+    def lease(path):
+        leases.append(Path(path))
+        return nullcontext()
+    class Agent:
+        def __init__(self, *args, **kwargs):
+            pass
+        def qm(self, *args, **kwargs):
+            pass
+        def put(self, *args, **kwargs):
+            pass
+        def call(self, vmid, op, **kwargs):
+            assert vmid == 9403
+            return {'revision': 'a' * 40, 'modified': False, 'processes': []}
+    monkeypatch.setattr(ev, 'GuestAgent', Agent)
+    monkeypatch.setattr(ev, 'lease', lease)
+    monkeypatch.setattr(ev, 'TargetReservation', lambda path: nullcontext())
+    runtime = {'backend': backend, 'execution': {'target_lock': str(tmp_path / 'target.lock')}}
+    manager = updates.UpdateManager({}, runtime, tmp_path, {})
     try:
         manager.require_update_access(LocalAccess(), 9403)
         assert calls == [('current', None), ('require_vm', 9403)]
         assert manager.desktop is True
+        lock = updates.vm_lock_path(backend, 9403)
+        assert lock.parent == Path.home() / '.cache/cyber-agent-flow/locks'
+        assert lock.name.startswith('fusion-')
+        assert lock.name.endswith('.lock')
+        directory = tmp_path / 'job'
+        directory.mkdir()
+        job = {'id': 'a' * 32, 'role': 'participant', 'action': 'rollback',
+               'root': '/opt/cyber-agent-flow', 'vmid': 9403}
+        manager._run(LocalAccess(), directory, job, '/usr/bin/python3', None)
+        assert job['status'] == 'completed'
+        assert leases == [directory / '.lock', lock]
     finally:
         manager.close()
 
@@ -390,6 +428,30 @@ def test_force_update_discards_confirmed_tracked_edits(installation, tmp_path):
     restored = guest.dispatch(dict(args, op='app_rollback', expected_revision=result['revision'], token='f' * 32))
     assert restored['revision'] == original
     assert 'local VM edit' not in tracked.read_text()
+
+
+@pytest.mark.parametrize('identical', [True, False])
+def test_update_preserves_untracked_hotfix_collisions(installation, tmp_path, identical):
+    role, source, root, original, _ = installation
+    relative = Path('hotfix.py')
+    (source / relative).write_text('VERSION = 3\n')
+    git(source, 'add', '.')
+    git(source, 'commit', '-m', 'Include hotfix')
+    local = 'VERSION = 3\n' if identical else 'LOCAL = True\n'
+    (root / relative).write_text(local)
+    args = stage(installation, tmp_path)
+    if identical:
+        result = guest.dispatch(dict(args, op='app_update'))
+        assert result['revision'] == args['revision']
+        assert result['update']['preserved_untracked_files'] == ['hotfix.py']
+        assert (Path(result['update']['untracked_backup']) / relative).read_text() == local
+        assert (root / relative).read_text() == local
+    else:
+        with pytest.raises(ValueError, match='Untracked file differs'):
+            guest.dispatch(dict(args, op='app_update', force=True))
+        assert git(root, 'rev-parse', 'HEAD') == original
+        assert (root / relative).read_text() == local
+    assert (root / 'config.local.yaml').read_text() == 'keep: my settings\n'
 
 
 def test_force_update_can_clean_the_current_revision(installation, tmp_path):

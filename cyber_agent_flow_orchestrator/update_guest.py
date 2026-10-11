@@ -128,6 +128,34 @@ def tracked_changes(root):
     return files, count
 
 
+def preserve_identical_untracked(root, target, backup, record_move):
+    """Preserve earlier hotfix copies only when identical to incoming Git blobs."""
+    incoming = {}
+    for entry in git(root, 'ls-tree', '-r', '-z', target).stdout.split(b'\0'):
+        if entry:
+            metadata, name = entry.split(b'\t', 1)
+            mode, kind, digest = metadata.split()
+            if kind == b'blob' and mode in (b'100644', b'100755'):
+                incoming[os.fsdecode(name)] = digest.decode()
+    for name in git(root, 'ls-files', '--others', '--exclude-standard', '-z').stdout.split(b'\0'):
+        if not name:
+            continue
+        relative = Path(os.fsdecode(name))
+        if str(relative) not in incoming:
+            continue
+        source = root / relative
+        if (relative.is_absolute() or '..' in relative.parts
+                or any(parent.is_symlink() for parent in [source, *source.parents] if parent != root)
+                or not source.is_file()):
+            raise ValueError('Untracked source collision needs manual review: ' + str(relative))
+        if value(root, 'hash-object', '--no-filters', '--', str(relative)) != incoming[str(relative)]:
+            raise ValueError('Untracked file differs from the incoming revision; preserve or move it before updating: ' + str(relative))
+        destination = backup / relative
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        record_move(str(relative))
+        source.rename(destination)
+
+
 def identity(root, role):
     head = value(root, 'rev-parse', 'HEAD')
     controls = None
@@ -370,7 +398,7 @@ def dispatch(data):
                 return dict(identity(root, role), root=str(root), update=previous)
             if not force:
                 raise ValueError('This revision is already installed')
-        # Local edits remain untouched. Git checkout also refuses untracked-file collisions.
+        # Validate the incoming checkout before changing the live application.
         staging = directory / ('stage-' + token)
         staging.mkdir(mode=0o700)
         os.chown(staging, root.stat().st_uid, root.stat().st_gid)
@@ -422,9 +450,15 @@ def dispatch(data):
                 save(journal, record)
                 save(PENDING, dict(record, root=str(root)))
                 git(root, 'restore', '--worktree', '--', 'kali_tools.json')
+            backup = directory / (token + '-untracked-backup')
+            def record_move(relative):
+                record['untracked_backup'] = str(backup)
+                record.setdefault('preserved_untracked_files', []).append(relative)
+                save(journal, record)
+                save(PENDING, dict(record, root=str(root)))
+            preserve_identical_untracked(root, target, backup, record_move)
             if force:
-                # The user explicitly confirmed this irreversible step. Keep
-                # untracked files; checkout still fails on collisions.
+                # The user explicitly confirmed this irreversible step.
                 git(root, 'reset', '--hard', 'HEAD')
             record['status'] = 'activating'
             save(journal, record)
@@ -443,6 +477,10 @@ def dispatch(data):
                 if record['service_was_active']:
                     run(['systemctl', 'stop', service], timeout=60)
                 git(root, 'checkout', '--detach', before)
+            for relative in record.get('preserved_untracked_files', []):
+                backup_file = Path(record['untracked_backup']) / relative
+                if backup_file.exists():
+                    backup_file.rename(root / relative)
             if record.get('tools_config_backup'):
                 (root / 'kali_tools.json').write_bytes(Path(record['tools_config_backup']).read_bytes())
             if record['service_was_active']:

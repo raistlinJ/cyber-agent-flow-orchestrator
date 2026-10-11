@@ -140,8 +140,9 @@ ScenarioForge and cyber-agent-flow checkouts through the Fusion guest agent.
 If a version check finds tracked local edits, **Force update** requires an
 explicit destructive confirmation and a fresh inspection before it resets those
 edits and activates the selected revision. Discarded edits are not included in
-the application rollback record; untracked files are retained and can still
-block activation if they collide with the target revision.
+the application rollback record. Untracked files that match an incoming source
+file exactly are moved to a persistent guest backup, recorded in maintenance
+details. Differing untracked files still block activation for manual review.
 Omit `--local` for Proxmox deployments.
 
 

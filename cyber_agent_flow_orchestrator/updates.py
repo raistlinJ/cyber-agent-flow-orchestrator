@@ -12,6 +12,7 @@ import time
 from urllib.parse import urlsplit
 
 from cyber_agent_flow_eval import integration as ev, reporting
+from cyber_agent_flow_eval.fusion import vm_lock_path
 from .access import AccessDenied
 from .monitor import definitions, now
 from .workspaces import Workspace, private_directory
@@ -279,7 +280,7 @@ class UpdateManager:
                     processes = '; '.join(f"PID {p['pid']} ({p['name']}: {p['reason']})" for p in installed['processes'])
                     raise UpdateError('Processes reference the application checkout: ' + processes +
                                       '. No managed service is configured. Stop the application/workers or move idle shells out of the checkout, then retry. No source bundle downloaded or transferred.')
-                with ev.TargetReservation(self.runtime['execution']['target_lock']), ev.lease(f'/var/lock/cyber-agent-flow-eval-vm-{vmid}.lock'):
+                with ev.TargetReservation(self.runtime['execution']['target_lock']), ev.lease(vm_lock_path(self.runtime['backend'], vmid)):
                     if self.closed:
                         raise UpdateError('Server stopped before maintenance began')
                     self.require_update_access(access, vmid)
