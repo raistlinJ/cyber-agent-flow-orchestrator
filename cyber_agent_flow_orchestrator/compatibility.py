@@ -19,6 +19,7 @@ def check_evaluator():
             'guest_agent': ('MAINTENANCE_LOCK', 'MAINTENANCE_PENDING', 'RPC_INPUT_LIMIT', 'SUPPORTED_OPERATIONS'),
             'fusion': ('vm_lock_path',),
             'rubric': ('validate_rubric', 'participant_scaffold', 'aggregate'),
+            'judge': ('resolve_judge', '_completion', '_json_action'),
             'studies': ('compare', 'summarize'),
             'usage': ('validate_pricing',),
         }

@@ -294,7 +294,12 @@ class SampleManager:
                     progress('Checking participant engine and guest access', 'checking')
                     backend, engine = journal['runtime']['backend'], journal['runtime']['engine']
                     vmid = backend['participant_vmid']
-                    ev.GuestAgent(backend).call(vmid, 'probe', engine=engine, user=backend['user'])
+                    from .workflow import Workflow
+                    from .workflow_progress import step
+                    from .input_preflight import run as check_inputs
+                    observer = Workflow(output, journal, progress=None)
+                    with step(observer, 'preflight'):
+                        check_inputs(observer)
                     progress('Acquiring exclusive access to the participant', 'reserving')
                     with ev.TargetReservation(journal['runtime']['execution']['target_lock']) as reservation:
                         try:

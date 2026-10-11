@@ -21,6 +21,8 @@ def main():
         install_transport(patch,agent,manifest)
         from cyber_agent_flow_eval import judge
         def completion(config,messages,timeout):
+            if messages[0]['content'].startswith('Synthetic preflight'):
+                return json.dumps({'action':'verdict','passed':False,'score':0,'reason':'Synthetic','evidence':[]}),{}
             if len(messages)==2:return json.dumps({'action':'read_evidence','file':'worker-result.json'}),{'prompt_tokens':10,'output_tokens':5}
             return json.dumps({'action':'verdict','passed':True,'score':1,'reason':'Reviewed the saved result.','evidence':['worker-result.json']}),{'prompt_tokens':10,'output_tokens':5}
         patch.setattr(judge,'_completion',completion)
@@ -191,6 +193,11 @@ def main():
                     expect(progress_page.locator('.workflow-step.completed')).to_have_count(10)
                     expect(progress_page.locator('.workflow-vms')).to_contain_text('VM 9404')
                     expect(progress_page.locator('.workflow-readiness')).to_contain_text('containers: pass')
+                    preflight=progress_page.locator('.workflow-step').first
+                    preflight.locator('summary').click()
+                    expect(preflight).to_contain_text('Judge endpoint and host credentials · pass')
+                    expect(preflight).to_contain_text('Participant model, guest credentials and connectivity · pass')
+                    expect(preflight).to_contain_text('CORE upload paths and HITL interface · pass')
                     progress_page.screenshot(path='/tmp/caf-detailed-progress.png',full_page=True)
                     progress_page.set_viewport_size({'width':390,'height':844})
                     assert progress_page.evaluate('document.documentElement.scrollWidth<=innerWidth')

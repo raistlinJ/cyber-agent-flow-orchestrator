@@ -96,6 +96,7 @@ function renderWorkflowProgress(run,target){
   output.addEventListener('scroll',()=>{stageDetailScroll.set(key,output.scrollTop);if(stageDetailScroll.size>200)stageDetailScroll.delete(stageDetailScroll.keys().next().value);});
   output.append(el('p',stage.operation|| (stage.status==='pending'?'Waiting for earlier stages.':'Detailed checkpoints were not recorded for this stage.'),'small'));
   if(stage.timeout_seconds!=null)output.append(el('p','Command limit: '+stage.timeout_seconds+'s'+(stage.exitcode!=null?' · Exit code: '+stage.exitcode:''),'small'));
+  for(const check of stage.input_checks||[])output.append(el('p',check.label+' · '+check.status+' · '+check.message+(check.seconds==null?'':' · '+duration(check.seconds)),check.status==='fail'?'error':check.status==='warning'?'notice':'small'));
   for(const check of stage.vm_checks||[])output.append(el('p','VM '+check.vmid+' · '+(check.ready?'Ready':'Not ready')+' · '+(check.stopped||[]).length+' recorded job(s) stopped','small'));
   const observation=stage.guest_observation;
   if(observation)output.append(el('p','Last guest response: '+new Date(observation.at).toLocaleTimeString()+' · '+observation.state+(observation.pid?' · PID '+observation.pid:''),'small'));

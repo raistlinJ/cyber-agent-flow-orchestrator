@@ -23,6 +23,8 @@ def install_backend(monkeypatch, root):
             calls.append((vmid, op, data))
             if op == 'probe':
                 return {'engine': '0' * 64, 'runtime': {'test': 'simulated guest'}}
+            if op == 'input_check':
+                return {'message':'Simulated guest input check','core':{'user':'corevm','repo':'/opt/scenarioforge-services','base':'/tmp/scenarioforge','interface':'ens19'}}
             if op == 'sample_start':
                 return {'url': 'http://127.0.0.1:18888/'}
             return {'stopped': True}

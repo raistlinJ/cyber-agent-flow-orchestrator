@@ -235,3 +235,32 @@ updating its code so the popup page and API routes are active.
 See [Rubric experiments and multi-scenario studies](rubric-experiments.md) for
 judge-only tasks without flags, structured criteria, evidence citations, per-trial
 lab resets, condition editing, study collections and publication exports.
+
+
+## Input preflight before deployment
+
+Every launch starts with **Check inputs, model access and VM readiness**. Its
+**Stage details and output** dropdown shows a checklist and time for each check:
+
+- Saved task/verification definitions, limits, target scope, local tool catalogs and guidance.
+- Judge host API-key variable and a small synthetic JSON-verdict request.
+- Participant CAF/Python compatibility and required dependencies.
+- Participant's actual guest credential environment and a small synthetic model request, including tool-schema support when tools are selected.
+- ScenarioForge checkout, executable Python, service account and configuration access.
+- ScenarioForge-to-CORE SSH authentication and gRPC port access using `.scenarioforge.env`.
+- CORE runtime/upload permissions and the configured HITL interface.
+- Existing VM readiness and cleanup of jobs owned by inactive runs.
+
+A failed required check stops the launch before scenario preparation, deployment
+or trial execution. Disabled judges are skipped; time-budget mismatches are
+shown as warnings. Model probes use only synthetic prompts, never scenario
+solutions or saved transcripts, and return no credential values. They can use a
+small number of model tokens. Generation probes have a 60-second ceiling (or
+the configured judge limit if shorter); a busy or slow model can block preflight.
+The full trial and judge-review budgets are unchanged. Results are saved in
+`input-preflight.json` and the workflow journal for review and export.
+
+Actual target services and challenge artifacts can be verified only after the
+scenario has been deployed. The existing readiness gate still checks them
+before trials. Passing preflight establishes configuration/access readiness;
+it does not guarantee a task will be solved or that the model stays available.

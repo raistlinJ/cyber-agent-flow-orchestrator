@@ -50,6 +50,8 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
             request['judge']={'enabled':True,'use_participant_model':True,'max_turns':3,'timeout_seconds':30,'max_tokens':1000}
             from cyber_agent_flow_eval import judge
             def completion(config,messages,timeout):
+                if messages[0]['content'].startswith('Synthetic preflight'):
+                    return json.dumps({'action':'verdict','passed':False,'score':0,'reason':'Synthetic','evidence':[]}),{}
                 if len(messages)==2:return json.dumps({'action':'read_evidence','file':'worker-result.json'}),{}
                 return json.dumps({'action':'verdict','passed':True,'score':1,'reason':'Reviewed the worker result.','evidence':['worker-result.json']}),{}
             monkeypatch.setattr(judge,'_completion',completion)

@@ -43,6 +43,8 @@ def run(workflow):
                 record = ev.read_json(reporting.within(folder, path))
                 if not record.get('stopped') and record.get('vmid') in eligible:
                     candidates.append((record, path))
+        from .input_preflight import run as check_inputs
+        check_inputs(workflow)
         report = []
         for vmid in vmids:
             jobs = [(record,path) for record,path in candidates if record['vmid']==vmid]
