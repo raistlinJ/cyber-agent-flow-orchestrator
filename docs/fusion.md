@@ -46,6 +46,6 @@ saved in the participant configuration, not the host inventory or runtime YAML.
 Transport and WebUI tests use simulated guest operations. A complete live three-VM experiment still needs verification after provisioning.
 Local startup and automatic dashboard access have been checked on the Mac.
 
-With `--local`, access uses your current OS account automatically, without a separate password or operator group. The server is restricted to localhost. Proxmox retains its login and `caf-orchestration` group requirement.
+With `--local`, access uses your current OS account automatically, without a separate password or operator group. The server is restricted to localhost. This option is accepted only for desktop-virtualization workflows. Proxmox rejects `--local` and retains its login and `caf-orchestration` group requirement.
 
 Without `--local`, startup requires authentication. The flag overrides the bind address and public URL to localhost for that invocation and does not rewrite saved settings.

@@ -55,7 +55,7 @@ def main(argv=None):
     web.add_argument('config', nargs='?', help='Workflow YAML (default: workflow.yaml; created on first launch)')
     web.add_argument('--runs-root', default='runs')
     web.add_argument('--web-config', help='Web settings (default: web.yaml; created on first launch)')
-    web.add_argument('--local', action='store_true', help='Open without login; bind only to localhost')
+    web.add_argument('--local', action='store_true', help='Open a desktop-virtualization workflow without login; bind only to localhost (not valid for Proxmox)')
     web.add_argument('--poll-seconds', type=int, default=10)
     web.add_argument('--provision-config', help='ScenarioForge Proxmox key=value config; import VM IDs and model into a separate profile')
     provision = commands.add_parser('import-provision', help='Create an editable workflow profile from a ScenarioForge Proxmox provision config')
@@ -91,14 +91,19 @@ def main(argv=None):
             from .bootstrap import prepare
             from .web import serve
             config, web_config = prepare(args.config, args.web_config)
-            if args.runs_root == 'runs' and not any(arg == '--runs-root' or arg.startswith('--runs-root=') for arg in argv):
-                from .config import load
-                _, runtime, _, _ = load(config)
-                if runtime['backend']['type'] == 'fusion':
-                    args.runs_root = str(Path(config).parent/'runs')
             if args.provision_config:
                 from .provision import import_profile
                 config = import_profile(args.provision_config, config)
+            from .config import load
+            _, runtime, _, _ = load(config)
+            if args.local and runtime['backend']['type'] != 'fusion':
+                raise ValueError(
+                    '--local requires a desktop virtualization workflow '
+                    '(VMware Fusion or Workstation); Proxmox requires authenticated access'
+                )
+            if args.runs_root == 'runs' and not any(arg == '--runs-root' or arg.startswith('--runs-root=') for arg in argv):
+                if runtime['backend']['type'] == 'fusion':
+                    args.runs_root = str(Path(config).parent/'runs')
             print(f'Workflow: {config}\nWeb settings: {web_config}\nRuns: {args.runs_root}', flush=True)
             return serve(config, args.runs_root, web_config=web_config, interval=args.poll_seconds, **({"local": True} if args.local else {}))
         if args.command in ('user-run', 'user-resume', 'user-recover'):

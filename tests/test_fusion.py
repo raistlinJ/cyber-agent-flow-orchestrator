@@ -94,7 +94,8 @@ def test_fusion_runs_full_workflow_with_guest_transport(lab, tmp_path):
     assert any(op=='preflight' for vmid,op,data in agent.calls)
 
 
-def test_default_launcher_uses_imported_fusion_profile(fusion_lab, tmp_path, monkeypatch):
+@pytest.mark.parametrize('argv, local', [([], False), (['--local'], True)])
+def test_default_launcher_uses_imported_fusion_profile(fusion_lab, tmp_path, monkeypatch, argv, local):
     from cyber_agent_flow_orchestrator.__main__ import main
     from cyber_agent_flow_orchestrator import web
     Path(fusion_lab['workflow']).parent.rename(tmp_path/'fusion-local')
@@ -103,11 +104,12 @@ def test_default_launcher_uses_imported_fusion_profile(fusion_lab, tmp_path, mon
     monkeypatch.chdir(tmp_path)
     calls=[]
     monkeypatch.setattr(web,'serve',lambda *args,**kwargs:calls.append((args,kwargs)) or 0)
-    assert main([])==0
+    assert main(argv)==0
     args,kwargs=calls[-1]
     assert args[0]==str(tmp_path/'fusion-local/workflow.yaml')
     assert args[1]==str(tmp_path/'fusion-local/runs')
     assert kwargs['web_config']==str(tmp_path/'fusion-local/web.yaml')
+    assert kwargs.get('local', False) is local
     assert not (tmp_path/'web.yaml').exists()
 
 

@@ -107,6 +107,14 @@ CLIENT = web.AppKey('client', ClientSession)
 
 
 def run_https(config_path, runs_root, web_config, interval=10, local=False):
+    if local:
+        from .config import load
+        _, runtime, _, _ = load(config_path)
+        if runtime['backend']['type'] != 'fusion':
+            raise ValueError(
+                '--local requires a desktop virtualization workflow '
+                '(VMware Fusion or Workstation); Proxmox requires authenticated access'
+            )
     config = settings(web_config, local=local)
     ensure_certificate(config)
     ssl_context = context(config)

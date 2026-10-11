@@ -150,12 +150,13 @@ def test_non_proxmox_default_requires_authentication(tmp_path, monkeypatch):
     assert "users_file" not in settings(path)
 
 
-def test_local_flag_forwarded_to_server(tmp_path, monkeypatch):
+def test_local_flag_rejects_proxmox_backend(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     calls=[]
     monkeypatch.setattr(web, 'serve', lambda *a, **kw: calls.append(kw) or 0)
-    assert main(['--local']) == 0
-    assert calls[-1]['local'] is True
+    assert main(['--local']) == 2
+    assert not calls
+    assert 'Proxmox requires authenticated access' in capsys.readouterr().err
     assert settings('web.yaml')['auth']['provider'] == 'pve'
     config=settings('web.yaml',local=True)
     assert config['listen']=='127.0.0.1'

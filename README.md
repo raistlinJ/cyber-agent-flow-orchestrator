@@ -108,9 +108,11 @@ After syncing, start the WebUI with:
 ```bash
 uv run cyber-agent-flow-orchestrator
 ```
-Authentication is required by default. For single-user access without login, run
-`uv run cyber-agent-flow-orchestrator --local`. This forces localhost-only access
-for the current launch and leaves saved web settings unchanged.
+Authentication is required by default. For a VMware Fusion or Workstation profile,
+single-user access without login is available with `--local`. This forces
+localhost-only access for the current launch and leaves saved web settings
+unchanged. Proxmox workflows reject `--local` and always require authenticated
+access.
 
 
 No subcommand means `serve`. First launch creates editable `workflow.yaml`,
