@@ -113,6 +113,19 @@ class UpdateManager:
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='application-update')
         self.lock, self.jobs, self.closed = threading.Lock(), {}, False
 
+    @property
+    def desktop(self):
+        return self.runtime['backend']['type'] == 'fusion'
+
+    def require_update_access(self, access, vmid=None):
+        """Authorize maintenance for PVE groups or the owned desktop inventory."""
+        if self.desktop:
+            access.current()
+            if vmid is not None:
+                access.require_vm(vmid)
+            return
+        require_maintenance(access, self.config['group'])
+
     def close(self):
         with self.lock:
             self.closed = True
@@ -123,7 +136,7 @@ class UpdateManager:
         if self.config is None:
             return None
         try:
-            require_maintenance(access, self.config['group'])
+            self.require_update_access(access)
             permitted = True
         except AccessDenied:
             permitted = False
@@ -143,7 +156,7 @@ class UpdateManager:
                     except (OSError, ValueError):
                         pass  # A damaged optional trace must not hide the job result.
                 rows.append(row)
-        return dict(can_update=permitted, group=self.config['group'], jobs=rows,
+        return dict(can_update=permitted, group=self.config['group'], desktop=self.desktop, jobs=rows,
                     applications=[dict(role=role, vmid=roles.get(role), **self.config[role]) for role in ('participant', 'scenarioforge')])
 
     def submit(self, access, role, action, ref, request_id, process_confirmation=None):
@@ -152,13 +165,13 @@ class UpdateManager:
         ref_name(ref)
         if not isinstance(request_id, str) or not re.fullmatch('[0-9a-f]{32}', request_id):
             raise UpdateError('Invalid maintenance request ID')
-        if action != 'inspect':
-            require_maintenance(access, self.config['group'])
         workspace = Workspace(self.root, access.username)
         vmid = workspace.roles()[role]
         if vmid is None:
             raise UpdateError('Save a VM selection for this application first')
         access.require_vm(vmid)
+        if action != 'inspect':
+            self.require_update_access(access, vmid)
         definition = next(item for item in definitions(self.cfg, self.runtime) if item['role'] == role)
         root = definition['root']
         approved = None
@@ -207,13 +220,14 @@ class UpdateManager:
             trace.emit('status', message, force=True)
         def authorize(args):
             start = time.monotonic()
-            trace.emit('authorization', 'Checking current PVE group and VM permissions', force=True)
+            label = 'desktop inventory authorization' if self.desktop else 'PVE authorization'
+            trace.emit('authorization', f'Checking current {label}', force=True)
             try:
-                access.qm(args, required_group=self.config['group'] if job['action'] != 'inspect' else None)
+                access.qm(args, required_group=(self.config['group'] if job['action'] != 'inspect' and not self.desktop else None))
             except Exception:
-                trace.emit('error', f'PVE authorization failed after {time.monotonic()-start:.2f}s', force=True)
+                trace.emit('error', f'{label.capitalize()} failed after {time.monotonic()-start:.2f}s', force=True)
                 raise
-            trace.emit('authorization', f'PVE authorization passed in {time.monotonic()-start:.2f}s')
+            trace.emit('authorization', f'{label.capitalize()} passed in {time.monotonic()-start:.2f}s')
         agent = trace.instrument(ev.GuestAgent(self.runtime['backend'], authorize=authorize))
         agent.script = Path(__file__).with_name('update_guest.py').read_text()
         vmid = job['vmid']
@@ -243,7 +257,7 @@ class UpdateManager:
                 with ev.TargetReservation(self.runtime['execution']['target_lock']), ev.lease(f'/var/lock/cyber-agent-flow-eval-vm-{vmid}.lock'):
                     if self.closed:
                         raise UpdateError('Server stopped before maintenance began')
-                    require_maintenance(access, self.config['group'])
+                    self.require_update_access(access, vmid)
                     update = dict(args, token=job['id'], expected_revision=installed['revision'], python=python, service=service)
                     if approved:
                         update['stop_processes'] = approved

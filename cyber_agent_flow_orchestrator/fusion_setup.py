@@ -52,7 +52,7 @@ def prepare(state_dir, output):
     web=dict(version=1,listen='127.0.0.1',port=8443,public_url='https://localhost:8443',
              certificate=str(output.parent/'certs/cert.pem'),private_key=str(output.parent/'certs/key.pem'),
              users_file=str(output/'users.json'),auth=dict(provider='fusion',inventory_file=str(inventory_file)),
-             samples=['smoke','tools-vs-helper'],updates=False)
+             samples=['smoke','tools-vs-helper'],updates={})
     for name,data in [('runtime.yaml',runtime),('workflow.yaml',workflow),('web.yaml',web)]:
         private_file(output/name,yaml.safe_dump(data,sort_keys=False).encode())
     private_file(output/'catalogs/baseline.json',templates.joinpath('catalogs/baseline.json').read_bytes())

@@ -51,7 +51,6 @@ def settings(path, *, local=False):
         data.pop('users_file', None)
         data['listen'] = '127.0.0.1'
         data['public_url'] = f"https://localhost:{data['port']}"
-        data['updates'] = None
     elif (data.get('auth') or {}).get('provider') == 'desktop':
         # Older imported profiles opted into desktop access in YAML. Require
         # the explicit launch flag now; preserve their files on disk.
@@ -85,14 +84,11 @@ def settings(path, *, local=False):
             raise ValueError('Desktop mode uses the OS account; remove users_file')
         if 'inventory_file' in auth:
             auth['inventory_file'] = str((path.parent / auth['inventory_file']).resolve())
-        data['updates'] = None
     elif auth.get('provider') == 'fusion':
         ev.fields(auth, ['provider', 'inventory_file'], ['provider', 'inventory_file'], 'Fusion auth')
         if 'users_file' not in data:
             raise ValueError('Fusion authentication requires users_file')
         auth['inventory_file'] = str((path.parent / auth['inventory_file']).resolve())
-        if data['updates'] is not None:
-            raise ValueError('Application maintenance is not enabled for Fusion')
     elif auth.get('provider') == 'pve':
         ev.fields(auth, ['provider', 'url', 'ca_file', 'required_group', 'realms'],
                   ['provider', 'url', 'required_group'], 'PVE auth')

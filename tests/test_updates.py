@@ -178,6 +178,46 @@ def test_maintenance_group_and_vm_permission_rechecked(pve):
     with pytest.raises(AccessDenied): updates.require_maintenance(user, 'caf-maintainers')
 
 
+def test_fusion_maintenance_uses_session_and_inventory_access(tmp_path):
+    calls = []
+    class LocalAccess:
+        def current(self):
+            calls.append(('current', None))
+        def require_vm(self, vmid):
+            calls.append(('require_vm', vmid))
+    manager = updates.UpdateManager({}, {'backend': {'type': 'fusion'}}, tmp_path, {})
+    try:
+        manager.require_update_access(LocalAccess(), 9403)
+        assert calls == [('current', None), ('require_vm', 9403)]
+        assert manager.desktop is True
+    finally:
+        manager.close()
+
+
+def test_root_owned_git_metadata_is_reassigned_to_checkout_owner(tmp_path, monkeypatch):
+    root = tmp_path / 'application'
+    metadata = root / '.git'
+    metadata.mkdir(parents=True)
+    index = metadata / 'index'
+    index.write_bytes(b'index')
+    owner = root.stat()
+    real_stat = Path.stat
+    real_lstat = Path.lstat
+    changed = []
+
+    class MetadataStat:
+        st_uid = 0
+        st_gid = 0
+        st_mode = 0o100600
+
+    monkeypatch.setattr(guest.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(Path, 'lstat', lambda path: MetadataStat() if path in (metadata, index) else real_lstat(path))
+    monkeypatch.setattr(guest.os, 'chown', lambda path, uid, gid, **kwargs: changed.append((Path(path), uid, gid, kwargs)))
+    guest.normalize_repository_metadata(root)
+    assert {row[0] for row in changed} == {metadata, index}
+    assert all(row[1:3] == (owner.st_uid, owner.st_gid) for row in changed)
+
+
 def test_https_maintenance_whitelist_csrf_group_and_scoped_inspection(pve, lab, tmp_path, monkeypatch):
     pve[0]['resources']['operator@pve'] = [vm(9403)]
     calls, agent, _ = install_backend(monkeypatch, tmp_path)

@@ -135,7 +135,9 @@ uv run -m cyber_agent_flow_orchestrator --local
 The shorthand automatically selects the imported Fusion profile and its
 `fusion-local/runs` directory. `--local` uses the current desktop account, does
 not request an application login or operator-group membership, and listens only
-on localhost. Omit `--local` for Proxmox deployments.
+on localhost. The **Applications** page can check, update, and roll back the
+ScenarioForge and cyber-agent-flow checkouts through the Fusion guest agent.
+Omit `--local` for Proxmox deployments.
 
 
 No subcommand means `serve`. First launch creates editable `workflow.yaml`,

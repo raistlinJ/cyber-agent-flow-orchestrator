@@ -39,6 +39,8 @@ def test_fusion_import_loads_configs_and_preserves_provider(fusion_lab):
     assert runtime['model']['provider']=='openai'
     assert runtime['model']['name']=='configured-model'
     assert web['auth']['provider']=='fusion'
+    assert web['updates']['participant']['ref']=='main'
+    assert web['updates']['scenarioforge']['ref']=='main'
     assert web['certificate']==str(Path(fusion_lab['workflow']).parent.parent/'certs/cert.pem')
     assert web['auth']['inventory_file']==runtime['backend']['inventory_file']
     assert runtime['execution']['target_lock'].startswith(str(Path.home()))
@@ -142,6 +144,7 @@ def test_local_overrides_remote_listen(fusion_lab):
     config=settings(path,local=True)
     assert config['listen']=='127.0.0.1'
     assert config['auth']['provider']=='desktop'
+    assert config['updates']['participant']['url'].endswith('/cyber-agent-flow.git')
 
 
 def test_legacy_desktop_profile_requires_local_flag(fusion_lab):

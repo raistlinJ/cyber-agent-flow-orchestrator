@@ -9,6 +9,7 @@ from pathlib import Path
 import pwd
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -30,11 +31,41 @@ def run(argv, *, cwd=None, user=None, check=True, timeout=60, input=None):
 
 def git(root, *args, **kwargs):
     user = pwd.getpwuid(root.stat().st_uid).pw_name
-    return run(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-C', str(root), *args], user=user, **kwargs)
+    # Inspection must not refresh/write an index left by provisioning or a
+    # service account. Required locks for fetch/reset remain enforced by Git.
+    return run(['git', '--no-optional-locks', '-c', 'core.hooksPath=/dev/null',
+                '-c', 'core.fsmonitor=false', '-C', str(root), *args], user=user, **kwargs)
 
 
 def value(root, *args):
     return git(root, *args).stdout.decode().strip()
+
+
+def normalize_repository_metadata(root):
+    """Repair root-owned Git metadata left by privileged provisioning.
+
+    The application checkout itself defines the intended owner. Only root-owned
+    entries are reassigned; metadata owned by any third account fails closed.
+    Symlinks are never followed.
+    """
+    owner = root.stat()
+    metadata = root / '.git'
+    if os.geteuid() != 0 or owner.st_uid == 0 or not metadata.exists():
+        return
+    if metadata.is_symlink():
+        raise ValueError('Git metadata cannot be a symlink')
+    paths = [metadata]
+    if metadata.is_dir():
+        for directory, names, files in os.walk(metadata, followlinks=False):
+            paths.extend(Path(directory) / name for name in [*names, *files])
+    for path in paths:
+        current = path.lstat()
+        if stat.S_ISLNK(current.st_mode):
+            continue
+        if current.st_uid not in (0, owner.st_uid):
+            raise ValueError('Git metadata is owned by an unexpected account')
+        if current.st_uid == 0:
+            os.chown(path, owner.st_uid, owner.st_gid, follow_symlinks=False)
 
 
 def state_dir(root):
@@ -261,6 +292,7 @@ def dispatch(data):
     if not raw.is_absolute() or raw.is_symlink() or '..' in raw.parts or not raw.is_dir():
         raise ValueError('Application root must be an existing non-symlink absolute checkout')
     root = raw.resolve()
+    normalize_repository_metadata(root)
     if value(root, 'rev-parse', '--show-toplevel') != str(root):
         raise ValueError('Application path must be a Git checkout root')
     directory = state_dir(root)

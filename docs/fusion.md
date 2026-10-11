@@ -39,8 +39,10 @@ published atomically. Polling never resends an acknowledged guest command.
 Host VM locks are keyed to the VMX path under your Mac user's cache directory;
 preflight does not treat an old Proxmox run or a different Fusion lab with the
 same local IDs as owning these guest services. Keep a separate imported profile
-and run directory for each lab. Application source-update actions remain disabled
-for Fusion; local operator model configuration is supported. API keys should be
+and run directory for each lab. Application source checks, updates and rollback
+use the same bounded guest-agent transport and are authorized by the local desktop
+session and imported VM inventory. Local operator model configuration is also
+supported. API keys should be
 saved in the participant configuration, not the host inventory or runtime YAML.
 
 Transport and WebUI tests use simulated guest operations. A complete live three-VM experiment still needs verification after provisioning.

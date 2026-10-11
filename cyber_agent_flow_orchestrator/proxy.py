@@ -107,15 +107,21 @@ CLIENT = web.AppKey('client', ClientSession)
 
 
 def run_https(config_path, runs_root, web_config, interval=10, local=False):
+    from .config import load
+    _, runtime, _, _ = load(config_path)
     if local:
-        from .config import load
-        _, runtime, _, _ = load(config_path)
         if runtime['backend']['type'] != 'fusion':
             raise ValueError(
                 '--local requires a desktop virtualization workflow '
                 '(VMware Fusion or Workstation); Proxmox requires authenticated access'
             )
     config = settings(web_config, local=local)
+    # Imported profiles created before desktop maintenance support used
+    # ``updates: false``. A localhost-only Fusion launch is owned by the current
+    # OS user, so migrate that old setting in memory without rewriting it.
+    if local and runtime['backend']['type'] == 'fusion' and config['updates'] is None:
+        from .updates import settings as update_settings
+        config['updates'] = update_settings(None)
     ensure_certificate(config)
     ssl_context = context(config)
     provider = None
@@ -124,15 +130,11 @@ def run_https(config_path, runs_root, web_config, interval=10, local=False):
         provider = PVEProvider(config['auth'])
     if config['auth']['provider'] == 'fusion':
         from .auth import FusionProvider
-        from .config import load
-        _, runtime, _, _ = load(config_path)
         if runtime['backend']['type'] != 'fusion' or runtime['backend']['inventory_file'] != config['auth']['inventory_file']:
             raise ValueError('Fusion auth and workflow must use the same inventory')
         provider = FusionProvider(config['users_file'], config['auth']['inventory_file'])
     if config['auth']['provider'] == 'desktop':
         from .auth import DesktopProvider
-        from .config import load
-        _, runtime, _, _ = load(config_path)
         configured = config['auth'].get('inventory_file')
         if runtime['backend']['type'] == 'fusion' and configured != runtime['backend']['inventory_file']:
             raise ValueError('Desktop auth and workflow must use the same Fusion inventory')

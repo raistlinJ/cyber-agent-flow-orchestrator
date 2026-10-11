@@ -671,9 +671,9 @@ function renderUpdates(data){
   }
   return;
  }
- $('updates-title').textContent='Application versions';$('updates-mode').textContent='Host downloads · guest-agent transfer';$('maintenance-history').hidden=false;
+ $('updates-title').textContent='Application versions';$('updates-mode').textContent=updates.desktop?'Desktop downloads · Fusion guest-agent transfer':'Host downloads · guest-agent transfer';$('maintenance-history').hidden=false;
  $('maintenance-count').textContent=`${updates.jobs?.length||0} recent jobs`;
- $('updates-context').textContent=updates.can_update?'Updates preserve local data and reuse installed dependencies. The application must be idle; its configured service is restarted when necessary.':`Check installed versions here. Updates and rollback require membership in the ${updates.group} PVE group.`;
+ $('updates-context').textContent=updates.can_update?(updates.desktop?'Check or update the applications installed in the selected local VMs. Updates preserve local data and reuse installed dependencies; managed services restart when necessary.':'Updates preserve local data and reuse installed dependencies. The application must be idle; its configured service is restarted when necessary.'):`Check installed versions here. Updates and rollback require membership in the ${updates.group} PVE group.`;
  const cards=$('update-cards');
  // Preserve input focus while the dashboard polls.
  if(!document.activeElement?.matches('#update-cards input[data-update-ref]')){
