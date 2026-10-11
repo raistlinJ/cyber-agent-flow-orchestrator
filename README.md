@@ -114,6 +114,29 @@ localhost-only access for the current launch and leaves saved web settings
 unchanged. Proxmox workflows reject `--local` and always require authenticated
 access.
 
+For a provisioned local VMware lab, start all three VMs (CORE, ScenarioForge APP,
+and participant), then launch the imported desktop profile from the orchestrator
+checkout:
+
+```bash
+uv run -m cyber_agent_flow_orchestrator serve \
+  fusion-local/workflow.yaml \
+  --web-config fusion-local/web.yaml \
+  --local
+```
+
+Open **https://localhost:8443**. When `fusion-local/workflow.yaml` and
+`fusion-local/web.yaml` exist, the equivalent shorthand is:
+
+```bash
+uv run -m cyber_agent_flow_orchestrator --local
+```
+
+The shorthand automatically selects the imported Fusion profile and its
+`fusion-local/runs` directory. `--local` uses the current desktop account, does
+not request an application login or operator-group membership, and listens only
+on localhost. Omit `--local` for Proxmox deployments.
+
 
 No subcommand means `serve`. First launch creates editable `workflow.yaml`,
 `runtime.yaml`, `catalogs/baseline.json`, and `web.yaml` in the current directory
