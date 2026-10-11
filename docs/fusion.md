@@ -59,3 +59,28 @@ Local startup and automatic dashboard access have been checked on the Mac.
 With `--local`, access uses your current OS account automatically, without a separate password or operator group. The server is restricted to localhost. This option is accepted only for desktop-virtualization workflows. Proxmox rejects `--local` and retains its login and `caf-orchestration` group requirement.
 
 Without `--local`, startup requires authentication. The flag overrides the bind address and public URL to localhost for that invocation and does not rewrite saved settings.
+
+
+### Judge credentials on the Mac host
+
+The judge and intermediate progress reviewer run on the orchestrator host.
+A key saved in the CAF participant VM is available only to the participant;
+using the same model URL does not transfer that key to the host. If the saved
+judge model names `CAF_JUDGE_API_KEY`, provide that variable before starting the
+orchestrator. A private `fusion-local/host-secrets.env` can contain:
+
+```dotenv
+CAF_JUDGE_API_KEY="your-judge-api-key"
+```
+
+Keep it owner-only (`chmod 600 fusion-local/host-secrets.env`) and start with:
+
+```bash
+uv run --env-file fusion-local/host-secrets.env -m cyber_agent_flow_orchestrator serve fusion-local/workflow.yaml --web-config fusion-local/web.yaml --local
+```
+
+The imported `fusion-local` directory is excluded from Git. The key is not
+written into experiment settings or results. Restart the host after changing
+its environment; then rerun the experiment to create a fresh recorded attempt.
+An authenticated model server returning HTTP 401 is reachable but rejected the
+judge credential; it is distinct from a participant wall-clock timeout.
