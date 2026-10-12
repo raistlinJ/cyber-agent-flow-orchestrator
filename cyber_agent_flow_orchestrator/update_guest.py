@@ -74,6 +74,11 @@ def state_dir(root):
     directory.mkdir(mode=0o711, exist_ok=True)
     if STATE_ROOT.is_symlink() or directory.is_symlink():
         raise ValueError('Update state directory cannot be a symlink')
+    # mkdir's requested mode is filtered by the guest's umask (often 0077).
+    # Git runs as the checkout owner and must be able to traverse both root-owned
+    # directories to read the owner-only bundle prepared below.
+    STATE_ROOT.chmod(0o711)
+    directory.chmod(0o711)
     return directory
 
 

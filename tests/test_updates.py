@@ -105,6 +105,19 @@ def test_root_uploaded_bundle_is_reassigned_to_checkout_owner(tmp_path, monkeypa
     assert bundle.stat().st_mode & 0o777 == 0o600
 
 
+def test_update_state_directories_remain_traversable_under_private_umask(tmp_path, monkeypatch):
+    monkeypatch.setattr(guest, 'STATE_ROOT', tmp_path / 'state')
+    root = tmp_path / 'checkout'
+    root.mkdir()
+    previous = os.umask(0o077)
+    try:
+        directory = guest.state_dir(root)
+    finally:
+        os.umask(previous)
+    assert guest.STATE_ROOT.stat().st_mode & 0o777 == 0o711
+    assert directory.stat().st_mode & 0o777 == 0o711
+
+
 def test_real_git_package_offline_update_and_rollback_preserve_data(installation, tmp_path):
     role, _, root, original, calls = installation
     args = stage(installation, tmp_path)
