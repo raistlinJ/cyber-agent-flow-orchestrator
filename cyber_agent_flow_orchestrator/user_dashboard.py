@@ -25,6 +25,7 @@ class UserDashboard:
         self.creation_records = {}
         self.start_records = {}
         self.analysis_records = {}
+        self.scenario_task_records = {}
         self.slots = threading.BoundedSemaphore(4)
         self.entries = {}
         from .samples import SampleManager
@@ -277,6 +278,48 @@ class UserDashboard:
         with self.lock:
             return deepcopy(self.analysis_records.get((access.username, request_id),
                 dict(step=0, total=10, state='pending', message='Waiting for post-execution analysis to start')))
+
+    def scenario_task_status(self, access, request_id):
+        import re
+        if not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise ValueError('Invalid scenario task request ID')
+        access.current()
+        with self.lock:
+            return deepcopy(self.scenario_task_records.get((access.username, request_id),
+                dict(step=0, total=5, percent=0, state='pending',
+                     message='Waiting for the task-draft request to start')))
+
+    def load_scenario_tasks(self, access, selection_id, request_id):
+        import re
+        from datetime import datetime, timezone
+        from .samples import SampleRequestError
+        if not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise SampleRequestError('Supply a valid task-draft request ID')
+        key = (access.username, request_id)
+        def progress(step, message, state='running', **extra):
+            with self.lock:
+                self.scenario_task_records[key] = dict(
+                    step=step, total=5, message=message, state=state,
+                    updated_at=datetime.now(timezone.utc).isoformat(), **extra)
+                while len(self.scenario_task_records) > 256:
+                    self.scenario_task_records.pop(next(iter(self.scenario_task_records)))
+        progress(1, 'Checking the selected scenario and VM access', percent=2)
+        try:
+            result = self.scenarios.tasks(access, selection_id, progress=progress)
+            with self.lock:
+                current = self.scenario_task_records.get(key, {})
+            progress(5, 'Task draft loaded and ready to review', 'completed', percent=100,
+                     **{name: current[name] for name in ('received_bytes', 'total_bytes',
+                         'source_bytes', 'checksum_verified', 'task_count') if name in current})
+            return result
+        except Exception as exc:
+            with self.lock:
+                current = self.scenario_task_records.get(key, {})
+            progress(current.get('step', 1), current.get('message', 'Loading task draft'),
+                     'failed', percent=current.get('percent', 0), error=str(exc),
+                     **{name: current[name] for name in ('received_bytes', 'total_bytes',
+                         'source_bytes', 'checksum_verified') if name in current})
+            raise
 
     def analyze_and_rerun(self, access, run_id, request_id, launch_request_id):
         import re

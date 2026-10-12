@@ -158,9 +158,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     return
                 if path == '/api/session':
                     self.respond(200, session)
-                elif path in ('/api/experiments/creation-status', '/api/experiments/start-status', '/api/experiments/analysis-status') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
+                elif path in ('/api/experiments/creation-status', '/api/experiments/start-status', '/api/experiments/analysis-status', '/api/scenarios/tasks-status') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     request_id = parse_qs(urlsplit(self.path).query).get('request_id', [''])[0]
-                    if path.endswith('/analysis-status'):
+                    if path.endswith('/tasks-status'):
+                        self.respond(200, dashboard.scenario_task_status(auth.access(token, revalidate=False), request_id))
+                    elif path.endswith('/analysis-status'):
                         self.respond(200, dashboard.analysis_status(auth.access(token, revalidate=False), request_id))
                     else:
                         self.respond(200, dashboard.creation_status(auth.access(token, revalidate=False), request_id, starting=path.endswith('/start-status')))
@@ -359,9 +361,10 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         raise SampleRequestError('Supply a scenario selection ID and reference kind only')
                     self.respond(200, dashboard.scenarios.references(auth.access(token, revalidate=False), data['selection_id'], data['kind']))
                 elif path == '/api/scenarios/tasks' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
-                    if set(data) != {'selection_id'}:
-                        raise SampleRequestError('Supply a scenario selection ID only')
-                    self.respond(200, dashboard.scenarios.tasks(auth.access(token, revalidate=False), data['selection_id']))
+                    if set(data) != {'selection_id', 'request_id'}:
+                        raise SampleRequestError('Supply a scenario selection ID and request ID only')
+                    self.respond(200, dashboard.load_scenario_tasks(
+                        auth.access(token, revalidate=False), data['selection_id'], data['request_id']))
                 elif path.startswith('/api/studies/') and getattr(dashboard, 'scoped', False):
                     access=auth.access(token,revalidate=False)
                     action=path.rsplit('/',1)[1]

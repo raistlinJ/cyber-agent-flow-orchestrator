@@ -172,6 +172,34 @@ function taskScenarioChanged(){
  $('task-source-note').textContent='Load a task draft from the selected scenario. Custom task edits, if any, remain selected for this experiment.';
  if($('task-source').value==='scenario')renderTaskEditor();
 }
+function taskProgressBytes(value){return Number.isFinite(value)?Number(value).toLocaleString()+' bytes':'size pending';}
+async function loadScenarioTaskRequest(selection){
+ const requestId=crypto.randomUUID().replaceAll('-','');
+ let finished=false,timer=null,last={step:0,total:5,percent:0,message:'Submitting task-draft request…'};
+ const started=Date.now();
+ const render=status=>{
+  if(status)last=status;
+  const parts=[`Loading task draft · Step ${last.step||0}/${last.total||5}`,last.message||'Working'];
+  if(Number.isFinite(last.source_bytes))parts.push(`Scenario XML: ${taskProgressBytes(last.source_bytes)}`);
+  if(Number.isFinite(last.received_bytes))parts.push(`${taskProgressBytes(last.received_bytes)} / ${Number.isFinite(last.total_bytes)?taskProgressBytes(last.total_bytes):'total pending'}`);
+  if(Number.isFinite(last.percent))parts.push(Math.round(last.percent)+'%');
+  parts.push(Math.floor((Date.now()-started)/1000)+'s elapsed');
+  const label=parts.join(' · ');
+  operation=label;syncBusy();loadingModal.set('scenario-tasks',true,label,Number.isFinite(last.percent)?last.percent:null);
+ };
+ const poll=async()=>{
+  const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),10000);
+  try{
+   const response=await apiFetch('/api/scenarios/tasks-status?request_id='+encodeURIComponent(requestId),{cache:'no-store',signal:controller.signal});
+   if(response.ok&&!finished)render(await dashboardJSON(response));
+  }catch(error){if(!finished)render({...last,message:(last.message||'Loading task draft')+` · progress update unavailable (${error.name==='AbortError'?'timed out':error.message}); retrying`});}
+  finally{clearTimeout(deadline);}
+  if(!finished)timer=setTimeout(poll,1000);
+ };
+ render();const heartbeat=setInterval(()=>render(),1000);timer=setTimeout(poll,200);
+ try{return await apiFetch('/api/scenarios/tasks',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({selection_id:selection,request_id:requestId})});}
+ finally{finished=true;clearTimeout(timer);clearInterval(heartbeat);loadingModal.set('scenario-tasks',false);}
+}
 function initTaskEditor(){
  $('task-editor').addEventListener('input',()=>{if($('task-source').value==='custom'){customTaskRows=readTaskRows();$('task-editor-error').textContent=taskValidationMessage();syncCreateExperiment();}});
  $('task-source').addEventListener('change',()=>{if($('task-source').value==='custom'&&!customTaskRows.length)customTaskRows=(scenarioTaskDefinitions||[{id:'task-1',family:'custom',verification_mode:'judge',rubric:defaultRubric('')}]).map(taskRow);renderTaskEditor();syncCreateExperiment();});
@@ -190,7 +218,7 @@ function initTaskEditor(){
   if(!selection||scenarioChoiceVM!==snapshot?.roles?.scenarioforge){$('task-editor-error').textContent='Choose a saved scenario on the ScenarioForge tab first.';return;}
   operation='Loading tasks from ScenarioForge…';syncBusy();
   try{
-   const response=await apiFetch('/api/scenarios/tasks',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({selection_id:selection})});
+   const response=await loadScenarioTaskRequest(selection);
    const result=await dashboardJSON(response);if(!response.ok)throw Error(result.error||'Unable to load scenario tasks');
    if(result.tasks!==null&&!Array.isArray(result.tasks))throw Error('Scenario task definitions must be a JSON array.');
    if(!Array.isArray(result.suggested_tasks||[]))throw Error('Scenario task draft must be a JSON array.');

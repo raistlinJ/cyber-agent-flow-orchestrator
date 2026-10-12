@@ -104,7 +104,7 @@ class ScenarioExperiments:
         return dict(result, vmid=vmid)
 
 
-    def tasks(self, access, selection_id):
+    def tasks(self, access, selection_id, progress=lambda step, message, **details: None):
         import hashlib
         if not isinstance(selection_id, str) or not re.fullmatch('[0-9a-f]{64}', selection_id):
             raise SampleRequestError('Choose a listed scenario first')
@@ -120,9 +120,14 @@ class ScenarioExperiments:
         item = next((row for row in catalogue['items'] if row['id'] == selection_id), None)
         if not item:
             raise SampleRequestError('Reload the scenario list')
+        progress(1, 'Validated the selected ScenarioForge XML', percent=8,
+                 source_bytes=item.get('bytes'))
         content, identity = '', None
         with authorized_operations(access.qm):
             remote = guest(self.runtime['backend'])
+            progress(2, 'Reading the saved Flow and building its task draft on ScenarioForge',
+                     percent=15, received_bytes=0, total_bytes=None,
+                     source_bytes=item.get('bytes'))
             for _ in range(25):
                 result = remote.call(vmid, 'tasks', roots=catalogue['roots'], path=item['path'],
                                      selection_id=selection_id, repo=catalogue['repo'], offset=len(content), timeout=70)
@@ -132,12 +137,21 @@ class ScenarioExperiments:
                     raise SampleRequestError('Scenario tasks changed while loading')
                 identity = result['sha256']
                 content += result['chunk']
+                total = result['total']
+                transferred = len(content.encode())
+                transfer_percent = 80 if total == 0 else min(80, 20 + int(60 * transferred / total))
+                progress(3, 'Transferring task draft from ScenarioForge', percent=transfer_percent,
+                         received_bytes=transferred, total_bytes=total,
+                         source_bytes=item.get('bytes'))
                 if len(content) == result['total']:
                     break
             else:
                 raise SampleRequestError('Scenario task response is incomplete')
         if hashlib.sha256(content.encode()).hexdigest() != identity:
             raise SampleRequestError('Scenario task checksum mismatch')
+        progress(4, 'Transfer complete; checksum verified and task JSON decoded', percent=90,
+                 received_bytes=len(content.encode()), total_bytes=len(content.encode()),
+                 source_bytes=item.get('bytes'), checksum_verified=True)
         access.current()
         details = json.loads(content)
         # Accept the prior guest format while an already-running orchestrator
@@ -157,6 +171,10 @@ class ScenarioExperiments:
             raise SampleRequestError('Invalid suggested scenario tasks')
         if not isinstance(context, dict):
             raise SampleRequestError('Invalid scenario task context')
+        progress(5, 'Task draft validated and ready to review', percent=100,
+                 received_bytes=len(content.encode()), total_bytes=len(content.encode()),
+                 source_bytes=item.get('bytes'), checksum_verified=True,
+                 task_count=len(tasks if tasks is not None else suggested))
         return dict(selection_id=selection_id, tasks=tasks,
                     suggested_tasks=suggested, context=context,
                     source='scenario' if tasks is not None else ('scenario-derived' if suggested else 'scenario-default'))

@@ -226,9 +226,16 @@ def test_tasks_create_preview_and_rerun_preserve_definitions(pve,lab,tmp_path,mo
     monkeypatch.setattr(service,'run',execute)
     try:
         selection=next(i for i in controller.catalogue(user)['items'] if i['path']==str(path) and i['scenario']=='Selected')
-        preview=controller.tasks(user,selection['id'])
+        task_progress=[]
+        preview=controller.tasks(user,selection['id'],
+            progress=lambda step,message,**details:task_progress.append((step,message,details)))
         assert preview['tasks']==[TASKS[0]]
         assert preview['context']['chain'][0]['id']=='7'
+        assert [row[0] for row in task_progress]==[1,2,3,4,5]
+        assert task_progress[2][2]['received_bytes']==task_progress[2][2]['total_bytes']
+        assert task_progress[3][2]['checksum_verified'] is True
+        assert task_progress[-1][2]['percent']==100
+        assert task_progress[-1][2]['task_count']==1
         with pytest.raises(samples.SampleRequestError, match='less than maximum agent turns'):
             controller.create(user,selection['id'],'f'*32,'10.77.0.0/24','',tasks=TASKS,
                 provide_progressive_hints=True,
