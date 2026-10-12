@@ -232,6 +232,14 @@ controls to close it. Reopening the same view for a run reuses its named window.
 URLs can also be reloaded or opened directly while signed in:
 `/run?view=results&run=<run-id>` and `/run?view=progress&run=<run-id>`.
 
+Finished scenario experiments show **Analyze, generate helper & rerun**. The modal
+reports ten checkpoints while the host selects participant evidence, asks CAF to
+analyze it on the participant VM, freezes the generated Markdown helper, builds
+paired original/helper conditions and queues the derived experiment. A progress
+link opens when launch succeeds. The action excludes judge and private-reference
+files, preserves the source run, and records parent/evidence/model lineage in the
+new run. It uses the participant model credential already stored in the guest.
+
 ![Separate results window with simulated trial results](images/results-window.png)
 
 Failed attempts also show **Failure details** from files already collected on

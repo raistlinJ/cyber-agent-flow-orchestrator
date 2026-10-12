@@ -46,7 +46,7 @@ def saved_json(root, name):
 def files(root):
     """Include recorded inputs and evidence, excluding controls and linked files."""
     root = Path(root)
-    allowed_roots = {'inputs', 'suite', 'evaluation', 'logs', 'reproduction'}
+    allowed_roots = {'inputs', 'suite', 'evaluation', 'logs', 'reproduction', 'post-execution'}
     allowed_files = {'workflow.json', 'runtime.yaml', 'study.yaml', 'empty.json', 'baseline.json',
                      'with-http-helper.json', 'sample-fixture.py', 'input-preflight.json', 'judge-preflight-events.jsonl', 'scenario-readiness.json'}
     found = []
@@ -200,6 +200,7 @@ def configuration(root):
             'system_prompt_note': 'Exact initial system prompts from collected worker checkpoints.' if system_prompts else
                                   'No collected initial system prompt is available for this run.',
             'provenance': {k: manifest[k] for k in ('created_at', 'spec_hash', 'source_hash', 'source_hashes', 'engine_runtime', 'dependencies', 'python') if k in manifest},
+            'post_execution': deepcopy(journal.get('post_execution')),
             'workflow': journal.get('workflow'), 'scenarioforge': scenario,
             'downloads': downloads, 'files': inventory,
             'capture_note': 'These are captured run files, not a VM snapshot. External executables, container images and credential values are not automatically captured.'}

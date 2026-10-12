@@ -311,6 +311,15 @@ guidance with authored local guidance in the saved host inputs. The baseline sta
 condition comparison; it is not repeated for each trial. Changing the artifacts
 requires a new workflow output directory.
 
+Browser scenario runs also support a post-execution adaptation loop. From a
+finished run's Results window, **Analyze, generate helper & rerun** invokes CAF's
+headless analyst on participant-visible transcript/tool evidence, generates a
+safe Markdown guidance helper, and queues a derived paired comparison using the
+same frozen scenario, tasks, tools, model and budgets. The source run remains
+unchanged and the derived journal records its lineage. This is a development
+rerun learned from prior evidence; validate the helper on held-out scenarios
+before claiming general improvement. It does not publish executable MCP tools.
+
 For one exported task, examples 1/2 schedule **2 trials** (1 condition × 2
 repetitions); example 3 schedules **4 trials** (2 conditions × 2 repetitions).
 Multiple tasks multiply these counts. Each attempt uses one task prompt, up to

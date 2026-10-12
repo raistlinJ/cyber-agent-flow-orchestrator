@@ -24,6 +24,7 @@ class UserDashboard:
         self.lock = threading.RLock()
         self.creation_records = {}
         self.start_records = {}
+        self.analysis_records = {}
         self.slots = threading.BoundedSemaphore(4)
         self.entries = {}
         from .samples import SampleManager
@@ -265,6 +266,52 @@ class UserDashboard:
         with self.lock:
             return deepcopy((self.start_records if starting else self.creation_records).get((access.username, request_id),
                 dict(step=0, total=None, state='pending', message='Waiting for the launch request to start' if starting else 'Waiting for the creation request to start')))
+
+    def analysis_status(self, access, request_id):
+        import re
+        if not re.fullmatch('[0-9a-f]{32}', request_id):
+            raise ValueError('Invalid analysis request ID')
+        access.current()
+        with self.lock:
+            return deepcopy(self.analysis_records.get((access.username, request_id),
+                dict(step=0, total=10, state='pending', message='Waiting for post-execution analysis to start')))
+
+    def analyze_and_rerun(self, access, run_id, request_id, launch_request_id):
+        import re
+        from .samples import SampleRequestError
+        if (not re.fullmatch('[0-9a-f]{32}', request_id)
+                or not re.fullmatch('[0-9a-f]{32}', launch_request_id)):
+            raise SampleRequestError('Supply valid analysis and launch request IDs')
+        key = (access.username, request_id)
+        def progress(step, message, state='running', **extra):
+            from datetime import datetime, timezone
+            with self.lock:
+                self.analysis_records[key] = dict(step=step, total=10, message=message,
+                    state=state, updated_at=datetime.now(timezone.utc).isoformat(), **extra)
+                while len(self.analysis_records) > 256:
+                    self.analysis_records.pop(next(iter(self.analysis_records)))
+        progress(1, 'Validating the completed experiment and selecting participant evidence')
+        try:
+            from .post_execution import analyze
+            analysis = analyze(access, self.root, run_id,
+                progress=lambda step, message: progress(step, message))
+            progress(5, 'Freezing CAF analysis and generated helper into a derived experiment')
+            created = self.scenarios.create_assisted(access, run_id, request_id, analysis)
+            progress(6, 'Validating the derived experiment before launch', derived_run_id=created['run_id'])
+            launched = self.scenarios.run_saved(access, created['run_id'], launch_request_id,
+                progress=lambda step, message: progress(min(9, step + 4), message,
+                                                       derived_run_id=created['run_id']))
+            progress(10, 'Generated-helper comparison queued; follow its experiment progress',
+                     'completed', derived_run_id=launched['run_id'])
+            return dict(run_id=launched['run_id'], status=launched['status'],
+                        source_run_id=run_id, analysis_sha256=analysis.get('analysis_sha256'))
+        except Exception as exc:
+            with self.lock:
+                current = self.analysis_records.get(key, {})
+            progress(current.get('step', 1), current.get('message', 'Post-execution analysis'),
+                     'failed', error=str(exc), **({'derived_run_id': current['derived_run_id']}
+                                                  if current.get('derived_run_id') else {}))
+            raise
 
     def maintain(self, access, data):
         return self.updates.submit(access, **data)

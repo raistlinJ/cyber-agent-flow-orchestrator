@@ -88,6 +88,7 @@ def status(output, *, include_transcript=False):
             'workflow_hash': data['workflow_hash'], 'recorded_status': state,
             'coordinator_active': coordinator_active,
             'sample_id': data.get('sample_id'), 'scenario_experiment': data.get('scenario_experiment'), 'message': 'Stop requested; finishing the current stage or trial and collecting results' if stopping else data.get('message'),
+            'post_execution': data.get('post_execution'),
             'sample_progress': sample_progress,
             'trial_failures': failures, 'failure_diagnostics': diagnostics,
             'workflow_progress': stages_progress,

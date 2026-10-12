@@ -158,9 +158,12 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     return
                 if path == '/api/session':
                     self.respond(200, session)
-                elif path in ('/api/experiments/creation-status', '/api/experiments/start-status') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
+                elif path in ('/api/experiments/creation-status', '/api/experiments/start-status', '/api/experiments/analysis-status') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     request_id = parse_qs(urlsplit(self.path).query).get('request_id', [''])[0]
-                    self.respond(200, dashboard.creation_status(auth.access(token, revalidate=False), request_id, starting=path.endswith('/start-status')))
+                    if path.endswith('/analysis-status'):
+                        self.respond(200, dashboard.analysis_status(auth.access(token, revalidate=False), request_id))
+                    else:
+                        self.respond(200, dashboard.creation_status(auth.access(token, revalidate=False), request_id, starting=path.endswith('/start-status')))
                 elif path == '/api/status':
                     if auth.provider.name in ('pve', 'fusion', 'desktop') and getattr(dashboard, 'scoped', False):
                         if not getattr(dashboard, 'scoped', False):
@@ -316,6 +319,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     return
                 stage = {'/api/experiments/create': 'create experiment',
                          '/api/experiments/run': 'run experiment', '/api/experiments/stop': 'stop experiment',
+                         '/api/experiments/analyze-rerun': 'analyze experiment and create assisted rerun',
                          '/api/model-config': 'model settings', '/api/scenarios/list': 'list scenarios',
                          '/api/scenarios/references': 'load scenario reference', '/api/scenarios/tasks': 'load scenario tasks', '/api/samples/run': 'run sample',
                          '/api/roles': 'save VM roles', '/api/applications': 'application maintenance'}.get(path, 'request')
@@ -376,6 +380,11 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         raise SampleRequestError('Invalid experiment request fields')
                     access = auth.access(token, revalidate=False)
                     self.respond(202, dashboard.experiment(access, action, data))
+                elif path == '/api/experiments/analyze-rerun' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
+                    if set(data) != {'run_id', 'request_id', 'launch_request_id'} or any(not isinstance(value, str) for value in data.values()):
+                        raise SampleRequestError('Supply run, analysis request and launch request IDs only')
+                    self.respond(202, dashboard.analyze_and_rerun(
+                        auth.access(token, revalidate=False), data['run_id'], data['request_id'], data['launch_request_id']))
                 elif path == '/api/model-network-scope' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     if data:
                         raise ModelConfigError('Supply no network scope parameters')

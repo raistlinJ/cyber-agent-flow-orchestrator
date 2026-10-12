@@ -63,6 +63,20 @@ Prompt-driven generation is not reproducible from seed alone; preserve its resul
 
 Results show the exported task prompts, tool settings, model, and collected metrics. Downloads include the captured run bundle, complete scenario XML, and ScenarioForge reproduction ZIP. The reproduction manifest reports any unavailable generated artifacts; see [saved run inputs](run-inputs.md).
 
+For a finished run, choose **Analyze, generate helper & rerun** in Results to run
+CAF's post-execution analyst on the collected participant transcript and tool-call
+records. CAF generates a concise procedural helper without private answers. The
+orchestrator freezes the analysis and evidence hashes, pairs the source run's first
+condition with its assisted copy, and immediately queues a new experiment against
+the same saved scenario and execution settings. The source run is never modified.
+
+The derived experiment is adaptation/development evidence because its helper was
+learned from the source run. Use a different held-out scenario or a preregistered
+study for a publishable generalization claim. The generated artifact is Markdown
+guidance consumed by CAF; it is not an unreviewed executable MCP tool. Analysis
+runs on the participant VM with its frozen provider, endpoint, model and guest API
+credential. Update the participant CAF checkout before using this action.
+
 ## Upload from New experiment
 
 Choose a local XML or ScenarioForge reproduction ZIP and click **Send to ScenarioForge**. Upload uses the selected VM and signed-in user’s access, then invokes ScenarioForge’s own importer. ZIP artifacts are restored and the imported XML appears in the scenario selector. Import does not deploy. The limit is 32 MiB uploaded / 128 MiB expanded. Experiment-results ZIPs are not scenario import packages.

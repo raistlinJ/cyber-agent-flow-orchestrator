@@ -44,6 +44,18 @@ Generation/testing commands are optional, explicitly configured preparation stag
 executable artifacts and their dependencies must be installed and archived separately.
 Catalog/guidance snapshots do not freeze those executables or dependencies.
 
+After a browser experiment finishes, Results also offers **Analyze, generate helper
+& rerun**. CAF reviews only participant-visible transcripts, annotations and tool
+records, produces a reusable Markdown guidance helper, and the orchestrator creates
+a new paired experiment containing the source run's first condition plus its
+helper-assisted copy. The original run is immutable. The derived run retains the same frozen
+scenario, tasks, model, budgets and tools; its journal records the parent run,
+evidence hashes, analysis model and generated-helper hash. Judge records, private
+references, facilitator answers and verifier values are excluded from generation.
+This is an explicit post-execution adaptation run, so it should be reported
+separately from held-out evaluation. Executable MCP-tool generation still requires
+a reviewed build/test/publish workflow.
+
 Private scoring can record verified success, flag progress and time to first flag.
 Human review decides whether an artifact helps and whether to revise it between
 studies. The WebUI currently provides included samples and result inspection;

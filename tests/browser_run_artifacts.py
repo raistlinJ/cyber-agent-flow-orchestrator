@@ -27,7 +27,10 @@ def main():
         xml = '<Scenarios><!--' + ('large saved XML ' * 10000) + '--><Scenario name="Demo"/></Scenarios>'
         (output / 'suite/evaluator/scenario.xml').write_text(xml)
         ev.write_json(output / 'workflow.json', dict(workflow={'id':'demo'}, workflow_hash='saved',
-            status='completed', stages={}, runtime={}))
+            status='completed', stages={}, runtime={
+                'backend': {'participant_vmid': 9403},
+                'model': {'provider': 'openai', 'name': 'saved-model'},
+            }, scenario_experiment={'id':'a'*64,'scenario':'Demo'}))
         ev.write_json(output / 'evaluation/manifest.json', dict(spec_hash='saved',
             spec=dict(id='demo', tasks=[dict(id='discover', prompt='Explore the saved target. Return JSON. <script>window.injected=true</script>')],
                 conditions=[dict(id='baseline', tools=['curl'], catalog_snapshot={'tools':[{'name':'curl'}]})],
@@ -56,6 +59,7 @@ def main():
                 expect(page.locator('#refresh')).to_be_enabled(timeout=30000)
                 page.goto(server['origin']+'/run?view=results&run=demo')
                 expect(page.locator('#loading-modal')).not_to_be_visible()
+                expect(page.get_by_role('button', name='Analyze, generate helper & rerun')).to_be_visible()
                 expect(page.locator('.task-prompt')).to_contain_text('Explore the saved target.')
                 expect(page.locator('#run-configuration')).to_contain_text('saved-model')
                 assert page.evaluate('window.injected') is None
@@ -68,6 +72,12 @@ def main():
                 expect(page.locator('#loading-modal')).not_to_be_visible()
                 expect(page.locator('[data-config-key=xml]')).to_have_attribute('open','')
                 assert len(xml_requests) == 1
+                page.route('**/api/experiments/analyze-rerun', lambda route: route.fulfill(
+                    status=202, json={'run_id':'scenario-'+'f'*32,'status':'queued'}))
+                page.get_by_role('button', name='Analyze, generate helper & rerun').click()
+                expect(page.locator('#analysis-status')).to_contain_text('Generated-helper comparison queued')
+                expect(page.locator('#analysis-status a')).to_have_attribute('href', '/run?view=progress&run=scenario-'+'f'*32)
+                expect(page.locator('#loading-modal')).not_to_be_visible()
                 with page.expect_download() as downloaded:
                     page.get_by_role('link',name='ScenarioForge re-import ZIP',exact=True).click()
                 artifact = downloaded.value

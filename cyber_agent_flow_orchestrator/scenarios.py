@@ -498,6 +498,91 @@ class ScenarioExperiments:
                     created_at=now(), updated_at=now(), stages={}, events=[],
                     message='Ready. Run deploys the saved scenario and evaluates it with baseline tools.')
 
+    def create_assisted(self, access, source_run_id, request_id, analysis):
+        """Clone a completed run into original/assisted paired conditions."""
+        if (not re.fullmatch('[0-9a-f]{32}', request_id)
+                or not re.fullmatch(r'scenario-[0-9a-f]{32}', source_run_id)):
+            raise SampleRequestError('Invalid assisted-rerun request')
+        if not isinstance(analysis, dict) or not isinstance(analysis.get('helper'), str):
+            raise SampleRequestError('A validated generated helper is required')
+        workspace = Workspace(self.root, access.username)
+        source_output = workspace.run_path(source_run_id)
+        source_record = ev.read_json(source_output / 'workflow.json')
+        if not source_record.get('scenario_experiment'):
+            raise SampleRequestError('Source run is not a scenario experiment')
+        run_id = 'scenario-' + request_id
+        output = workspace.run_path(run_id)
+        source_inputs = workspace.path / 'inputs' / source_run_id
+        destination = workspace.path / 'inputs' / run_id
+        with self.samples.lock, submission_lock(workspace):
+            if output.exists():
+                record = ev.read_json(output / 'workflow.json')
+                if record.get('post_execution', {}).get('source_run_id') != source_run_id:
+                    raise SampleRequestError('Request ID belongs to another derived experiment')
+                return dict(run_id=run_id, status=record['status'])
+            if not source_inputs.is_dir() or source_inputs.is_symlink():
+                raise SampleRequestError('Frozen source inputs are unavailable')
+            shutil.copytree(source_inputs, destination)
+            try:
+                cfg = yaml.safe_load((destination / 'workflow.yaml').read_text())
+                saved_runtime = yaml.safe_load((destination / 'runtime.yaml').read_text())
+                original_conditions = saved_runtime.get('conditions', [])
+                if not original_conditions:
+                    raise SampleRequestError('The source run has no condition to compare')
+                for condition in original_conditions:
+                    for key in ('catalog', 'guidance_files'):
+                        paths = [condition[key]] if key == 'catalog' else condition.get(key, [])
+                        mapped = [str(destination / Path(path).relative_to(source_inputs))
+                                  if Path(path).is_relative_to(source_inputs) else path for path in paths]
+                        condition[key] = mapped[0] if key == 'catalog' else mapped
+                helper_path = destination / 'generated-post-run-helper.md'
+                private_file(helper_path, analysis['helper'].encode())
+                private_file(destination / 'post-run-analysis.json', json.dumps(analysis, indent=2).encode())
+                original = deepcopy(original_conditions[0])
+                assisted = deepcopy(original)
+                assisted['id'] = (original['id'][:55].rstrip('-_') or 'condition') + '-generated-helper'
+                assisted.setdefault('guidance_files', []).append(str(helper_path))
+                saved_runtime['conditions'] = [original, assisted]
+                source_collect = deepcopy(cfg.get('collect', {}))
+                cfg['collect'] = {}
+                if original['id'] in source_collect:
+                    cfg['collect'][original['id']] = deepcopy(source_collect[original['id']])
+                    cfg['collect'][assisted['id']] = deepcopy(source_collect[original['id']])
+                cfg['id'] = run_id
+                if cfg['scenarioforge'].get('mode') == 'execute':
+                    cfg['scenarioforge']['suite_id'] = run_id
+                private_file(destination / 'runtime.yaml', yaml.safe_dump(saved_runtime).encode(), replace=True)
+                private_file(destination / 'workflow.yaml', yaml.safe_dump(cfg).encode(), replace=True)
+                cfg, runtime, _, identity = load(destination / 'workflow.yaml')
+                private_directory(output)
+                if (source_output / 'inputs').is_dir():
+                    shutil.copytree(source_output / 'inputs', output / 'inputs')
+                else:
+                    private_directory(output / 'inputs')
+                private_directory(output / 'post-execution')
+                private_file(output / 'post-execution/analysis.json', json.dumps(analysis, indent=2).encode())
+                private_file(output / 'post-execution/generated-helper.md', analysis['helper'].encode())
+                record = self.record(cfg, runtime, identity, deepcopy(source_record['scenario_experiment']), request_id)
+                record['task_design'] = deepcopy(source_record.get('task_design', []))
+                record['post_execution'] = {
+                    'source_run_id': source_run_id,
+                    'source_workflow_hash': source_record.get('workflow_hash'),
+                    'analysis_sha256': analysis.get('analysis_sha256'),
+                    'input_sha256': analysis.get('input_sha256'),
+                    'model': deepcopy(analysis.get('model')),
+                    'created_at': analysis.get('created_at'),
+                    'kind': 'caf-generated-helper-comparison',
+                    'baseline_condition': original['id'],
+                    'assisted_condition': assisted['id'],
+                }
+                record['message'] = 'Ready. This derived experiment compares each original condition with its CAF-generated helper.'
+                ev.write_json(output / 'workflow.json', record)
+            except BaseException:
+                shutil.rmtree(destination, ignore_errors=True)
+                shutil.rmtree(output, ignore_errors=True)
+                raise
+        return dict(run_id=run_id, status='ready')
+
     def run_saved(self, access, run_id, request_id, progress=lambda step, message: None):
         if not re.fullmatch('[0-9a-f]{32}', request_id):
             raise SampleRequestError('Invalid request ID')

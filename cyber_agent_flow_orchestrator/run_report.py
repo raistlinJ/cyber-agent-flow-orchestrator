@@ -239,6 +239,19 @@ def render(report, *, root=None, recorded_at=None):
         ['PASS / FAIL', f'{counts["PASS"]} / {counts["FAIL"]}'],
         ['Execution errors or interruptions / unverified / running', f'{counts["ERROR"]} / {counts["UNVERIFIED"]} / {counts["RUNNING"]}'],
         ['Unstarted trials', evaluation.get('unstarted_trials')], ['Attempts recorded', evaluation.get('attempt_count')]])
+    adaptation = config.get('post_execution') or workflow.get('post_execution')
+    if adaptation:
+        doc.heading('Post-execution adaptation')
+        doc.table(['Lineage', 'Recorded value'], [
+            ['Source run', adaptation.get('source_run_id')],
+            ['Source workflow hash', adaptation.get('source_workflow_hash')],
+            ['Analysis input hash', adaptation.get('input_sha256')],
+            ['Analysis output hash', adaptation.get('analysis_sha256')],
+            ['Analysis model', display((adaptation.get('model') or {}).get('name'))],
+            ['Created', adaptation.get('created_at')],
+            ['Kind', adaptation.get('kind')],
+        ])
+        doc.paragraph('This derived comparison learned a Markdown helper from participant-visible evidence in the source run. It is development/adaptation evidence, not an independent held-out evaluation.')
     if not evaluation:
         doc.paragraph('Evaluation has not started; no trial outcomes or scores have been recorded.')
     doc.heading('Charts')
