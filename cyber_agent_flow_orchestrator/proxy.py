@@ -26,6 +26,10 @@ async def api_errors(request, handler):
 
 
 def upstream_timeout(path):
+    if path == '/api/experiments/analyze-rerun':
+        # CAF analysis uses the frozen judge/analysis budget (up to one hour),
+        # while independent status reads keep the browser informed.
+        return ClientTimeout(total=None, sock_connect=10, sock_read=3660)
     # Sample creation imports a bundle and snapshots XML through multiple QGA calls.
     slow = path.endswith('/artifact') or path in (
         '/api/scenarios/upload', '/api/scenarios/list', '/api/scenarios/tasks', '/api/experiments/create',

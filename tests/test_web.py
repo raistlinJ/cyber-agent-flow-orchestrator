@@ -6,6 +6,7 @@ from urllib.request import Request, urlopen, build_opener, HTTPSHandler, HTTPRed
 import pytest
 
 from cyber_agent_flow_orchestrator.web import Dashboard
+from cyber_agent_flow_orchestrator.proxy import upstream_timeout
 from test_workflow import lab
 from test_monitor import Probe
 from https_fixture import PASSWORD, secure_server
@@ -57,6 +58,12 @@ def test_anonymous_api_blocked_and_login_assets_available(server):
     assert b'Welcome back.' in request(server, '/login')[2]
     assert request(server, '/login.js')[0] == 200
     assert request(server, '/style.css')[0] == 200
+
+
+def test_post_execution_analysis_proxy_timeout_covers_model_budget():
+    timeout = upstream_timeout('/api/experiments/analyze-rerun')
+    assert timeout.total is None
+    assert timeout.sock_read == 3660
 
 
 def test_login_cookie_dashboard_and_logout_revocation(server):
