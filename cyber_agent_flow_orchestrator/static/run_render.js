@@ -102,7 +102,7 @@ function renderWorkflowProgress(run,target){
   const observation=stage.guest_observation;
   if(observation)output.append(el('p','Last guest response: '+new Date(observation.at).toLocaleTimeString()+' · '+observation.state+(observation.pid?' · PID '+observation.pid:''),'small'));
   for(const transfer of stage.transfers||[])output.append(el('p','VM '+transfer.vmid+' · '+transfer.file+' · '+transfer.received_bytes+' / '+(transfer.total_bytes??'unknown')+' bytes · '+(transfer.verified?'Checksum verified':transfer.status),'small'));
-  if(stage.readiness)for(const check of stage.readiness.checks||[])output.append(el('p','Readiness '+check.key+': '+check.status,'small'));
+  if(stage.readiness)for(const check of stage.readiness.checks||[]){output.append(el('p','Readiness '+check.key+': '+check.status+(check.summary?' · '+check.summary:''),check.status==='fail'?'error':'small'));for(const detail of check.details||[])output.append(el('p',detail,check.status==='fail'?'error':'small'));}
   if(stage.file_count){output.append(el('p',stage.file_count+' saved file(s)'+(stage.file_count>100?' · showing first 100':''),'small'));output.append(el('pre',stage.files.join('\n')));}
   for(const trial of stage.trials||[]){output.append(el('p',trial.trial_id+' · '+trial.condition_id+' · '+trial.status+' · Verified: '+(trial.verified_success??'pending'),'small'));if(trial.transport)output.append(el('p',trial.transport.activity+' · '+(trial.transport.files_uploaded??0)+' / '+(trial.transport.files_total??'unknown')+' files transferred','small'));for(const error of trial.errors||[])output.append(el('p',error,'error'));}
   if(stage.events?.length)output.append(el('h4','Checkpoints and recent output'),el('pre',stage.events.map(event=>`${event.at} [${event.kind}] ${event.message}`).join('\n')));
@@ -142,11 +142,13 @@ function renderProgress(run){
    if(trial.hints_released!=null)card.append(el('p',`${trial.hints_released} hints released · ${trial.solutions_released??0} solutions provided · ${trial.facts_revealed??0} required facts revealed`,'small'));
    card.append(el('p',`${trial.trial_id} · ${trial.condition_id} · repetition ${trial.repetition} · attempt ${trial.attempt}`));
    const timing=el('p',null,'small');timing.append(document.createTextNode('Trial elapsed (includes setup and collection): '),timer(trial.elapsed_seconds,p.observed_at,p.active,true));card.append(timing);
+   if(transport?.participant_active_seconds!=null)card.append(el('p',`Participant active time: ${duration(transport.participant_active_seconds)} · Assistance wait: ${duration(transport.assistance_wait_seconds)} (excluded from participant limit)`,'small'));
+   if(trial.deferred_steps?.length)card.append(el('p','Deferred, still unverified: '+trial.deferred_steps.join(', '),'notice'));
    if(transport?.files_total)card.append(el('p',`Inputs transferred: ${transport.files_uploaded} / ${transport.files_total} files · ${(transport.bytes_uploaded??0).toLocaleString()} / ${(transport.bytes_total??0).toLocaleString()} bytes acknowledged`,'small'));
    if(transport?.service?.SubState)card.append(el('p',`Last observed guest service: ${transport.service.SubState}${transport.service.ExecMainPID?' · PID '+transport.service.ExecMainPID:''}`,'small'));
    if(transport?.updated_at)card.append(el('p',`Guest stage last recorded: ${new Date(transport.updated_at).toLocaleTimeString()}`,'small'));
   }
-  card.append(el('p',`Per-trial limits: ${p.max_turns} turns · ${p.wall_seconds}s worker budget. The transcript is available under step 9; scores appear after collection.`,'small'));
+  card.append(el('p',`Per-trial limits: ${p.max_turns} turns · ${p.wall_seconds}s participant active budget; assistance waits excluded. The transcript is available under step 9; scores appear after collection.`,'small'));
   if(p.trials.length){const wrap=el('div',null,'scroll'),table=el('table'),header=el('tr'),thead=el('thead'),body=el('tbody');for(const title of ['Trial','Condition','Status','Verified','Score'])header.append(el('th',title));thead.append(header);for(const trial of p.trials){const row=el('tr');for(const value of [trial.trial_id,trial.condition_id,trial.status,trial.verified_success===true?'Yes':trial.verified_success===false?'No':trial.status==='running'?'Pending':'Unavailable',trial.score??'—'])row.append(el('td',value));body.append(row);}table.append(thead,body);wrap.append(table);card.append(wrap);}
   for(const trial of p.trials)for(const error of trial.errors||[])card.append(el('p',`${trial.trial_id} · ${error}`,'error'));
   if(run.error)card.append(el('p',run.error,'error'));

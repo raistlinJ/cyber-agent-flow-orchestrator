@@ -321,6 +321,35 @@ only in an interactive terminal is not inherited by the systemd evaluation worke
 Either configure that guest EnvironmentFile or save a replacement key through this
 editor. Clearing the file's key does not clear an independently configured environment.
 
+Evaluation is organized into **Tasks**, **Trial limits**, **Hints & solutions**,
+**Tools & conditions**, **Helpers**, **Run controls**, and **Judge LLM**, in that
+order. Baseline and participant tool conditions are edited on Tools & conditions.
+Added helper conditions are edited on Helpers; its comparison preset sets up one
+baseline condition and one HTTP-helper condition. Switching pages preserves the
+draft and validation opens the page containing an invalid field.
+
+In **New → Evaluation → Judge LLM**, enter an optional **Judge API key**.
+The key controls are disabled while participant model settings are inherited;
+the stored host judge key for that endpoint is reused. Uncheck the inheritance
+option to edit a separate judge key. An entered key is saved when you create the
+experiment, in a private host credential directory
+outside run outputs. Leave blank to reuse the key saved for your account and
+endpoint, or its host environment key. The form displays whether a key is
+available. **Clear stored judge key** selects no key for new experiments at that
+endpoint. Replacing or clearing does not remove the immutable credential retained
+for existing experiment reruns. Raw keys are never returned to the browser,
+written in run inputs, copied to guests, or included in results/bundles.
+
+The judge runs on the orchestrator host and uses a separate credential. A blank
+participant replacement-key field preserves only the guest key. To persist the
+judge's key across normal WebUI launches, set `host_environment_file:
+host-secrets.env` in `web.yaml` and store `CAF_JUDGE_API_KEY=your-key` in that
+private file (or the variable named by `judge.model.api_key_env`). The path is
+relative to `web.yaml`; the file must be owned by the orchestrator account with
+mode 0600. Restart after changing it. Shell/service environment values override
+file values. This applies to both desktop and Proxmox hosting; the host file is
+never included in experiment output or run bundles.
+
 Reading requires access to the selected VM. Saving additionally requires
 the configured application maintenance group (default `caf-maintainers`); `updates:
 false` disables writes. Mutations refuse while the VM's evaluator lock or guest
@@ -585,3 +614,8 @@ If the endpoint hostname cannot resolve after the bootstrap NIC is removed,
 the shared utility configures DNS for just that provider domain on the dedicated
 LLM NIC, using its on-link configured/DHCP resolver or gateway. This setting is
 persistent. DNS and route files are restored if route setup fails.
+
+When ScenarioForge exports a package but blocks it on readiness, the deployment
+stage collects `scenario-readiness.json` before stopping. Progress shows the
+failed check and its per-target reasons; the report is included in the run bundle.
+Infrastructure failures and missing challenge access procedures remain blocking.

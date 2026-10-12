@@ -21,7 +21,7 @@ def settings(path, *, local=False):
     path = Path(path).resolve()
     data = yaml.load(path.read_text(), Loader=ev.StrictLoader)
     ev.fields(data, ['version', 'listen', 'port', 'public_url', 'certificate', 'private_key', 'users_file',
-                     'session_idle_seconds', 'session_max_seconds', 'auth', 'samples', 'updates'],
+                     'session_idle_seconds', 'session_max_seconds', 'auth', 'samples', 'updates', 'host_environment_file'],
               ['version', 'public_url', 'certificate', 'private_key'], 'web configuration')
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('Only web configuration version 1 is supported')
@@ -113,6 +113,10 @@ def settings(path, *, local=False):
             auth['ca_file'] = str((path.parent / auth['ca_file']).resolve())
     else:
         raise ValueError('auth.provider must be local, pve, fusion, or desktop')
+    if 'host_environment_file' in data:
+        if not isinstance(data['host_environment_file'], str) or not data['host_environment_file']:
+            raise ValueError('host_environment_file must be a path')
+        data['host_environment_file'] = str((path.parent / data['host_environment_file']).absolute())
     for key in ('certificate', 'private_key', *(['users_file'] if 'users_file' in data else [])):
         if not isinstance(data[key], str) or not data[key]:
             raise ValueError(key + ' must be a path')

@@ -101,7 +101,6 @@ def validate(value, runtime, extra_catalogs=None):
             "source",
             "tools",
             "guidance",
-            "provide_progressive_hints",
         }:
             raise SampleRequestError("Unknown condition fields")
         if (
@@ -128,8 +127,6 @@ def validate(value, runtime, extra_catalogs=None):
             or len(row.get("guidance", "")) > 32000
         ):
             raise SampleRequestError("Condition guidance exceeds 32000 characters")
-        if type(row.get("provide_progressive_hints", False)) is not bool:
-            raise SampleRequestError("Condition hints must be boolean")
     return deepcopy(value)
 
 
@@ -150,6 +147,9 @@ def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs
         )
     if value.get("pricing"):
         runtime["pricing"] = value["pricing"]
+    for condition in runtime.get("conditions", []):
+        # The Evaluation hint policy is the only orchestrator-level control.
+        condition.pop("provide_progressive_hints", None)
     if not value.get("conditions"):
         return
     folder.mkdir(parents=True, exist_ok=True)
@@ -159,11 +159,9 @@ def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs
         original = deepcopy(catalogue(defaults, extra_catalogs)[row["source"]])
         original.pop('definitions', None)
         collect_source = original.pop("collect_source", None)
-        original.update(
-            id=row["id"],
-            tools=row["tools"],
-            provide_progressive_hints=row.get("provide_progressive_hints", False),
-        )
+        original.update(id=row["id"], tools=row["tools"])
+        # Progressive hints are controlled once for the whole evaluation.
+        original.pop("provide_progressive_hints", None)
         if source_cfg and "guidance_files" in source_cfg.get("collect", {}).get(
             collect_source, {}
         ):

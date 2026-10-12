@@ -228,6 +228,42 @@ def test_automatic_capture_roundtrip_preserves_generated_artifacts(tmp_path):
         assert restored_flow['reproduction_artifact_sources'][0]['source_path'] == str(directory)
 
 
+def test_monitored_capture_keeps_each_copied_guest_helper(tmp_path):
+    from types import SimpleNamespace
+    from cyber_agent_flow_orchestrator.workflow_progress import observe_transfers
+    repo=tmp_path/'sf'
+    directories=[repo/'outputs'/name for name in ('first', 'second')]
+    for index, directory in enumerate(directories):
+        directory.mkdir(parents=True)
+        (directory/'proof.txt').write_text(str(index))
+    xml=('<Scenarios><FlowState>'+json.dumps({'artifacts_dir':[str(p) for p in directories]})+'</FlowState></Scenarios>').encode()
+    class LocalAgent:
+        script=''
+        def call(self, vmid, op, **data):
+            if op=='unlink':
+                Path(data['path']).unlink(missing_ok=True)
+                return {}
+            result=subprocess.run([sys.executable,'-c',self.script,json.dumps(data)],capture_output=True,text=True,check=True)
+            return json.loads(result.stdout)
+        def get(self, vmid, path):
+            return Path(path).read_bytes()
+    agent=LocalAgent()
+    wf=SimpleNamespace(agent=agent,journal={'current_step':'reproduction'},save=lambda:None)
+    # A previous stage must also restore methods without pinning their receiver.
+    with observe_transfers(wf):
+        assert agent.get(101,str(directories[0]/'proof.txt'))==b'0'
+    assert 'call' not in vars(agent) and 'get' not in vars(agent)
+    with observe_transfers(wf):
+        content=capture(xml,{'scenarioforge':{'repo':str(repo)}},
+                        {'backend':{'app_vmid':101,'max_transfer_bytes':1024*1024}},agent)
+    manifest=run_artifacts.validate_reproduction(content,xml,1024*1024)
+    assert manifest['fidelity']=='portable-artifacts'
+    assert all(source['bundled'] for source in manifest['artifact_sources'])
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        assert archive.read('artifacts/001/proof.txt')==b'0'
+        assert archive.read('artifacts/002/proof.txt')==b'1'
+
+
 def test_explicit_reproduction_archive_is_frozen_and_hash_checked(lab):
     config, output, agent, _ = lab
     package_xml = (config.parent / 'package/evaluator/scenario.xml').read_bytes()

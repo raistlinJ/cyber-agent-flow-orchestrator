@@ -341,3 +341,27 @@ def test_authored_hint_cannot_include_an_explicit_verifier_answer():
         validate_tasks([task])
     task['progressive_hints']=['Inspect the service with curl.']
     assert validate_tasks([task])[0]['progressive_hints']==task['progressive_hints']
+
+
+def test_auto_saved_task_with_missing_access_is_rejected_before_deployment():
+    rubric={'version':1,'criteria':[dict(
+        id='complete',requirement='Complete the target challenge.',
+        evidence='Successful tool output.',essential=True,weight=1)]}
+    task=dict(id='solve-scenario',family='scenario-challenges',
+        split='development',prompt='Complete the challenge.',
+        verification_mode='judge',rubric=rubric,
+        required_checks=['containers','challenge_access'],
+        challenge_plan={'version':1,'steps':[dict(
+            id='step-1',node_id='7',title='Target',
+            criterion_ids=['complete'],requires=[],hints=[],solution='')],
+            'source':{'auto_saved_by':'scenarioforge-flow-save-v1',
+                      'access_validation':{'status':'fail',
+                                           'review_steps':['step-1']}}})
+    with pytest.raises(
+        SampleRequestError,
+        match='without complete participant access guidance.*step-1',
+    ):
+        validate_tasks([task])
+
+    task['challenge_plan']['source']['access_validation']={'status':'pass'}
+    assert validate_tasks([task])[0]['id']=='solve-scenario'

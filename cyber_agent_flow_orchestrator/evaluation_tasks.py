@@ -69,6 +69,23 @@ def validate_tasks(value):
                 validate_plan(task['challenge_plan'], task['rubric'])
             except (ValueError, KeyError) as exc:
                 fail('Invalid challenge plan: ' + str(exc))
+            source = task['challenge_plan'].get('source', {})
+            access = source.get('access_validation', {}) if isinstance(source, dict) else {}
+            if (
+                source.get('auto_saved_by') == 'scenarioforge-flow-save-v1'
+                and access.get('status') == 'fail'
+            ):
+                steps = access.get('review_steps') or []
+                detail = (
+                    ' for step(s) ' + ', '.join(map(str, steps))
+                    if isinstance(steps, list) and steps else ''
+                )
+                fail(
+                    'ScenarioForge generated this task without complete participant '
+                    'access guidance' + detail + '. Add or update the vulnerability/'
+                    'generator access instructions, save the Flow again, and reload '
+                    'the task before running.'
+                )
         if mode in {'judge', 'both'} and 'rubric' not in task:
             fail('judge/both mode requires a rubric')
         if mode == 'judge':

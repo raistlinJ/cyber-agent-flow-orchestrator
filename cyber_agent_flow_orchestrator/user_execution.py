@@ -60,6 +60,8 @@ def run(template, root, run_id, access, *, resume=False, retry_steps=False, retr
             cfg, runtime, _, _ = load(source)
         for vmid in workflow_vmids(cfg, runtime):
             access.require_vm(vmid)
+        from .judge_credentials import restore
+        restore(workspace, runtime)
         with authorized_operations(access.qm):
             return service.run(source, output, resume=resume, retry_steps=retry_steps,
                                retry_failed=retry_failed, progress=progress)

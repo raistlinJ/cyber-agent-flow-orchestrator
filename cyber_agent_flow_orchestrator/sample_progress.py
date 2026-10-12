@@ -44,7 +44,7 @@ def build(root, journal, report, state, coordinator, *, include_transcript=False
         if transport.is_file():
             record = ev.read_json(transport)
             trial['transport'] = {key: record.get(key) for key in ('phase', 'updated_at', 'files_uploaded', 'files_total',
-                                      'bytes_uploaded', 'bytes_total', 'execution_started_at')}
+                                      'bytes_uploaded', 'bytes_total', 'execution_started_at', 'participant_active_seconds', 'assistance_wait_seconds')}
             trial['transport']['activity'] = PHASES.get(record.get('phase'),
                 'Collecting trial outputs' if record.get('stopped') and not record.get('collected') else
                 'Scoring and exporting trial results' if record.get('collected') else
@@ -59,6 +59,7 @@ def build(root, journal, report, state, coordinator, *, include_transcript=False
             trial['hints_released'] = sum(not e.get('solution') for e in audit.get('events', []))
             trial['solutions_released'] = sum(bool(e.get('solution')) for e in audit.get('events', []))
             trial['completed_steps'] = audit.get('completed_steps', [])
+            trial['deferred_steps'] = audit.get('deferred_steps', [])
             trial['progress_monitor_error'] = audit.get('progress_monitor_error')
             trial['facts_revealed'] = len(audit.get('revealed_fact_ids', []))
             for event in audit.get('events', []):

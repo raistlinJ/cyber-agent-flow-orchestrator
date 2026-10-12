@@ -297,6 +297,8 @@ class SampleManager:
                     from .workflow import Workflow
                     from .workflow_progress import step
                     from .input_preflight import run as check_inputs
+                    from .judge_credentials import restore
+                    restore(workspace, journal['runtime'])
                     observer = Workflow(output, journal, progress=None)
                     with step(observer, 'preflight'):
                         check_inputs(observer)

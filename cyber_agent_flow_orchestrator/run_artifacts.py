@@ -48,7 +48,7 @@ def files(root):
     root = Path(root)
     allowed_roots = {'inputs', 'suite', 'evaluation', 'logs', 'reproduction'}
     allowed_files = {'workflow.json', 'runtime.yaml', 'study.yaml', 'empty.json', 'baseline.json',
-                     'with-http-helper.json', 'sample-fixture.py', 'input-preflight.json', 'judge-preflight-events.jsonl'}
+                     'with-http-helper.json', 'sample-fixture.py', 'input-preflight.json', 'judge-preflight-events.jsonl', 'scenario-readiness.json'}
     found = []
     for folder, directories, names in os.walk(root, followlinks=False):
         directories[:] = sorted(d for d in directories if not d.startswith('.') and not (Path(folder) / d).is_symlink()

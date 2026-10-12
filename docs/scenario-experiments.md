@@ -99,7 +99,7 @@ The enlarged modal separates **Experiment** (type), **ScenarioForge** (selected 
 
 ### Optional progressive hints
 
-**New → Evaluation → Provide progressive hints** defaults to off and is editable for both fixed samples. It is saved in the runtime as `execution.provide_progressive_hints`; reruns retain it. Baseline and helper conditions share the same policy.
+**New → Evaluation → Provide progressive hints** defaults to off and is editable for both fixed samples. It is the single hint policy for every condition, is saved as `execution.provide_progressive_hints`, and is retained on reruns.
 
 With hints enabled, the evaluator can release at most three hints per trial after two agent turns without observed progress, or after an incorrect final answer. A correct final answer stops normally. Assistance consumes the existing turn/time budget. Observed progress means a newly observed declared fact in bounded successful tool output; without fact declarations, it means a new nonempty successful tool output. This is a stall heuristic, not proof of what the model knows.
 

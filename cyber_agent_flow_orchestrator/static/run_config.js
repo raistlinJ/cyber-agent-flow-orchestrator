@@ -51,7 +51,6 @@ function renderRunConfiguration(config){
  for(const condition of config.conditions||[]){
   const section=el('section',null,'run-condition');section.append(el('h4',condition.id),
    el('p',condition.tools?.length?condition.tools.join(', '):'No tools'));
-  if(condition.provide_progressive_hints!==undefined)section.append(el('p','Progressive hints in this condition: '+(condition.provide_progressive_hints?'On':'Off'),'small'));
   if(condition.catalog_snapshot)section.append(configurationDetails('Exact tool catalog',condition.catalog_snapshot,'catalog-'+condition.id));
   if(condition.guidance_snapshot?.length)section.append(configurationDetails('Additional guidance',condition.guidance_snapshot,'guidance-'+condition.id));
   target.append(section);

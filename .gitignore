@@ -15,6 +15,7 @@ runs/
 /catalogs/
 
 /fusion-local/
+host-secrets.env
 
 /certs/
 /ScenarioForge-Bundles/local-validation-2026-10-09

@@ -210,3 +210,11 @@ python -m scenarioforge.cli evaluation-scaffold \
 ```
 
 Review `evaluation-draft/evaluation-tasks.json`, then supply it using `--evaluation-tasks` during execute/evaluation-export. The standalone evaluator consumes that version 4 package and the same optional judge/monitor configuration.
+
+
+The Evaluation tab's participant active-time limit excludes intermediate evidence
+transfer and progress-judge waits. Progress and result metrics distinguish active
+time, assistance waiting and total worker duration. A solution-exhausted challenge
+can be deferred while independent steps proceed; it remains unverified and does
+not unlock dependent steps. ScenarioForge packages with a challenge plan must pass
+the `challenge_access` documentation check as well as runtime readiness checks.

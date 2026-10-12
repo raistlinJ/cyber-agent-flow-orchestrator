@@ -271,7 +271,7 @@ class Studies:
                     )
                 },
                 conditions=[
-                    {k: c.get(k) for k in ("id", "tools", "provide_progressive_hints")}
+                    {k: c.get(k) for k in ("id", "tools")}
                     for c in runtime["conditions"]
                 ],
             )

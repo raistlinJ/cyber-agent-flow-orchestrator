@@ -43,20 +43,18 @@ def test_conditions_select_configured_catalogs_and_freeze_guidance(tmp_path):
                 id="baseline",
                 source="baseline",
                 tools=["curl"],
-                provide_progressive_hints=False,
             ),
             dict(
                 id="guided",
                 source="http-helper",
                 tools=["curl", "http_flag_walk"],
                 guidance="Inspect the service.",
-                provide_progressive_hints=True,
             ),
         ],
     )
     apply(value, runtime, cfg, tmp_path, {"conditions": []})
     assert cfg["reset_each_trial"] and runtime["order_seed"] == 19
-    assert runtime["conditions"][1]["provide_progressive_hints"]
+    assert all("provide_progressive_hints" not in row for row in runtime["conditions"])
     assert (
         Path(runtime["conditions"][1]["guidance_files"][0]).read_text()
         == "Inspect the service."
@@ -92,10 +90,32 @@ def test_dynamic_participant_catalog_controls_tools_and_dangerous_approval(tmp_p
           extra_catalogs=extra)
     assert runtime['execution']['auto_approve_dangerous'] is True
     assert runtime['conditions'][0]['tools'] == ['nmap', 'shell_dangerous']
+    assert 'provide_progressive_hints' not in runtime['conditions'][0]
     assert 'definitions' not in runtime['conditions'][0]
     with pytest.raises(SampleRequestError, match='available'):
         validate({**value, 'conditions': [{**value['conditions'][0], 'tools': ['missing']}]},
                  {'conditions': []}, extra)
+
+
+def test_condition_progressive_hints_are_rejected_as_ambiguous():
+    with pytest.raises(SampleRequestError, match='Unknown condition fields'):
+        validate({'conditions': [{
+            'id': 'baseline', 'source': 'baseline', 'tools': ['curl'],
+            'provide_progressive_hints': False,
+        }]}, {'conditions': []})
+
+
+def test_default_conditions_cannot_override_evaluation_hint_policy(tmp_path):
+    runtime = {
+        'conditions': [{
+            'id': 'baseline', 'catalog': 'catalog.json', 'tools': ['curl'],
+            'guidance_files': [], 'provide_progressive_hints': False,
+        }],
+        'execution': {'provide_progressive_hints': True},
+    }
+    apply({'conditions': []}, runtime, {}, tmp_path, runtime)
+    assert runtime['execution']['provide_progressive_hints'] is True
+    assert 'provide_progressive_hints' not in runtime['conditions'][0]
 
 
 @pytest.mark.parametrize("changed", [False, True])

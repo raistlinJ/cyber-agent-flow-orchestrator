@@ -145,6 +145,31 @@ file exactly are moved to a persistent guest backup, recorded in maintenance
 details. Differing untracked files still block activation for manual review.
 Omit `--local` for Proxmox deployments.
 
+If the judge needs an API key, persist it on the orchestrator host and configure
+its file in your profile's `web.yaml`:
+
+```yaml
+host_environment_file: host-secrets.env
+```
+
+The path is relative to `web.yaml`. The file must belong to the account running
+the orchestrator and have owner-only permissions (`chmod 600`). For a runtime
+that uses `judge.model.api_key_env: CAF_JUDGE_API_KEY`, add
+`CAF_JUDGE_API_KEY=your-key` to that file. Startup loads it for both final and
+progress judges, including the plain `--local` command above. Explicit shell or
+service environment variables take precedence. Restart after changing the file.
+You can also enter a **Judge API key** in **New → Evaluation → Judge LLM**.
+Uncheck the participant model option to edit a separate judge key; otherwise
+the stored host judge key for the inherited endpoint is used. Creating the
+experiment saves an entered key privately on the host for your account
+and judge endpoint. A blank field reuses the saved key or the configured host
+key. Replacements and clearing affect new experiments; reruns keep their original
+credential reference. Key values are excluded from results and bundles.
+
+This also works with authenticated Proxmox hosting; keep the host file outside
+Git and run bundles. The participant's blank replacement-key field preserves
+its guest key; that key is separate from the judge's host credential.
+
 
 No subcommand means `serve`. First launch creates editable `workflow.yaml`,
 `runtime.yaml`, `catalogs/baseline.json`, and `web.yaml` in the current directory
@@ -450,7 +475,7 @@ you can keep them open alongside the dashboard.
 
 Select and save **ScenarioForge**, **Cyber-agent-flow participant**, and **CoreVM** roles on Lab setup. Configure ScenarioForge's CORE connection and ensure the participant can reach its lab network. Under **Experiments → New**, choose a sample and create it. Creation imports and freezes the fixed package; **Deploy and run** prepares topology and fresh task secrets, deploys the XML, checks readiness, exports the evaluation suite, and starts CAF.
 
-The modal shows effective CAF settings and locked sample XML, prompt template, tool conditions and limits. Model controls are in the **Cyber-agent-flow** tab. The **Evaluation** tab shows locked sample tasks and supports loading, importing, adding and editing custom scenario tasks, prompts, success criteria and readiness checks. Trial limits remain editable for samples and custom scenarios. **Load tools from participant VM** imports the participant's effective native-MCP catalog and provides a per-tool selector, including CAF's interactive-session controls. Dangerous-tool selection and unattended approval are separate settings; both are frozen with the run.
+The modal shows effective CAF settings and locked sample XML and prompt templates. Model controls are in the **Cyber-agent-flow** tab. **Evaluation** has separate pages for **Tasks**, **Trial limits**, **Hints & solutions**, **Tools & conditions**, **Helpers**, **Run controls**, and **Judge LLM** (last). Tasks supports loading, importing, adding and editing custom scenario prompts, success criteria and readiness checks. Trial limits remain editable for samples and custom scenarios. **Load tools from participant VM** imports the participant's effective native-MCP catalog and provides a per-tool selector, including CAF's interactive-session controls. Dangerous-tool selection and unattended approval are separate settings; both are frozen with the run.
 
 | Sample | Runs | What it checks |
 | --- | --- | --- |

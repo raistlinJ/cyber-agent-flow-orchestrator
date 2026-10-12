@@ -771,3 +771,56 @@ def test_manager_scopes_confirmation_and_rechecks_before_transfer(pve, lab, tmp_
                 manager.submit(user, 'participant', 'update', 'main', 'b' * 32)
     finally:
         manager.close()
+
+
+@pytest.mark.parametrize('forced', [False, True])
+def test_manager_same_revision_is_success_and_force_still_activates(pve, lab, tmp_path, monkeypatch, forced):
+    pve[0]['groups'] += ',caf-maintainers'
+    pve[0]['resources']['operator@pve'] = [vm(9403)]
+    user = access(pve)
+    workspace = Workspace(tmp_path / 'runs', user.username)
+    workspace.save_roles(dict(scenarioforge=None, participant=9403, core=None), user)
+    calls, agent, _ = install_backend(monkeypatch, tmp_path)
+    original = agent.call
+    installed = {'revision': 'a' * 40, 'modified': forced,
+                 'modified_files': [' M "mcp_client.py"'] if forced else [],
+                 'modified_file_count': int(forced), 'processes': [process_record()]}
+    def call(self, vmid, op, **data):
+        original(self, vmid, op, **data)
+        return dict(installed)
+    monkeypatch.setattr(agent, 'call', call)
+    def package(*args, **kwargs):
+        assert kwargs['allow_same'] is True
+        return installed['revision'], None
+    monkeypatch.setattr(updates, 'package', package)
+    cfg, runtime, _, _ = load(lab[0])
+    manager = updates.UpdateManager(cfg, runtime, tmp_path / 'runs')
+    try:
+        manager.submit(user, 'participant', 'inspect', 'main', 'a' * 32)
+        manager.jobs[user.username].result(timeout=10)
+        manager.submit(user, 'participant', 'update', 'main', 'b' * 32,
+                       process_confirmation='a' * 32,
+                       force_confirmation='a' * 32 if forced else None)
+        manager.jobs[user.username].result(timeout=10)
+        row = ev.read_json(workspace.path / 'updates' / ('b' * 32) / 'job.json')
+        assert row['status'] == 'completed'
+        assert row['revision'] == installed['revision']
+        assert [op for _, op, _ in calls] == ['app_inspect', 'app_inspect'] + (['app_update'] if forced else [])
+        if forced:
+            assert calls[-1][2]['force'] is True
+            assert not row.get('unchanged')
+        else:
+            assert row['unchanged'] is True and 'Already up to date' in row['message']
+            assert 'error' not in row and 'bundle_sha256' not in row
+    finally:
+        manager.close()
+
+
+def test_same_revision_package_has_no_bundle(installation, tmp_path):
+    _, source, _, _, _ = installation
+    installed_revision = git(source, 'rev-parse', 'HEAD')
+    output = tmp_path / 'same-revision'
+    output.mkdir()
+    revision, bundle = updates.package({'url': str(source)}, 'main', installed_revision, output, allow_same=True)
+    assert revision == installed_revision and bundle is None
+    assert not (output / 'source.bundle').exists()

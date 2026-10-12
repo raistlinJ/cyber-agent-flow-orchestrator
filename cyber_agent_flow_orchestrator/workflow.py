@@ -89,6 +89,50 @@ class Workflow:
                         attempt['log_recovery_error'] = str(exc)
                     self.save()
 
+    def deployment_readiness_failure(self, text, vmid):
+        """Preserve failed export evidence before normal suite collection is reached."""
+        from .diagnostics import clean
+        lines = [line.split('EVALUATION_PACKAGE_JSON:', 1)[1].strip()
+                 for line in text.splitlines() if line.startswith('EVALUATION_PACKAGE_JSON:')]
+        if len(lines) != 1:
+            return None
+        try:
+            marker = json.loads(lines[0])
+            sf = self.journal['workflow']['scenarioforge']
+            expected = sf['output_root'].rstrip('/') + '/' + self.journal['token']
+            if (marker.get('state') != 'complete' or marker.get('readiness_passed') is not False
+                    or marker.get('suite_id') != sf['suite_id']
+                    or marker.get('archive') != expected + '.zip'):
+                return None
+            content = self.agent.get(vmid, expected + '/evaluator/readiness.json')
+            if len(content) > 1024 * 1024:
+                raise ValueError('Readiness report exceeds diagnostic limit')
+            report = json.loads(content)
+            if not isinstance(report, dict) or not isinstance(report.get('checks'), list):
+                raise ValueError('Invalid readiness report')
+            ev.write_json(self.output / 'scenario-readiness.json', report)
+            checks = []
+            reasons = []
+            for check in report['checks']:
+                if not isinstance(check, dict):
+                    continue
+                failed = [item for item in check.get('items', []) if isinstance(item, dict) and item.get('status') == 'fail']
+                details = [clean(str(item.get('name', item.get('step_id', 'Target'))) + ': ' + str(item.get('detail', 'Failed'))) for item in failed[:20]]
+                checks.append(dict(key=clean(check.get('key')), status=clean(check.get('status')),
+                                   summary=clean(check.get('summary', '')), items=len(check.get('items', [])), details=details))
+                if check.get('status') == 'fail':
+                    reasons.append(clean(check.get('key')) + ': ' + (('; '.join(details)) if details else clean(check.get('summary', 'Failed'))))
+            self.journal['readiness_progress'] = dict(checked_at=report.get('checked_at'), session_id=report.get('session_id'),
+                overall=report.get('overall'), summary=clean(report.get('overall_summary', '')), checks=checks,
+                report='scenario-readiness.json')
+            self.save()
+            return clean('ScenarioForge readiness blocked evaluation: ' + ('; '.join(reasons) or report.get('overall_summary') or marker.get('message') or 'readiness did not pass'), 3000)
+        except (ValueError, OSError, KeyError, TypeError) as exc:
+            # Optional diagnostics must preserve the original command failure.
+            self.journal['readiness_diagnostic_error'] = type(exc).__name__
+            self.save()
+            return None
+
     def command(self, key, command, retry_steps):
         stage = self.journal['stages'].get(key)
         if stage and stage['status'] == 'completed':
@@ -117,6 +161,10 @@ class Workflow:
                     self.save()
                     log.write_bytes(self.agent.get(command['vmid'], result['log_path']))
                     if result['exitcode']:
+                        if key == 'deploy':
+                            reason = self.deployment_readiness_failure(log.read_text(), command['vmid'])
+                            if reason:
+                                raise ValueError(f'{reason}; see {log}')
                         raise ValueError(f'{key} exited {result["exitcode"]}; see {log}')
                 finally:
                     self.agent.call(command['vmid'], 'stop', unit=attempt['unit'])

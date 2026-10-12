@@ -254,7 +254,7 @@ class ScenarioExperiments:
             private_file(path, json.dumps(dict(result, vmid=vmid, repo=repo, roots=roots)).encode(), replace=path.exists())
         return dict(result, vmid=vmid, roots=roots, truncated=False)
 
-    def judge_settings(self, value, access):
+    def judge_settings(self, value, access, *, persist=False):
         from cyber_agent_flow_eval.judge import resolve_judge
         from .model_config import apply_model
         workspace = Workspace(self.root, access.username)
@@ -264,6 +264,12 @@ class ScenarioExperiments:
         value = deepcopy(value)
         if not isinstance(value, dict):
             raise SampleRequestError('Judge settings must be a mapping')
+        key = value.pop('api_key', '')
+        clear = value.pop('clear_api_key', False)
+        if value.get('use_participant_model') is True:
+            key, clear = '', False  # Disabled separate-model controls never change credentials.
+        from .judge_credentials import validate_key, bind
+        validate_key(key, clear)
         if isinstance(value.get('model'), dict) and 'api_key_env' in value['model']:
             raise SampleRequestError('Judge API keys must be configured on the orchestrator host')
         try:
@@ -278,7 +284,7 @@ class ScenarioExperiments:
                 config['model']['api_key_env'] = approved['api_key_env']
             # The participant's final model is already captured here. Freeze it.
             config['use_participant_model'] = False
-        return config
+        return bind(workspace, config, key, clear, persist=persist)
 
     def create(self, access, selection_id, request_id, allowed_targets, disallowed_targets, evaluation=None, tasks=None, _sample_id=None, provide_progressive_hints=False, progress=lambda step, message: None, judge=None, controls=None):
         progress(1, "Validating scenario, evaluation settings and VM access")
@@ -298,6 +304,7 @@ class ScenarioExperiments:
             stalled_turns = (overrides or {}).get('hint_stalled_turns', self.runtime['execution'].get('hint_stalled_turns', 2))
             if stalled_turns >= max_turns:
                 raise SampleRequestError('Turns without progress before a hint must be less than maximum agent turns')
+        judge_request = deepcopy(judge)
         if judge is not None:
             judge = self.judge_settings(judge, access)
         if definitions and any(t.get('verification_mode') in {'judge','both'} for t in definitions) and not (judge or self.runtime.get('judge',{})).get('enabled'):
@@ -378,7 +385,7 @@ class ScenarioExperiments:
                 runtime['repetitions'] = overrides['repetitions']
                 runtime['execution'].update({key: value for key, value in overrides.items() if key != 'repetitions'})
             if judge is not None:
-                runtime['judge'] = judge
+                runtime['judge'] = self.judge_settings(judge_request, access, persist=True)
             if _sample_id is not None:
                 command = cfg['prepare'][0]
                 options = json.loads(command['argv'][-1])
@@ -573,6 +580,8 @@ class ScenarioExperiments:
                 with ev.lease(output / '.workflow.lock'):
                     record = ev.read_json(output / 'workflow.json')
                     runtime, selection = record['runtime'], record['scenario_experiment']
+                    from .judge_credentials import restore
+                    restore(workspace, runtime)
                     record.update(started_at=now(), status='preparing', phase='verifying', message='Verifying the saved scenario XML on ScenarioForge')
                     from .workflow import Workflow
                     from .workflow_progress import step, checkpoint

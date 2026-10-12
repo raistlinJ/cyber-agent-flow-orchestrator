@@ -47,9 +47,11 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096,max_tries_before_solution=4)
         request=dict(sample_id=sample_id,request_id='a'*32)
         if custom_limits:
-            request['judge']={'enabled':True,'use_participant_model':True,'max_turns':3,'timeout_seconds':30,'max_tokens':1000}
+            request['judge']={'enabled':True,'use_participant_model':False,'model':dict(dashboard.scenarios.runtime['model']),'max_turns':3,'timeout_seconds':30,'max_tokens':1000,'api_key':'integration-judge-private-key'}
+            request['judge']['model'].pop('api_key_env', None)
             from cyber_agent_flow_eval import judge
             def completion(config,messages,timeout, **kwargs):
+                assert os.environ[config['model']['api_key_env']] == 'integration-judge-private-key'
                 if messages[0]['content'].startswith('Synthetic preflight'):
                     return json.dumps({'action':'verdict','passed':False,'score':0,'reason':'Synthetic','evidence':[]}),{}
                 if len(messages)==2:return json.dumps({'action':'read_evidence','file':'worker-result.json'}),{}
@@ -69,6 +71,8 @@ def test_samples_deploy_export_evaluate_and_capture(pve,lab,tmp_path,monkeypatch
         prepared_options=json.loads(saved['workflow']['prepare'][0]['argv'][-1])
         assert prepared_options['verification_mode']==('both' if custom_limits else 'exact')
         if custom_limits:
+            assert 'integration-judge-private-key' not in json.dumps(saved)
+            monkeypatch.delenv(saved['runtime']['judge']['model']['api_key_env'])
             assert saved['runtime']['judge']['model']['name']==saved['runtime']['model']['name']
             assert saved['runtime']['judge']['max_turns']==3
             assert saved['runtime']['repetitions']==settings['repetitions']
@@ -254,4 +258,11 @@ def test_judge_validation_precedes_sample_upload_and_cannot_choose_host_secrets(
         config=dashboard.scenarios.judge_settings({'enabled':True,'use_participant_model':True},user)
         assert config['model']['name']==dashboard.scenarios.runtime['model']['name']
         assert config['use_participant_model'] is False
+        from cyber_agent_flow_orchestrator.judge_credentials import bind
+        saved = bind(workspace, config, 'saved-host-judge-key', persist=True)
+        inherited = dashboard.scenarios.judge_settings({'enabled':True,'use_participant_model':True,
+            'api_key':'ignored-separate-key','clear_api_key':True},user,persist=True)
+        assert inherited['model']['api_key_env'] == saved['model']['api_key_env']
+        assert os.environ[inherited['model']['api_key_env']] == 'saved-host-judge-key'
+        monkeypatch.delenv(inherited['model']['api_key_env'])
     finally:dashboard.close()

@@ -116,6 +116,9 @@ def run_https(config_path, runs_root, web_config, interval=10, local=False):
                 '(VMware Fusion or Workstation); Proxmox requires authenticated access'
             )
     config = settings(web_config, local=local)
+    if config.get('host_environment_file'):
+        from .host_environment import load_environment
+        load_environment(config['host_environment_file'])
     # Imported profiles created before desktop maintenance support used
     # ``updates: false``. A localhost-only Fusion launch is owned by the current
     # OS user, so migrate that old setting in memory without rewriting it.

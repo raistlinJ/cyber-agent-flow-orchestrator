@@ -292,9 +292,13 @@ class UpdateManager:
                     if job['action'] == 'update':
                         save('Downloading the selected source revision on the host')
                         revision, bundle = package(self.config[job['role']], job['ref'], installed['revision'], directory,
-                                                   trace=trace, allow_same=bool(force_expected))
+                                                   trace=trace, allow_same=True)
                         job['revision'] = revision
                         update['revision'] = revision
+                        if bundle is None and not force_expected and not replace_tools:
+                            job.update(status='completed', unchanged=True)
+                            save('Already up to date; application source and running processes were left unchanged')
+                            return
                         if bundle is not None:
                             if bundle.stat().st_size > self.runtime['backend']['max_transfer_bytes']:
                                 raise UpdateError('Source bundle exceeds the configured transfer limit')

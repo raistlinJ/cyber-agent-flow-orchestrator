@@ -149,6 +149,57 @@ def test_failed_mutating_step_needs_explicit_retry(lab):
     assert len(list((output / 'logs').glob('*.log'))) == 2
 
 
+@pytest.mark.parametrize('report_available', [True, False])
+def test_failed_deploy_preserves_readiness_and_never_starts_evaluation(lab, report_available):
+    config, output, agent, manifest = lab
+    cfg = yaml.safe_load(config.read_text())
+    cfg['scenarioforge'] = dict(mode='execute', xml='/scenarios/lab.xml', scenario='Evaluation fixture',
+                               suite_id=manifest['id'], output_root='/exports')
+    config.write_text(yaml.safe_dump(cfg))
+    agent.marker = dict(state='complete', readiness_passed=False, archive='/unused.zip',
+                        package_hash=manifest['package_hash'], suite_id=manifest['id'])
+    agent.fail = True
+    original = agent.call
+    report = dict(status='complete', overall='fail', ok=False, session_id=9,
+                  overall_summary='1 access procedure needs review', checks=[dict(key='challenge_access',
+                      status='fail', summary='Missing access procedure', items=[dict(name='docker-1',
+                          status='fail', detail='No documented connection and retrieval procedure')])])
+    def call(vmid, op, **data):
+        if op == 'hook' and 'scenarioforge.cli' in data['argv']:
+            folder = data['argv'][data['argv'].index('--evaluation-output-dir') + 1]
+            agent.marker['archive'] = folder + '.zip'
+            if report_available:
+                agent.files[folder + '/evaluator/readiness.json'] = json.dumps(report).encode()
+        return original(vmid, op, **data)
+    agent.call = call
+    with pytest.raises(ValueError, match='docker-1.*No documented' if report_available else 'deploy exited 1'):
+        workflow.run(config, output, agent=agent)
+    saved = ev.read_json(output / 'workflow.json')
+    assert saved['stages']['deploy']['attempts'][0]['stopped'] is True
+    assert not (output / 'evaluation').exists()
+    if report_available:
+        assert ev.read_json(output / 'scenario-readiness.json') == report
+        assert saved['readiness_progress']['checks'][0]['details'] == ['docker-1: No documented connection and retrieval procedure']
+        from cyber_agent_flow_orchestrator import service
+        stage = next(s for s in service.status(output)['workflow_progress']['steps'] if s['id'] == 'deploy')
+        assert stage['readiness']['overall'] == 'fail'
+        from cyber_agent_flow_orchestrator.run_artifacts import files
+        assert any(item['path'] == 'scenario-readiness.json' for item in files(output))
+    else:
+        assert saved['readiness_diagnostic_error'] == 'KeyError'
+
+
+def test_failed_export_marker_cannot_request_unrelated_guest_path(tmp_path):
+    class Agent:
+        def get(self, *args):
+            pytest.fail('Unrelated guest paths must not be fetched')
+    journal = dict(workflow=dict(scenarioforge=dict(output_root='/exports', suite_id='reviewed')),
+                   token='run-token')
+    wf = workflow.Workflow(tmp_path, journal, Agent())
+    marker = dict(state='complete', readiness_passed=False, suite_id='reviewed', archive='/other/private.zip')
+    assert wf.deployment_readiness_failure('EVALUATION_PACKAGE_JSON: ' + json.dumps(marker), 9402) is None
+
+
 def test_target_lock_blocks_all_guest_mutation(lab):
     config, output, agent, _ = lab
     _, runtime, _, _ = load(config)

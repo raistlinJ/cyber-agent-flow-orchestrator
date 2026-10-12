@@ -199,7 +199,7 @@ def build(journal, state, active, root=None):
                           guest_observation=record.get('guest_observation'), transfers=record.get('transfers', [])[-20:],
                           timeout_seconds=attempt.get('timeout_seconds'), exitcode=attempt.get('exitcode'), log_tail=log_tail,
                           file_count=len(files), files=list(files)[:100],
-                          readiness=journal.get('readiness_progress') if key=='readiness' else None))
+                          readiness=journal.get('readiness_progress') if key=='readiness' or (key=='deploy' and status=='failed') else None))
     selected = next((s for s in steps if s['id'] == current), None)
     roles = [
         dict(role='scenarioforge', label='ScenarioForge', vmid=app, responsibility='Prepares and deploys the scenario; exports tasks and readiness evidence.'),
@@ -217,6 +217,15 @@ def observe_transfers(workflow):
     from pathlib import PurePosixPath
     agent = workflow.agent
     original_get, original_call = agent.get, agent.call
+    missing = object()
+    overrides = {name: vars(agent).get(name, missing) for name in ('get', 'call')}
+    def restore(name):
+        # Avoid leaving a bound method on the instance: a copied guest agent
+        # would then invoke the original instance and its original helper script.
+        if overrides[name] is missing:
+            vars(agent).pop(name, None)
+        else:
+            setattr(agent, name, overrides[name])
     def persist():
         try:
             workflow.save()
@@ -252,9 +261,10 @@ def observe_transfers(workflow):
             persist()
             raise
         finally:
-            agent.call = original_call
+            restore('call')
     agent.get = get
     try:
         yield
     finally:
-        agent.get, agent.call = original_get, original_call
+        restore('get')
+        restore('call')

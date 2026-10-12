@@ -22,7 +22,7 @@ def check_judge(runtime, output=None):
         return {'status':'skip', 'message':'Judge disabled; exact checks will be used'}
     variable = config['model'].get('api_key_env')
     if variable and not os.environ.get(variable):
-        raise ValueError('Judge host credential ' + variable + ' is missing. Set it on the orchestrator host and restart; the participant VM key is separate.')
+        raise ValueError('Judge host credential ' + variable + ' is missing. Set it in the host environment or configure host_environment_file in web.yaml, then restart; the participant VM key is separate.')
     probe = dict(config, max_tokens=min(config['max_tokens'],512))
     messages = [{'role':'system','content':'Synthetic preflight only; no experiment data. Return exactly one JSON action, without calling tools.'},
                 {'role':'user','content':'Return {"action":"verdict","passed":false,"score":0,"reason":"synthetic preflight","evidence":[]}.'}]
