@@ -92,6 +92,19 @@ def stage(installation, tmp_path, token='a' * 32):
                 sha256=hashlib.sha256(bundle.read_bytes()).hexdigest(), service='demo.service')
 
 
+def test_root_uploaded_bundle_is_reassigned_to_checkout_owner(tmp_path, monkeypatch):
+    root = tmp_path / 'checkout'
+    root.mkdir()
+    bundle = tmp_path / 'source.bundle'
+    bundle.write_bytes(b'bundle')
+    calls = []
+    monkeypatch.setattr(guest.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(guest.os, 'chown', lambda path, uid, gid, **kwargs: calls.append((path, uid, gid, kwargs)))
+    guest.prepare_bundle_for_application_user(bundle, root)
+    assert calls == [(bundle, root.stat().st_uid, root.stat().st_gid, {'follow_symlinks': False})]
+    assert bundle.stat().st_mode & 0o777 == 0o600
+
+
 def test_real_git_package_offline_update_and_rollback_preserve_data(installation, tmp_path):
     role, _, root, original, calls = installation
     args = stage(installation, tmp_path)

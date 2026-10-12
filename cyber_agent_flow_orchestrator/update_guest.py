@@ -77,6 +77,21 @@ def state_dir(root):
     return directory
 
 
+def prepare_bundle_for_application_user(bundle, root):
+    """Make a root/QGA-uploaded bundle readable by the checkout owner Git uses."""
+    uploaded = bundle.lstat()
+    owner = root.stat()
+    if not stat.S_ISREG(uploaded.st_mode):
+        raise ValueError('Source bundle must be a regular file')
+    if os.geteuid() == 0:
+        if uploaded.st_uid not in (0, owner.st_uid):
+            raise ValueError('Source bundle is owned by an unexpected account')
+        os.chown(bundle, owner.st_uid, owner.st_gid, follow_symlinks=False)
+    elif uploaded.st_uid != owner.st_uid:
+        raise ValueError('Source bundle is not readable by the application account')
+    os.chmod(bundle, 0o600, follow_symlinks=False)
+
+
 def save(path, data):
     temporary = path.with_suffix('.tmp')
     with temporary.open('w') as stream:
@@ -383,6 +398,7 @@ def dispatch(data):
                     raise ValueError('Source bundle is missing')
                 if hashlib.sha256(bundle.read_bytes()).hexdigest() != data.get('sha256'):
                     raise ValueError('Source bundle checksum mismatch')
+                prepare_bundle_for_application_user(bundle, root)
                 git(root, 'bundle', 'verify', str(bundle))
                 git(root, 'fetch', '--no-tags', str(bundle), 'refs/heads/caf-release', timeout=120)
                 if value(root, 'rev-parse', 'FETCH_HEAD') != target:
