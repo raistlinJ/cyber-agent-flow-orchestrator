@@ -367,7 +367,10 @@ function syncCreateExperiment(){
  syncScenarioReferences();
  const busy=isBusy()||experimentCreating;
  const reason=busy?'Wait for the current operation to finish.':experimentMissingFields();
- $('create-experiment').disabled=Boolean(reason);
+ const button=$('create-experiment'),tooltip=$('create-experiment-tooltip');
+ button.disabled=Boolean(reason);
+ const hoverReason=reason?'Create experiment unavailable: '+reason:'';
+ button.title=hoverReason;tooltip.title=hoverReason;
  const hint=$('create-experiment-hint');if(hint.textContent!==reason)hint.textContent=reason;
  hint.hidden=!reason;
 }

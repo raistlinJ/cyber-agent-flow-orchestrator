@@ -136,6 +136,10 @@ def main():
                     expect(page.locator('#caf-settings-summary')).to_have_count(0)
                     page.get_by_role('tab',name="Experiment",exact=True).click()
                     page.get_by_label('Experiment type', exact=True).select_option('scenarioforge-xml')
+                    expect(page.locator('#create-experiment')).to_have_attribute(
+                        'title', 'Create experiment unavailable: Choose a resolved scenario on the ScenarioForge tab.')
+                    expect(page.locator('#create-experiment-tooltip')).to_have_attribute(
+                        'title', 'Create experiment unavailable: Choose a resolved scenario on the ScenarioForge tab.')
                     expect(page.locator('#sample-scenario-info')).to_be_hidden()
                     expect(page.locator('#eval-max_turns')).to_be_enabled()
                     page.get_by_role('tab',name="Evaluation",exact=True).click()
@@ -212,6 +216,7 @@ def main():
                     expect(page.locator('#create-experiment')).to_be_disabled()
                     page.locator('#scenario-allowed').fill('10.77.0.0/24')
                     expect(page.locator('#create-experiment')).to_be_enabled()
+                    expect(page.locator('#create-experiment')).to_have_attribute('title','')
                     page.get_by_role('tab',name='Evaluation',exact=True).click()
                     page.locator('#eval-repetitions').fill('0')
                     page.get_by_role('tab',name='Experiment',exact=True).click()
