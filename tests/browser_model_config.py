@@ -29,6 +29,10 @@ def main():
         roots = {9403:root/'participant', 9402:root/'scenarioforge'}
         for path in roots.values(): path.mkdir()
         ev.write_json(roots[9403]/'configs/cli.json', dict(provider='openai', url='https://models.example/v1', model='custom-model', ssl_verify=True, api_key='never-show-this', network_policy={'disallow':['10.0.0.1']}))
+        ev.write_json(roots[9403]/'kali_tools.default.json', {'tools': [
+            {'name':'nmap','command':'nmap','description':'Inspect target services.'},
+            {'name':'shell_dangerous','command':'bash','allow_args':True,'description':'Run unrestricted shell commands.'},
+        ]})
         (roots[9402]/'.scenarioforge.env').write_text('CORETG_AI_PROVIDER=litellm\nCORETG_AI_BASE_URL=https://models.example/v1\nCORETG_AI_MODEL=scenario-model\nCORE_HOST=10.0.0.2\n')
         patch.setattr(guest, 'network_scope', lambda url,config:dict(provider_host='models.example',excluded_targets=['192.0.2.8','192.0.2.1'],warnings=[]))
         patch.setattr(guest, 'LOCK', root/'guest-maintenance.lock')
@@ -55,6 +59,8 @@ def main():
             original_create = dashboard.samples.create
             def create(*args, **kwargs):
                 kwargs.pop('evaluation',None)  # This fixture isolates model persistence.
+                kwargs.pop('judge',None)
+                kwargs.pop('controls',None)
                 progress=kwargs.pop('progress',None)
                 if progress:progress(3,'Saving experiment')
                 create_entered.set()
@@ -101,6 +107,19 @@ def main():
                     page.locator('#model-participant-model').dispatch_event('input')
                     expect(page.locator('#model-participant-apply')).to_be_disabled()
                     expect(page.locator('#create-experiment')).to_be_enabled()
+                    page.get_by_role('tab',name='Evaluation',exact=True).click()
+                    page.locator('#load-participant-tools').click()
+                    expect(page.locator('#participant-tools-status')).to_contain_text('Loaded 6 tools',timeout=30000)
+                    expect(page.locator('.condition-tool-option')).to_have_count(6)
+                    expect(page.locator('.tool-risk.dangerous')).to_have_text('dangerous')
+                    expect(page.locator('.tool-risk.interactive')).to_have_count(4)
+                    controls=page.evaluate('experimentControls()')
+                    assert controls['conditions'][0]['source']=='participant-vm'
+                    assert 'shell_dangerous' in controls['conditions'][0]['tools']
+                    assert controls['auto_approve_dangerous'] is True
+                    page.locator('#auto-approve-dangerous').uncheck()
+                    assert page.evaluate('experimentControls().auto_approve_dangerous') is False
+                    page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
                     page.locator('#model-participant-model').fill('temporary-edit')
                     expect(page.locator('#create-experiment')).to_be_disabled()
                     page.locator('#model-participant-model').fill('custom-model')

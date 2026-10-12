@@ -450,7 +450,7 @@ you can keep them open alongside the dashboard.
 
 Select and save **ScenarioForge**, **Cyber-agent-flow participant**, and **CoreVM** roles on Lab setup. Configure ScenarioForge's CORE connection and ensure the participant can reach its lab network. Under **Experiments → New**, choose a sample and create it. Creation imports and freezes the fixed package; **Deploy and run** prepares topology and fresh task secrets, deploys the XML, checks readiness, exports the evaluation suite, and starts CAF.
 
-The modal shows effective CAF settings and locked sample XML, prompt template, tool conditions and limits. Model controls are in the **Cyber-agent-flow** tab. The **Evaluation** tab shows locked sample tasks and supports loading, importing, adding and editing custom scenario tasks, prompts, success criteria and readiness checks. Custom scenarios can also edit repetitions, turns, trial time, tool timeout and context window; sample budgets are fixed.
+The modal shows effective CAF settings and locked sample XML, prompt template, tool conditions and limits. Model controls are in the **Cyber-agent-flow** tab. The **Evaluation** tab shows locked sample tasks and supports loading, importing, adding and editing custom scenario tasks, prompts, success criteria and readiness checks. Trial limits remain editable for samples and custom scenarios. **Load tools from participant VM** imports the participant's effective native-MCP catalog and provides a per-tool selector, including CAF's interactive-session controls. Dangerous-tool selection and unattended approval are separate settings; both are frozen with the run.
 
 | Sample | Runs | What it checks |
 | --- | --- | --- |

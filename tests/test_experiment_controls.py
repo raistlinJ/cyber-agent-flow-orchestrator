@@ -66,6 +66,38 @@ def test_conditions_select_configured_catalogs_and_freeze_guidance(tmp_path):
         validate(value, {"conditions": []})
 
 
+def test_dynamic_participant_catalog_controls_tools_and_dangerous_approval(tmp_path):
+    catalog = tmp_path / 'participant-tools.json'
+    catalog.write_text(json.dumps({'tools': [
+        {'name': 'nmap', 'command': 'nmap'},
+        {'name': 'shell_dangerous', 'command': 'bash'},
+    ]}))
+    extra = {'participant-vm': {
+        'catalog': str(catalog),
+        'tools': ['nmap', 'shell_dangerous'],
+        'definitions': [{'name': 'nmap'}, {'name': 'shell_dangerous', 'risk': 'dangerous'}],
+        'guidance_files': [],
+    }}
+    value = {
+        'order_seed': 2,
+        'reset_each_trial': True,
+        'auto_approve_dangerous': True,
+        'conditions': [{
+            'id': 'all-tools', 'source': 'participant-vm',
+            'tools': ['nmap', 'shell_dangerous'],
+        }],
+    }
+    runtime, cfg = {'conditions': [], 'execution': {}}, {}
+    apply(value, runtime, cfg, tmp_path / 'inputs', {'conditions': [], 'execution': {}},
+          extra_catalogs=extra)
+    assert runtime['execution']['auto_approve_dangerous'] is True
+    assert runtime['conditions'][0]['tools'] == ['nmap', 'shell_dangerous']
+    assert 'definitions' not in runtime['conditions'][0]
+    with pytest.raises(SampleRequestError, match='available'):
+        validate({**value, 'conditions': [{**value['conditions'][0], 'tools': ['missing']}]},
+                 {'conditions': []}, extra)
+
+
 @pytest.mark.parametrize("changed", [False, True])
 def test_lab_reset_checks_frozen_objectives_and_tracks_owned_session(
     tmp_path, monkeypatch, changed

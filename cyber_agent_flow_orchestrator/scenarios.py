@@ -302,9 +302,6 @@ class ScenarioExperiments:
             judge = self.judge_settings(judge, access)
         if definitions and any(t.get('verification_mode') in {'judge','both'} for t in definitions) and not (judge or self.runtime.get('judge',{})).get('enabled'):
             raise SampleRequestError('Enable Judge LLM for judge/both task verification')
-        if controls is not None:
-            from .experiment_controls import validate
-            controls = validate(controls, self.runtime)
         access.current()
         workspace = Workspace(self.root, access.username)
         run_id = 'scenario-' + request_id
@@ -319,6 +316,11 @@ class ScenarioExperiments:
             if any(roles[role] is None for role in ('scenarioforge', 'participant')):
                 raise SampleRequestError('Select and save ScenarioForge and participant VMs first')
             access.require_vms(v for v in roles.values() if v is not None)
+            from .experiment_controls import participant_catalogue
+            extra_catalogs = participant_catalogue(workspace, roles['participant'])
+            if controls is not None:
+                from .experiment_controls import validate
+                controls = validate(controls, self.runtime, extra_catalogs)
             try:
                 catalogue = ev.read_json(workspace.path / 'scenario-catalogue.json')
             except FileNotFoundError:
@@ -384,7 +386,8 @@ class ScenarioExperiments:
                 command['argv'][-1] = json.dumps(options)
             if controls is not None:
                 from .experiment_controls import apply
-                apply(controls, runtime, cfg, workspace.path/'condition-inputs'/request_id, self.runtime, self.cfg)
+                apply(controls, runtime, cfg, workspace.path/'condition-inputs'/request_id,
+                      self.runtime, self.cfg, extra_catalogs=extra_catalogs)
             source = workspace.materialize(cfg, runtime, access, run_id)
             saved_runtime = yaml.safe_load((source.parent / 'runtime.yaml').read_text())
             for condition in saved_runtime['conditions']:

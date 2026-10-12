@@ -433,7 +433,7 @@ function resetJudge(){
  const model=config?.model||snapshot?.experiment_defaults?.model||{};
  $('judge-provider').value=['openai','litellm','ollama_direct'].includes(model.provider)?model.provider:'openai';
  $('judge-url').value=model.url||'';$('judge-name').value=model.name||'';$('judge-ssl').checked=model.ssl_verify!==false;
- for(const [key,value] of Object.entries({max_turns:6,timeout_seconds:600,max_tokens:2048,progress_timeout_seconds:20,progress_max_checks:32}))$('judge-'+key).value=config?.[key]??value;
+ for(const [key,value] of Object.entries({max_turns:6,timeout_seconds:600,max_tokens:2048,progress_timeout_seconds:600,progress_max_checks:32}))$('judge-'+key).value=config?.[key]??value;
  syncJudge();
 }
 for(const id of ['judge-enabled','judge-inherit','judge-monitor_progress'])$(id).addEventListener('change',()=>{syncJudge();syncCreateExperiment();});
@@ -468,7 +468,7 @@ function renderEvaluationSettings(scenario,sample){
  }
  syncHintThreshold();
  $('eval-settings-note').textContent=scenario?'These settings are saved with this experiment. Reruns reuse them.':'Sample defaults are prefilled. Trial settings are editable and saved with this experiment; reruns reuse them. Sample tasks and tools remain fixed.';
- $('eval-tools').textContent='Tools / conditions: '+(scenario?'Baseline — nmap, curl, python3. Custom tool conditions are not editable here yet.':sample?.profile?.tools||'Sample-defined');
+ $('eval-tools').textContent='Tools / conditions: '+(scenario?'Use the condition editor below, or load every installed CAF MCP tool from the participant VM.':sample?.profile?.tools||'Sample-defined');
  $('eval-task-source').textContent=scenario?'ScenarioForge exports the selected task definitions after deployment. Prompts and private verifiers are captured in Results.':'The deployed host address and fresh token/flags are resolved at run time. Exact prompts and XML are captured in Results.';
 }
 function updateEvaluationBudget(){
@@ -489,7 +489,7 @@ function describeSample(){
  updateEvaluationBudget();
 }
 
-$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};customConditions=[];renderConditions();for(const id of ['price-participant-input','price-participant-output','price-judge-input','price-judge-output','price-generation'])$(id).value='';$('condition-order-seed').value='42';$('reset-each-trial').checked=true;$('extra-reset-hooks').checked=false;$('extra-reset-hooks').disabled=!snapshot?.extra_reset_hooks_available;selectEvaluationPage('settings');resetJudge();lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
+$('new-experiment').addEventListener('click',async()=>{if(isBusy())return;customEvaluation={};customConditions=[];renderConditions();for(const id of ['price-participant-input','price-participant-output','price-judge-input','price-judge-output','price-generation'])$(id).value='';$('condition-order-seed').value='42';$('reset-each-trial').checked=true;$('extra-reset-hooks').checked=false;$('extra-reset-hooks').disabled=!snapshot?.extra_reset_hooks_available;$('auto-approve-dangerous').checked=Boolean(snapshot?.experiment_defaults?.auto_approve_dangerous);$('participant-tools-status').textContent=snapshot?.condition_catalogs?.['participant-vm']?'Participant tool catalog is available. Load again to refresh it from the VM.':'Load the participant’s effective MCP catalog to select any installed CAF command-line tools.';selectEvaluationPage('settings');resetJudge();lastUploadedScenarioFile=null;$('scenario-file').value='';syncScenarioUploadButton();$('provide-progressive-hints').checked=false;resetTaskEditor();const select=$('experiment-sample');select.replaceChildren();for(const sample of snapshot?.samples?.items||[])select.add(new Option('Sample - '+sample.name,sample.id));if(snapshot?.scenarios?.enabled)select.add(new Option('ScenarioForge XML or bundle','scenarioforge-xml'));$('scenario-allowed').value='';$('scenario-disallowed').value=snapshot?.scenarios?.disallowed_targets||'';$('experiment-error').textContent='';$('experiment-save-progress').hidden=true;creationSteps=[];describeSample();selectExperimentTab('overview');$('experiment-dialog').showModal();describeScenarioSelection();syncCreateExperiment();await loadModelNetworkScope();});
 let scenarioChoices=[],scenarioChoiceVM=null,lastUploadedScenarioFile=null;
 let autoExcludedTargets=[];
 function applyModelNetworkScope(scope){
@@ -756,7 +756,15 @@ let customConditions=[];
 function experimentControls(){
  const ids=new Set();for(const row of customConditions){if(!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(row.id)||ids.has(row.id))throw Error('Condition IDs must be valid and unique.');ids.add(row.id);if(!row.source)throw Error('Choose a condition catalog.');if(new Set(row.tools).size!==row.tools.length)throw Error('Condition tools must be distinct.');}
  const pricing={};for(const key of ['participant','judge']){const a=$('price-'+key+'-input').value,b=$('price-'+key+'-output').value;if(Boolean(a)!==Boolean(b))throw Error('Enter both input and output prices, or leave both empty.');if(a){pricing[key]={input_per_million:Number(a),output_per_million:Number(b)};}}if($('price-generation').value)pricing.generation_cost_usd=Number($('price-generation').value);
- return {order_seed:Number($('condition-order-seed').value),reset_each_trial:$('reset-each-trial').checked,use_configured_reset_hooks:$('extra-reset-hooks').checked,conditions:customConditions,...(Object.keys(pricing).length?{pricing}:{})};
+ return {order_seed:Number($('condition-order-seed').value),reset_each_trial:$('reset-each-trial').checked,use_configured_reset_hooks:$('extra-reset-hooks').checked,auto_approve_dangerous:$('auto-approve-dangerous').checked,conditions:customConditions,...(Object.keys(pricing).length?{pricing}:{})};
+}
+function conditionToolPicker(row,choice){
+ const holder=el('fieldset',null,'condition-tools'),legend=el('legend','Allowed tools');holder.append(legend);
+ const actions=el('div',null,'condition-tool-actions'),all=el('button','Select all'),none=el('button','Clear all');all.type=none.type='button';
+ all.addEventListener('click',()=>{row.tools=[...choice.tools];renderConditions();syncCreateExperiment();});none.addEventListener('click',()=>{row.tools=[];renderConditions();syncCreateExperiment();});actions.append(all,none);holder.append(actions);
+ const definitions=new Map((choice.definitions||[]).map(item=>[item.name,item]));
+ for(const name of choice.tools){const definition=definitions.get(name)||{},label=el('label',null,'condition-tool-option'),input=el('input'),content=el('span');input.type='checkbox';input.checked=row.tools.includes(name);input.addEventListener('change',()=>{if(input.checked&&!row.tools.includes(name))row.tools.push(name);else if(!input.checked)row.tools=row.tools.filter(item=>item!==name);syncCreateExperiment();});content.append(el('strong',name));if(definition.risk&&definition.risk!=='standard')content.append(el('span',definition.risk,'tool-risk '+definition.risk));if(definition.description)content.append(el('small',definition.description));label.append(input,content);holder.append(label);}
+ return holder;
 }
 function renderConditions(){
  const target=$('condition-editor');target.replaceChildren();const choices=snapshot?.condition_catalogs||{'baseline':{tools:['nmap','curl','python3']},'http-helper':{tools:['nmap','curl','python3','http_flag_walk']}};
@@ -764,7 +772,7 @@ function renderConditions(){
   const field=(label,node)=>{const holder=el('label',label);holder.append(node);card.append(holder);};
   const id=el('input');id.value=row.id;id.addEventListener('input',()=>{row.id=id.value;syncCreateExperiment();});field('Condition ID',id);
   const source=el('select');for(const key of Object.keys(choices))source.add(new Option(key,key));source.value=row.source;source.addEventListener('change',()=>{row.source=source.value;row.tools=[...choices[row.source].tools];renderConditions();syncCreateExperiment();});field('Tool catalog',source);
-  const tools=el('input');tools.value=row.tools.join(', ');tools.addEventListener('input',()=>{row.tools=tools.value.split(',').map(t=>t.trim()).filter(Boolean);syncCreateExperiment();});field('Allowed tools (comma separated)',tools);
+  const choice=choices[row.source]||{tools:[]};card.append(conditionToolPicker(row,choice));
   const guidance=el('textarea');guidance.rows=3;guidance.value=row.guidance||'';guidance.maxLength=32000;guidance.addEventListener('input',()=>{row.guidance=guidance.value;});field('Participant guidance (optional)',guidance);
   const hints=el('input');hints.type='checkbox';hints.checked=row.provide_progressive_hints||false;hints.addEventListener('change',()=>{row.provide_progressive_hints=hints.checked;});field('Provide progressive hints in this condition',hints);
   const remove=el('button','Remove condition');remove.type='button';remove.addEventListener('click',()=>{customConditions.splice(index,1);renderConditions();syncCreateExperiment();});card.append(remove);target.append(card);
@@ -772,3 +780,10 @@ function renderConditions(){
 }
 $('add-condition').addEventListener('click',()=>{let n=1;while(customConditions.some(c=>c.id==='condition-'+n))n++;customConditions.push({id:'condition-'+n,source:'baseline',tools:['nmap','curl','python3'],guidance:'',provide_progressive_hints:false});renderConditions();syncCreateExperiment();});
 $('baseline-helper-conditions').addEventListener('click',()=>{customConditions=[{id:'baseline',source:'baseline',tools:['nmap','curl','python3'],guidance:'',provide_progressive_hints:false},{id:'added-helper',source:'http-helper',tools:['nmap','curl','python3','http_flag_walk'],guidance:'',provide_progressive_hints:false}];renderConditions();syncCreateExperiment();});
+$('auto-approve-dangerous').addEventListener('change',syncCreateExperiment);
+$('load-participant-tools').addEventListener('click',async()=>{
+ if(isBusy())return;operation='Loading the participant CAF tool catalog…';syncBusy();$('participant-tools-status').textContent=operation;
+ try{await finishDashboardRead();const response=await apiFetch('/api/model-config',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role:'participant',action:'tools'})});const data=await dashboardJSON(response);if(!response.ok)throw Error(data.error||'Unable to load participant tools');snapshot.condition_catalogs=snapshot.condition_catalogs||{};snapshot.condition_catalogs['participant-vm']={tools:data.tools.map(item=>item.name),definitions:data.tools};let row=customConditions.find(item=>item.source==='participant-vm');if(!row){let n=1;while(customConditions.some(item=>item.id==='participant-tools-'+n))n++;row={id:'participant-tools-'+n,source:'participant-vm',tools:data.tools.map(item=>item.name),guidance:'',provide_progressive_hints:false};customConditions.push(row);}else row.tools=data.tools.map(item=>item.name);renderConditions();$('participant-tools-status').textContent=`Loaded ${data.tools.length} tools from participant VM ${data.vmid}. Select the tools this condition may expose.`;}
+ catch(error){$('participant-tools-status').textContent='Tool catalog load failed: '+error.message;}
+ finally{operation=null;syncBusy();schedulePoll();}
+});

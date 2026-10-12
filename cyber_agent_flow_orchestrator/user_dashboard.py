@@ -154,11 +154,15 @@ class UserDashboard:
             model={key: runtime['model'].get(key) for key in ('provider', 'name', 'url', 'ssl_verify')},
             judge={key:value for key,value in runtime.get('judge', {}).items() if key!='model'} | ({'model':{key:value for key,value in runtime['judge']['model'].items() if key!='api_key_env'}} if runtime.get('judge', {}).get('model') else {}),
             evaluation=dict(repetitions=1, **{key: runtime['execution'].get(key, {'tool_timeout':60,'context_window':8192,'hint_stalled_turns':2,'max_tries_before_solution':6}.get(key)) for key in
-                ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window', 'hint_stalled_turns', 'max_tries_before_solution')}))
+                ('max_turns', 'wall_seconds', 'tool_timeout', 'context_window', 'hint_stalled_turns', 'max_tries_before_solution')}),
+            auto_approve_dangerous=runtime['execution'].get('auto_approve_dangerous', True))
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         value['model_config_writable'] = self.runtime['backend']['type']=='fusion' or bool((value['updates'] or {}).get('can_update'))
-        from .experiment_controls import catalogue
-        value['condition_catalogs'] = {key:dict(tools=item['tools']) for key,item in catalogue(runtime).items()}
+        from .experiment_controls import catalogue, participant_catalogue
+        extra_catalogs = participant_catalogue(workspace, value['roles'].get('participant'))
+        value['condition_catalogs'] = {
+            key: dict(tools=item['tools'], **({'definitions': item['definitions']} if item.get('definitions') else {}))
+            for key,item in catalogue(runtime, extra_catalogs).items()}
         value['extra_reset_hooks_available'] = bool(runtime['backend'].get('before_trial'))
         access.current()
         return value

@@ -76,6 +76,40 @@ def test_guest_refuses_symlinks_and_embedded_credentials(guest_root, tmp_path):
         guest.validate('participant', dict(settings(), url='https://user:secret@models.example/v1'))
 
 
+def test_guest_reads_effective_tool_catalog_and_includes_caf_builtins(guest_root):
+    ev.write_json(guest_root / 'configs/cli.json', dict(settings(), tools_config='tools.json'))
+    ev.write_json(guest_root / 'tools.json', {'tools': [
+        {'name': 'nmap', 'command': 'nmap', 'description': 'Inspect hosts'},
+        {'name': 'shell_dangerous', 'command': 'bash', 'description': 'Run an unrestricted command'},
+    ]})
+    result = guest.dispatch(dict(action='tools', role='participant', root=str(guest_root)))
+    names = [item['name'] for item in result['tools']]
+    assert names[:2] == ['nmap', 'shell_dangerous']
+    assert set(names[-4:]) == {
+        'interactive_session_list', 'interactive_session_read',
+        'interactive_session_write', 'interactive_session_close',
+    }
+    assert result['tools'][1]['risk'] == 'dangerous'
+    assert result['tools'][-1]['risk'] == 'interactive'
+    assert len(result['catalog']['tools']) == 6
+
+
+def test_host_freezes_participant_tool_catalog_for_condition_selection(pve, lab, tmp_path, monkeypatch, guest_root):
+    manager, user, workspace, runtime, calls = fixture_manager(pve, lab, tmp_path, monkeypatch, guest_root)
+    ev.write_json(guest_root / 'configs/cli.json', dict(settings(), tools_config='tools.json'))
+    ev.write_json(guest_root / 'tools.json', {'tools': [
+        {'name': 'shell_dangerous', 'command': 'bash', 'allow_args': True},
+    ]})
+    result = manager.exchange(user, dict(role='participant', action='tools'))
+    assert result['source'] == 'participant-vm'
+    assert result['tools'][0]['name'] == 'shell_dangerous'
+    from cyber_agent_flow_orchestrator.experiment_controls import participant_catalogue
+    choices = participant_catalogue(workspace, 9403)
+    assert choices['participant-vm']['tools'][0] == 'shell_dangerous'
+    assert participant_catalogue(workspace, 9999) == {}
+    assert 'shell_dangerous' in (workspace.path / 'participant-tools-catalog.json').read_text()
+
+
 def fixture_manager(pve, lab, tmp_path, monkeypatch, guest_root):
     original_lease = ev.lease
     monkeypatch.setattr(ev, 'lease', lambda path: original_lease(tmp_path / ('lock-' + ev.digest(str(path))) if str(path).startswith('/var/lock/') else path))

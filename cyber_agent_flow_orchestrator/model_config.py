@@ -2,6 +2,7 @@
 from cyber_agent_flow_eval.fusion import vm_lock_path
 
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -56,11 +57,11 @@ class ModelConfigs:
         if not isinstance(data, dict) or set(data) - {'role', 'action', 'token', 'settings', 'api_key'}:
             raise ModelConfigError('Invalid model configuration request')
         role, action = data.get('role'), data.get('action')
-        if role not in ('participant', 'scenarioforge') or action not in ('read', 'stage', 'save', 'use') or (action in ('stage', 'use') and role != 'participant'):
+        if role not in ('participant', 'scenarioforge') or action not in ('read', 'stage', 'save', 'use', 'tools') or (action in ('stage', 'use', 'tools') and role != 'participant'):
             raise ModelConfigError('Unsupported model configuration action')
-        if action != 'read' and not self.enabled:
+        if action not in ('read', 'tools') and not self.enabled:
             raise ModelConfigError('Application configuration writes are disabled by this server')
-        expected = {'role', 'action'} if action == 'read' else {'role', 'action', 'token', 'settings'} if action in ('stage', 'save') else {'role', 'action', 'token'}
+        expected = {'role', 'action'} if action in ('read', 'tools') else {'role', 'action', 'token', 'settings'} if action in ('stage', 'save') else {'role', 'action', 'token'}
         if set(data) - {'api_key'} != expected or ('api_key' in data and action != 'save'):
             raise ModelConfigError('Invalid model configuration fields')
         if action in ('stage', 'save'):
@@ -73,14 +74,14 @@ class ModelConfigs:
         vmid = workspace.roles()[role]
         if vmid is None: raise ModelConfigError('Save a VM selection for this application first')
         access.require_vm(vmid)
-        if action != 'read' and self.runtime['backend']['type'] != 'fusion': require_maintenance(access, self.group)
+        if action not in ('read', 'tools') and self.runtime['backend']['type'] != 'fusion': require_maintenance(access, self.group)
         definition = next(item for item in definitions(self.cfg, self.runtime) if item['role'] == role)
         draft_path = workspace.path / f'model-draft-{role}.json'
         if draft_path.is_symlink(): raise ModelConfigError('Invalid model draft file')
         try:
             with ev.lease(workspace.path / '.model-config.lock'):
                 args = dict(role=role, action=action, root=definition['root'])
-                if action != 'read':
+                if action not in ('read', 'tools'):
                     draft = ev.read_json(draft_path) if draft_path.is_file() else {}
                     if (not isinstance(data.get('token'), str) or not re.fullmatch('[0-9a-f]{32}', data['token']) or
                             draft.get('token') != data['token'] or draft.get('vmid') != vmid or draft.get('root') != definition['root']):
@@ -99,16 +100,37 @@ class ModelConfigs:
                         args['settings'] = data['settings']
                         if 'api_key' in data: args['api_key'] = data['api_key']
                 def authorize(argv):
-                    access.qm(argv, required_group=self.group if action != 'read' and self.runtime['backend']['type'] != 'fusion' else None)
+                    access.qm(argv, required_group=self.group if action not in ('read', 'tools') and self.runtime['backend']['type'] != 'fusion' else None)
                 agent = ev.GuestAgent(self.runtime['backend'], authorize=authorize)
                 agent.script = Path(__file__).with_name('guest_model_config.py').read_text()
                 # write uses qm stdin, so a replacement key never enters process argv.
-                if action == 'read':
+                if action in ('read', 'tools'):
                     result = agent.call(vmid, 'model_config', **args)
                 else:
                     with ev.lease(vm_lock_path(self.runtime['backend'], vmid)):
                         result = agent.call(vmid, 'write', timeout=120, **args)
                 access.current()
+                if action == 'tools':
+                    catalog = result.pop('catalog', None)
+                    summaries = result.get('tools')
+                    if (not isinstance(catalog, dict) or not isinstance(catalog.get('tools'), list)
+                            or not isinstance(summaries, list) or not summaries):
+                        raise ModelConfigError('Participant VM returned an invalid tool catalog')
+                    names = [item.get('name') for item in summaries if isinstance(item, dict)]
+                    if (len(names) != len(summaries) or len(set(names)) != len(names)
+                            or any(not isinstance(name, str) or not name for name in names)):
+                        raise ModelConfigError('Participant VM returned invalid tool metadata')
+                    content = (json.dumps(catalog, indent=2, sort_keys=True) + '\n').encode()
+                    digest = hashlib.sha256(content).hexdigest()
+                    catalog_path = workspace.path / 'participant-tools-catalog.json'
+                    metadata_path = workspace.path / 'participant-tools.json'
+                    private_file(catalog_path, content, replace=catalog_path.exists())
+                    metadata = dict(vmid=vmid, root=definition['root'], source='participant-vm',
+                                    catalog=str(catalog_path), catalog_sha256=digest,
+                                    source_path=result.get('source_path'), tools=summaries)
+                    private_file(metadata_path, json.dumps(metadata, indent=2).encode(), replace=metadata_path.exists())
+                    return dict(action=action, role=role, vmid=vmid, source='participant-vm',
+                                catalog_sha256=digest, source_path=result.get('source_path'), tools=summaries)
                 token = uuid.uuid4().hex
                 if action == 'read' and draft_path.is_file():
                     previous = ev.read_json(draft_path)

@@ -506,7 +506,7 @@ The Progress window shows the saved workflow timeline: XML verification, prepara
 
 Download counters report bytes received by the existing guest-agent transfers and mark verification only after checksum validation. During guest commands, the coordinator records QGA responses and reads up to 8 KiB of new command output every ten seconds. Partial command logs are saved on the host while execution is active; redacted excerpts appear in the troubleshooting console. A thirty-second heartbeat reports elapsed time, collected log bytes and the configured command limit even when output is quiet. Demo preparation reports backend loading, asset copying, CORE settings, topology planning and evaluation-task creation; Python demo/deployment commands run unbuffered. ScenarioForge output exposes its reported CORE operations; live model/tool calls are not streamed. Status and results requests only read host-saved data and never initiate these VM reads. Participant upload counters and service state come from evaluator transport checkpoints. Progress is retained in workflow/results JSON and the run bundle. Older runs without stage timestamps retain their recorded stage states.
 
-In **New → Evaluation**, sample task definitions are visible and locked. Custom experiments can preview ScenarioForge tasks, edit a copy, add/remove tasks or import a JSON task array. Create remains disabled for missing prompts, duplicate/invalid IDs, malformed criteria or missing readiness checks. Custom task definitions are frozen in the experiment XML and retained in reruns and downloads. See [scenario experiments](scenario-experiments.md#caf-and-evaluation-configuration).
+In **New → Evaluation**, sample task definitions are visible and locked. Custom experiments can preview ScenarioForge tasks, edit a copy, add/remove tasks or import a JSON task array. **Load tools from participant VM** reads the effective CAF native-MCP catalog, adds CAF's built-in interactive-session controls, and creates a condition with a scrollable per-tool selector. The pulled catalog is bound to the selected participant VM and frozen with the experiment. Create remains disabled for missing prompts, duplicate/invalid IDs, malformed criteria or missing readiness checks. Custom task definitions are frozen in the experiment XML and retained in reruns and downloads. See [scenario experiments](scenario-experiments.md#caf-and-evaluation-configuration).
 
 When an experiment completes with errors, **Progress** and **Results** show an
 **Experiment errors** section identifying each unsuccessful trial, condition,
@@ -517,9 +517,11 @@ reads use saved host artifacts; an agent answer that fails verification while
 execution completes is reported through the verified score, not a trial error.
 
 Orchestrated experiments default to `execution.auto_approve_dangerous: true`,
-CAF's Python equivalent of `--dangerous-no-prompt`. The flag is saved in the run
-configuration and passed to the participant session. Network allow/disallow rules,
-tool selection and wall-clock budgets still apply. The participant CAF checkout
+CAF's Python equivalent of `--dangerous-no-prompt`. **Allow dangerous-level CAF
+tool actions during unattended trials** makes that setting explicit and editable;
+it is independent of selecting `shell_dangerous` in a condition. The flag is saved
+in the run configuration and passed to the participant session. Network
+allow/disallow rules, tool selection and wall-clock budgets still apply. The participant CAF checkout
 must support this option and unattended continuation at tool timeout checkpoints.
 Saved interaction events appear in Failure details with the decision type, tool
 and timeout checkpoint; arguments and command bodies are omitted from this preview.

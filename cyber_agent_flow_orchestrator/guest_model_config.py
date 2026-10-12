@@ -200,9 +200,65 @@ def network_scope(url, config):
                 excluded_targets=sorted(addresses | gateways), warnings=warnings)
 
 
+def tool_catalog(root, config):
+    """Read the participant's effective native MCP catalog without executing it."""
+    configured = config.get('tools_config')
+    if configured is not None and (not isinstance(configured, str) or not configured.strip() or len(configured) > 4096):
+        raise ValueError('Invalid participant tools_config path')
+    if not configured or configured == 'kali_tools.json':
+        candidates = [root / 'kali_tools.json', root / 'kali_tools.default.json']
+        path = next((item for item in candidates if item.is_file()), candidates[-1])
+    else:
+        path = Path(configured)
+        if not path.is_absolute():
+            path = root / path
+    if path.is_symlink() or path.resolve() != path or not path.is_file():
+        raise ValueError('Participant tool catalog must be an existing regular file without symlinks')
+    with path.open('rb') as stream:
+        content = stream.read(4 * 1024 * 1024 + 1)
+    if len(content) > 4 * 1024 * 1024:
+        raise ValueError('Participant tool catalog exceeds 4 MiB')
+    try:
+        catalog = json.loads(content)
+    except (json.JSONDecodeError, UnicodeError):
+        raise ValueError('Participant tool catalog is not valid JSON') from None
+    tools = catalog.get('tools') if isinstance(catalog, dict) else None
+    if not isinstance(tools, list) or not tools or len(tools) > 1000:
+        raise ValueError('Participant tool catalog must contain 1 to 1000 tools')
+    # CAF exposes these built-ins whenever a native catalog is enabled. They
+    # are not always serialized in kali_tools.json, so include them in the
+    # selectable snapshot that the evaluator later supplies to CAF.
+    builtin_descriptions = {
+        'interactive_session_list': 'List preserved interactive sessions created by prior tool calls.',
+        'interactive_session_read': 'Read newly available output from a preserved interactive session.',
+        'interactive_session_write': 'Send input to a preserved interactive session and read its output.',
+        'interactive_session_close': 'Terminate a preserved interactive session and collect final output.',
+    }
+    serialized_names = {item.get('name') for item in tools if isinstance(item, dict)}
+    for name, description in builtin_descriptions.items():
+        if name not in serialized_names:
+            tools.append(dict(name=name, description=description))
+    seen, summaries = set(), []
+    for item in tools:
+        name = item.get('name') if isinstance(item, dict) else None
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', name) or name in seen:
+            raise ValueError('Participant tool catalog contains invalid or duplicate tool names')
+        seen.add(name)
+        description = item.get('description', '')
+        if not isinstance(description, str):
+            description = ''
+        risk = 'dangerous' if name == 'shell_dangerous' else 'interactive' if name in {
+            'shell', 'shell_extended', 'shell_sequence', 'msf_run',
+            'interactive_session_list', 'interactive_session_read',
+            'interactive_session_write', 'interactive_session_close'} else 'standard'
+        summaries.append(dict(name=name, description=description[:1000], risk=risk))
+    return dict(catalog=catalog, tools=summaries, source_path=str(path),
+                catalog_sha256=hashlib.sha256(content).hexdigest())
+
+
 def dispatch(data):
     role, op = data.get('role'), data.get('action')
-    if role not in ('participant', 'scenarioforge') or op not in ('read', 'save', 'use', 'scope') or (op in ('use', 'scope') and role != 'participant'):
+    if role not in ('participant', 'scenarioforge') or op not in ('read', 'save', 'use', 'scope', 'tools') or (op in ('use', 'scope', 'tools') and role != 'participant'):
         raise ValueError('Unsupported model configuration operation')
     root = Path(data['root'])
     if not root.is_absolute() or root.resolve() != root or not root.is_dir():
@@ -219,11 +275,13 @@ def dispatch(data):
             with path.open('rb') as stream: content = stream.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024: raise ValueError('Application configuration is too large')
         identity = hashlib.sha256(content).hexdigest()
-        if op not in ('read', 'scope') and data.get('revision') != identity:
+        if op not in ('read', 'scope', 'tools') and data.get('revision') != identity:
             raise ValueError('Configuration changed in the VM. Pull it again before saving or using it.')
         text = content.decode('utf-8')
         config = json.loads(text or '{}') if role == 'participant' else env_values(text)
         if not isinstance(config, dict): raise ValueError('Application configuration must be an object')
+        if op == 'tools':
+            return tool_catalog(root, config)
         if op == 'scope':
             return network_scope(data['url'], config)
         key_name = 'api_key' if role == 'participant' else 'CORETG_AI_API_KEY'

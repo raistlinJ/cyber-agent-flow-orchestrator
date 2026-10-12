@@ -1,12 +1,42 @@
 """Reviewable condition definitions; host paths never come from browser input."""
 
 from copy import deepcopy
+import hashlib
+import json
 from pathlib import Path
 import re
 from .samples import SampleRequestError
 
 
-def catalogue(runtime):
+def participant_catalogue(workspace, vmid):
+    """Return a server-owned catalog pulled from the currently selected participant."""
+    if vmid is None:
+        return {}
+    metadata_path = workspace.path / 'participant-tools.json'
+    catalog_path = workspace.path / 'participant-tools-catalog.json'
+    if (not metadata_path.is_file() or metadata_path.is_symlink()
+            or not catalog_path.is_file() or catalog_path.is_symlink()):
+        return {}
+    try:
+        metadata = json.loads(metadata_path.read_text())
+        content = catalog_path.read_bytes()
+        catalog = json.loads(content)
+        tools = metadata['tools']
+        names = [item['name'] for item in tools]
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if (metadata.get('vmid') != vmid or metadata.get('source') != 'participant-vm'
+            or metadata.get('catalog_sha256') != hashlib.sha256(content).hexdigest()
+            or not isinstance(catalog, dict) or not isinstance(catalog.get('tools'), list)
+            or not isinstance(tools, list) or not tools or len(set(names)) != len(names)
+            or any(not isinstance(name, str) or not name for name in names)
+            or names != [item.get('name') for item in catalog['tools'] if isinstance(item, dict)]):
+        return {}
+    return {'participant-vm': dict(catalog=str(catalog_path), tools=names,
+                                   definitions=deepcopy(tools), guidance_files=[])}
+
+
+def catalogue(runtime, extra_catalogs=None):
     builtins = Path(__file__).with_name("sample_data")
     choices = {
         "baseline": dict(
@@ -26,16 +56,20 @@ def catalogue(runtime):
             name = "configured-" + name
         choices[name] = {k: deepcopy(v) for k, v in item.items() if k != "id"}
         choices[name]["collect_source"] = item["id"]
+    for name, item in (extra_catalogs or {}).items():
+        if name not in choices:
+            choices[name] = deepcopy(item)
     return choices
 
 
-def validate(value, runtime):
+def validate(value, runtime, extra_catalogs=None):
     if not isinstance(value, dict) or set(value) - {
         "order_seed",
         "reset_each_trial",
         "conditions",
         "pricing",
         "use_configured_reset_hooks",
+        "auto_approve_dangerous",
     }:
         raise SampleRequestError("Unknown experiment control fields")
     if (
@@ -47,10 +81,12 @@ def validate(value, runtime):
         raise SampleRequestError("reset_each_trial must be boolean")
     if type(value.get("use_configured_reset_hooks", False)) is not bool:
         raise SampleRequestError("use_configured_reset_hooks must be boolean")
+    if type(value.get("auto_approve_dangerous", True)) is not bool:
+        raise SampleRequestError("auto_approve_dangerous must be boolean")
     rows = value.get("conditions", [])
     if not isinstance(rows, list) or len(rows) > 16:
         raise SampleRequestError("Supply up to 16 experiment conditions")
-    choices = catalogue(runtime)
+    choices = catalogue(runtime, extra_catalogs)
     seen = set()
     if "pricing" in value:
         from cyber_agent_flow_eval.usage import validate_pricing
@@ -97,10 +133,13 @@ def validate(value, runtime):
     return deepcopy(value)
 
 
-def apply(value, runtime, cfg, folder, defaults, source_cfg=None):
-    value = validate(value, defaults)
+def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs=None):
+    value = validate(value, defaults, extra_catalogs)
     runtime["order_seed"] = value.get("order_seed", 0)
     cfg["reset_each_trial"] = value.get("reset_each_trial", True)
+    runtime.setdefault("execution", {})["auto_approve_dangerous"] = value.get(
+        "auto_approve_dangerous", defaults.get("execution", {}).get("auto_approve_dangerous", True)
+    )
     if value.get("use_configured_reset_hooks"):
         if not defaults["backend"].get("before_trial"):
             raise SampleRequestError(
@@ -117,7 +156,8 @@ def apply(value, runtime, cfg, folder, defaults, source_cfg=None):
     runtime["conditions"] = []
     cfg["collect"] = {}
     for row in value["conditions"]:
-        original = deepcopy(catalogue(defaults)[row["source"]])
+        original = deepcopy(catalogue(defaults, extra_catalogs)[row["source"]])
+        original.pop('definitions', None)
         collect_source = original.pop("collect_source", None)
         original.update(
             id=row["id"],
