@@ -142,6 +142,8 @@ class UserDashboard:
         # Trial progress is independent of a potentially slow guest observation.
         with entry['run_cache_lock']:
             value['runs'] = service.list_runs(workspace.runs, cache=entry['run_cache'])
+        from .helper_library import listing as helper_listing
+        value['generated_helpers'] = helper_listing(workspace)
         value['samples'] = self.samples.catalog(value['roles'], workspace)
         value['scenarios'] = dict(enabled=True, vmid=value['roles'].get('scenarioforge'),
             allowed_targets=', '.join(self.runtime['execution']['network_policy']['allow']),
@@ -295,8 +297,11 @@ class UserDashboard:
             from .post_execution import analyze
             analysis = analyze(access, self.root, run_id,
                 progress=lambda step, message: progress(step, message))
-            progress(5, 'Freezing CAF analysis and generated helper into a derived experiment')
-            created = self.scenarios.create_assisted(access, run_id, request_id, analysis)
+            progress(5, 'Saving the generated helper and freezing a derived experiment')
+            from .helper_library import save as save_helper
+            helper = save_helper(self.workspace(access), run_id, analysis)
+            created = self.scenarios.create_assisted(access, run_id, request_id, analysis,
+                                                      helper_id=helper['id'])
             progress(6, 'Validating the derived experiment before launch', derived_run_id=created['run_id'])
             launched = self.scenarios.run_saved(access, created['run_id'], launch_request_id,
                 progress=lambda step, message: progress(min(9, step + 4), message,
@@ -304,7 +309,8 @@ class UserDashboard:
             progress(10, 'Generated-helper comparison queued; follow its experiment progress',
                      'completed', derived_run_id=launched['run_id'])
             return dict(run_id=launched['run_id'], status=launched['status'],
-                        source_run_id=run_id, analysis_sha256=analysis.get('analysis_sha256'))
+                        source_run_id=run_id, helper_id=helper['id'],
+                        analysis_sha256=analysis.get('analysis_sha256'))
         except Exception as exc:
             with self.lock:
                 current = self.analysis_records.get(key, {})
@@ -312,6 +318,18 @@ class UserDashboard:
                      'failed', error=str(exc), **({'derived_run_id': current['derived_run_id']}
                                                   if current.get('derived_run_id') else {}))
             raise
+
+    def generated_helper(self, access, helper_id):
+        from .helper_library import read
+        value = read(self.workspace(access), helper_id)
+        access.current()
+        return value
+
+    def review_generated_helper(self, access, helper_id, reviewed):
+        from .helper_library import set_reviewed
+        value = set_reviewed(self.workspace(access), helper_id, reviewed)
+        access.current()
+        return value
 
     def maintain(self, access, data):
         return self.updates.submit(access, **data)

@@ -76,11 +76,13 @@ def test_create_assisted_freezes_lineage_and_paired_conditions(pve, lab, tmp_pat
                     "analysis": "structured review", "analysis_sha256": "d" * 64,
                     "input_sha256": "e" * 64, "model": {"name": "fixture"},
                     "created_at": "2026-01-01T00:00:00+00:00"}
-        result = controller.create_assisted(user, source_run_id, "f" * 32, analysis)
+        result = controller.create_assisted(user, source_run_id, "f" * 32, analysis,
+                                            helper_id="helper-" + "2" * 24)
         derived = workspace.run_path(result["run_id"])
         record = ev.read_json(derived / "workflow.json")
         derived_runtime = yaml.safe_load((workspace.path / "inputs" / result["run_id"] / "runtime.yaml").read_text())
         assert record["post_execution"]["source_run_id"] == source_run_id
+        assert record["post_execution"]["helper_id"] == "helper-" + "2" * 24
         assert record["post_execution"]["source_workflow_hash"] == identity
         assert len(derived_runtime["conditions"]) == 2
         original, assisted = derived_runtime["conditions"]

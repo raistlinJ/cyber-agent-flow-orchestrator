@@ -211,6 +211,16 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(200, value, 'text/csv', **{'Content-Disposition': f'attachment; filename="{parts[3]}.csv"'})
                     else:
                         self.respond(200, value)
+                elif path.startswith('/api/generated-helpers/') and getattr(dashboard, 'scoped', False):
+                    parts = path.split('/')
+                    if len(parts) != 4:
+                        self.respond(404, {'error': 'Generated helper not found'})
+                        return
+                    try:
+                        self.respond(200, dashboard.generated_helper(
+                            auth.access(token, revalidate=False), parts[3]))
+                    except (FileNotFoundError, KeyError, ValueError):
+                        self.respond(404, {'error': 'Generated helper not found'})
                 elif path in {f'/demo-{name}.{ext}' for name in ('smoke', 'tools-vs-helper') for ext in ('xml', 'zip')}:
                     filename = path[1:]
                     with (assets / filename).open('rb') as stream:
@@ -320,6 +330,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 stage = {'/api/experiments/create': 'create experiment',
                          '/api/experiments/run': 'run experiment', '/api/experiments/stop': 'stop experiment',
                          '/api/experiments/analyze-rerun': 'analyze experiment and create assisted rerun',
+                         '/api/generated-helpers/review': 'review generated helper',
                          '/api/model-config': 'model settings', '/api/scenarios/list': 'list scenarios',
                          '/api/scenarios/references': 'load scenario reference', '/api/scenarios/tasks': 'load scenario tasks', '/api/samples/run': 'run sample',
                          '/api/roles': 'save VM roles', '/api/applications': 'application maintenance'}.get(path, 'request')
@@ -385,6 +396,12 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         raise SampleRequestError('Supply run, analysis request and launch request IDs only')
                     self.respond(202, dashboard.analyze_and_rerun(
                         auth.access(token, revalidate=False), data['run_id'], data['request_id'], data['launch_request_id']))
+                elif path == '/api/generated-helpers/review' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
+                    if (set(data) != {'helper_id', 'reviewed'} or not isinstance(data['helper_id'], str)
+                            or type(data['reviewed']) is not bool):
+                        raise SampleRequestError('Supply a generated helper ID and reviewed state only')
+                    self.respond(200, dashboard.review_generated_helper(
+                        auth.access(token, revalidate=False), data['helper_id'], data['reviewed']))
                 elif path == '/api/model-network-scope' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     if data:
                         raise ModelConfigError('Supply no network scope parameters')

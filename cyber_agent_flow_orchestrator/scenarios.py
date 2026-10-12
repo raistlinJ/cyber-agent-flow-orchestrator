@@ -498,7 +498,7 @@ class ScenarioExperiments:
                     created_at=now(), updated_at=now(), stages={}, events=[],
                     message='Ready. Run deploys the saved scenario and evaluates it with baseline tools.')
 
-    def create_assisted(self, access, source_run_id, request_id, analysis):
+    def create_assisted(self, access, source_run_id, request_id, analysis, *, helper_id=None):
         """Clone a completed run into original/assisted paired conditions."""
         if (not re.fullmatch('[0-9a-f]{32}', request_id)
                 or not re.fullmatch(r'scenario-[0-9a-f]{32}', source_run_id)):
@@ -575,6 +575,8 @@ class ScenarioExperiments:
                     'baseline_condition': original['id'],
                     'assisted_condition': assisted['id'],
                 }
+                if helper_id is not None:
+                    record['post_execution']['helper_id'] = helper_id
                 record['message'] = 'Ready. This derived experiment compares each original condition with its CAF-generated helper.'
                 ev.write_json(output / 'workflow.json', record)
             except BaseException:

@@ -320,6 +320,13 @@ unchanged and the derived journal records its lineage. This is a development
 rerun learned from prior evidence; validate the helper on held-out scenarios
 before claiming general improvement. It does not publish executable MCP tools.
 
+Each generated Markdown helper is also saved automatically in the signed-in
+user's private **Evaluation → Helpers** library. A new experiment can preview it,
+mark it reviewed, and add an editable copy as a condition. Library entries retain
+their source run, scenario, model, timestamps and content hashes. They are never
+silently enabled for another experiment; adding one freezes its current content
+into that experiment's normal saved inputs.
+
 For one exported task, examples 1/2 schedule **2 trials** (1 condition × 2
 repetitions); example 3 schedules **4 trials** (2 conditions × 2 repetitions).
 Multiple tasks multiply these counts. Each attempt uses one task prompt, up to

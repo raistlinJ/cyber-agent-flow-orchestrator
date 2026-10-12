@@ -10,7 +10,9 @@ import pytest
 from playwright.sync_api import sync_playwright, expect
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cyber_agent_flow_orchestrator.user_dashboard import UserDashboard
-from cyber_agent_flow_orchestrator import scenarios
+from cyber_agent_flow_orchestrator import helper_library, scenarios
+from cyber_agent_flow_orchestrator.workspaces import Workspace, private_directory
+from cyber_agent_flow_eval import integration as ev
 from https_fixture import secure_server, PASSWORD
 from test_pve_auth import pve_server, make_auth
 from test_user_access import Probe, vm
@@ -56,8 +58,15 @@ def main():
                 assert op == 'snapshot'
                 return dict(item, snapshot_path='/opt/scenarioforge/outputs/caf-orchestrator/'+data['token']+'/scenario.xml')
         patch.setattr(scenarios, 'guest', lambda backend: Guest())
-        from cyber_agent_flow_eval import integration as ev
         patch.setattr(ev, 'GuestAgent', lambda backend: Guest())
+        workspace=Workspace(root/'runs','operator@pve')
+        helper_source=workspace.run_path('scenario-'+'f'*32);private_directory(helper_source)
+        ev.write_json(helper_source/'workflow.json',dict(workflow={'id':'saved'},workflow_hash='1'*64,
+            scenario_experiment=dict(id='2'*64,scenario='Prior helper scenario',sha256='3'*64)))
+        saved_helper=helper_library.save(workspace,helper_source.name,dict(
+            helper='Probe the narrow target first, then preserve evidence from each verified service.',
+            analysis_sha256='4'*64,input_sha256='5'*64,created_at='2026-10-12T12:00:00+00:00',
+            model=dict(provider='openai',name='analyst')))
         with pve_server(root) as pve:
             pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403), vm(9404)]
             dashboard = UserDashboard(root / 'examples/01-reuse-export.yaml', root / 'runs', 2, lambda b,a: Probe(b,a,[]))
@@ -93,9 +102,22 @@ def main():
                     expect(page.locator('#sample-prompt')).to_be_visible()
                     expect(page.locator('#sample-prompt')).to_be_disabled()
                     expect(page.locator('#sample-task-id')).to_have_value('smoke')
+                    page.get_by_role('tab',name='Hints & solutions',exact=True).click()
                     expect(page.locator('#provide-progressive-hints')).not_to_be_checked()
                     expect(page.locator('#provide-progressive-hints')).to_be_enabled()
                     page.locator('#provide-progressive-hints').check()
+                    page.get_by_role('tab',name='Helpers',exact=True).click()
+                    expect(page.locator('.generated-helper-card')).to_contain_text('Prior helper scenario')
+                    expect(page.locator('.generated-helper-card')).to_contain_text('unreviewed')
+                    page.get_by_text('Preview generated guidance',exact=True).click()
+                    expect(page.locator('.generated-helper-card pre')).to_contain_text('Probe the narrow target first')
+                    page.get_by_role('button',name='Mark reviewed',exact=True).click()
+                    expect(page.locator('.generated-helper-card')).to_contain_text('reviewed')
+                    page.get_by_role('button',name='Add as condition',exact=True).click()
+                    expect(page.get_by_label('Generated participant guidance (editable copy)')).to_have_value(saved_helper['content'])
+                    expect(page.get_by_role('button',name='Added to this experiment',exact=True)).to_be_disabled()
+                    page.screenshot(path='/tmp/caf-generated-helper-library.png')
+                    page.get_by_role('button',name='Remove condition',exact=True).click()
                     page.get_by_role('tab',name='ScenarioForge',exact=True).click()
                     expect(page.locator('#sample-sf-use')).to_be_disabled()
                     expect(page.locator('#sample-sf-use')).to_have_value('Required · deploy, readiness check and evaluation export')
@@ -117,6 +139,7 @@ def main():
                     expect(page.locator('#sample-scenario-info')).to_be_hidden()
                     expect(page.locator('#eval-max_turns')).to_be_enabled()
                     page.get_by_role('tab',name="Evaluation",exact=True).click()
+                    page.get_by_role('tab',name='Trial limits',exact=True).click()
                     page.locator('#eval-max_turns').fill('9')
                     page.get_by_role('tab',name="Evaluation",exact=True).click()
                     page.locator('#eval-repetitions').fill('2')
@@ -196,6 +219,7 @@ def main():
                     page.get_by_role('tab',name='Evaluation',exact=True).click()
                     page.locator('#eval-repetitions').fill('2')
                     expect(page.locator('#create-experiment')).to_be_enabled()
+                    page.get_by_role('tab',name='Tasks',exact=True).click()
                     page.locator('#load-scenario-tasks').click()
                     expect(page.locator('#task-source-note')).to_contain_text('Loaded 1 task')
                     expect(page.locator('#task-scenario-context')).to_contain_text('1 Flow step')
@@ -255,7 +279,8 @@ def main():
                     row=page.locator('#runs tr').filter(has_text='Demo saved scenario')
                     expect(row).to_contain_text('ready')
                     expect(row.get_by_role('button',name='Deploy and run',exact=True)).to_be_enabled()
-                    journals=list((root/'runs').rglob('workflow.json'))
+                    journals=[path for path in (root/'runs').rglob('workflow.json') if 'runtime' in json.loads(path.read_text())]
+                    assert len(journals)==1
                     saved=json.loads(journals[0].read_text())
                     assert saved['runtime']['execution']['network_policy'] == dict(allow=['10.77.0.0/24'],disallow=['10.78.0.254/32','192.0.2.8/32','192.0.2.1/32'])
                     assert saved['runtime']['execution']['provide_progressive_hints'] is True

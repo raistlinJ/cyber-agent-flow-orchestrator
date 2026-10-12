@@ -70,6 +70,13 @@ orchestrator freezes the analysis and evidence hashes, pairs the source run's fi
 condition with its assisted copy, and immediately queues a new experiment against
 the same saved scenario and execution settings. The source run is never modified.
 
+The generated Markdown also enters the owner's persistent helper library. Open
+**New experiment → Evaluation → Helpers** to inspect its provenance, preview its
+content, mark it reviewed, and copy it into a new condition. Selection is explicit;
+the library does not automatically expose learned guidance to unrelated trials.
+The copied guidance remains editable until the experiment is created and is then
+frozen with the rest of the run inputs.
+
 The derived experiment is adaptation/development evidence because its helper was
 learned from the source run. Use a different held-out scenario or a preregistered
 study for a publishable generalization claim. The generated artifact is Markdown
