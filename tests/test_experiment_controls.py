@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import pytest
-from cyber_agent_flow_orchestrator.experiment_controls import validate, apply
+from cyber_agent_flow_orchestrator.experiment_controls import validate, apply, catalogue
 from cyber_agent_flow_orchestrator.evaluation_tasks import validate_tasks
 from cyber_agent_flow_orchestrator.samples import SampleRequestError
 from cyber_agent_flow_orchestrator import trial_reset
@@ -55,6 +55,7 @@ def test_conditions_select_configured_catalogs_and_freeze_guidance(tmp_path):
     apply(value, runtime, cfg, tmp_path, {"conditions": []})
     assert cfg["reset_each_trial"] and runtime["order_seed"] == 19
     assert all("provide_progressive_hints" not in row for row in runtime["conditions"])
+    assert "helper" not in runtime["conditions"][1]
     assert (
         Path(runtime["conditions"][1]["guidance_files"][0]).read_text()
         == "Inspect the service."
@@ -62,6 +63,13 @@ def test_conditions_select_configured_catalogs_and_freeze_guidance(tmp_path):
     value["conditions"][0]["source"] = "../../private"
     with pytest.raises(SampleRequestError, match="configured"):
         validate(value, {"conditions": []})
+
+
+def test_helper_catalog_metadata_is_separate_from_runtime_condition():
+    helper = catalogue({"conditions": []})["http-helper"]
+    assert helper["helper"]["name"] == "HTTP flag walker"
+    assert helper["helper"]["kind"] == "tool bundle"
+    assert helper["tools"][-1] == "http_flag_walk"
 
 
 def test_dynamic_participant_catalog_controls_tools_and_dangerous_approval(tmp_path):
@@ -95,6 +103,36 @@ def test_dynamic_participant_catalog_controls_tools_and_dangerous_approval(tmp_p
     with pytest.raises(SampleRequestError, match='available'):
         validate({**value, 'conditions': [{**value['conditions'][0], 'tools': ['missing']}]},
                  {'conditions': []}, extra)
+
+
+def test_selected_caf_guidance_assets_are_frozen_into_condition(tmp_path):
+    runtime, cfg = {'conditions': [], 'execution': {}}, {}
+    assets = {
+        'playbook:triage': {
+            'id': 'playbook:triage', 'kind': 'playbook', 'name': 'triage',
+            'content': '# CAF playbook: triage\n\nInspect the service.\n',
+        },
+        'skill:verify': {
+            'id': 'skill:verify', 'kind': 'skill', 'name': 'verify',
+            'content': '# CAF skill: verify\n\nVerify the result.\n',
+        },
+    }
+    value = {
+        'conditions': [{
+            'id': 'guided', 'source': 'baseline', 'tools': ['curl'],
+            'guidance_assets': ['playbook:triage', 'skill:verify'],
+        }],
+    }
+    apply(value, runtime, cfg, tmp_path / 'inputs', {'conditions': [], 'execution': {}},
+          guidance_assets=assets)
+    files = runtime['conditions'][0]['guidance_files']
+    assert len(files) == 2
+    assert 'Inspect the service.' in Path(files[0]).read_text()
+    assert 'Verify the result.' in Path(files[1]).read_text()
+    with pytest.raises(SampleRequestError, match='available in the participant snapshot'):
+        validate({**value, 'conditions': [{**value['conditions'][0],
+                 'guidance_assets': ['playbook:missing']}]}, {'conditions': []},
+                 guidance_assets=assets)
 
 
 def test_condition_progressive_hints_are_rejected_as_ambiguous():

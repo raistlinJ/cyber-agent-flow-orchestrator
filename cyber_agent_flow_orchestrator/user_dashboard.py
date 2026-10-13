@@ -164,11 +164,18 @@ class UserDashboard:
         value['experiment_defaults']['judge_credential_status'] = judge_credential_status(workspace, self.runtime)
         value['updates'] = self.updates.view(access, workspace, value['roles'])
         value['model_config_writable'] = self.runtime['backend']['type']=='fusion' or bool((value['updates'] or {}).get('can_update'))
-        from .experiment_controls import catalogue, participant_catalogue
+        from .experiment_controls import catalogue, participant_catalogue, participant_guidance_assets
         extra_catalogs = participant_catalogue(workspace, value['roles'].get('participant'))
+        catalogs = catalogue(runtime, extra_catalogs)
         value['condition_catalogs'] = {
             key: dict(tools=item['tools'], **({'definitions': item['definitions']} if item.get('definitions') else {}))
-            for key,item in catalogue(runtime, extra_catalogs).items()}
+            for key,item in catalogs.items()}
+        value['participant_guidance_assets'] = list(
+            participant_guidance_assets(workspace, value['roles'].get('participant')).values())
+        baseline_tools = set(catalogs['baseline']['tools'])
+        value['helper_catalog'] = [dict(
+            id=key, tools=item['tools'], added_tools=[tool for tool in item['tools'] if tool not in baseline_tools],
+            **item['helper']) for key,item in catalogs.items() if item.get('helper')]
         value['extra_reset_hooks_available'] = bool(runtime['backend'].get('before_trial'))
         access.current()
         return value

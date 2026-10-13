@@ -94,6 +94,54 @@ def test_guest_reads_effective_tool_catalog_and_includes_caf_builtins(guest_root
     assert len(result['catalog']['tools']) == 6
 
 
+def test_guest_loads_generated_mcp_tools_and_all_caf_guidance_kinds(guest_root):
+    ev.write_json(guest_root / 'configs/cli.json', dict(settings(), tools_config='tools.json'))
+    ev.write_json(guest_root / 'tools.json', {'tools': [
+        {'name': 'shell', 'command': 'bash', 'description': 'Run an interactive shell'},
+    ]})
+    (guest_root / 'tools_docs').mkdir()
+    (guest_root / 'tools_docs/shell.md').write_text('# Shell guide\nUse the shell carefully.\n')
+    (guest_root / 'mcp_client.py').write_text("_TOOL_DOC_MAP = {'shell': 'tools_docs/shell.md'}\n")
+    generated = guest_root / 'plugins/mcp_tools/site_probe'
+    generated.mkdir(parents=True)
+    (generated / 'probe.py').write_text('print("ok")\n')
+    ev.write_json(generated / 'manifest.json', {
+        'name': 'site_probe', 'command': 'python3', 'args': ['probe.py'],
+        'description': 'Inspect a site', 'allow_args': True,
+    })
+    playbooks = guest_root / 'plugins/playbooks'
+    playbooks.mkdir(parents=True)
+    (playbooks / 'triage.md').write_text('# Triage\nCollect service evidence.\n')
+    artifacts = guest_root / 'plugins/artifacts'
+    examples = {
+        'markdown/notes/document.md': '# Notes\nObserved facts.\n',
+        'skill/check-service/SKILL.md': '---\nname: check-service\ndescription: Check a service\n---\nCheck it.\n',
+        'rag_document/network/document.md': '# Network\nKnown topology.\n',
+        'rag_document/network/metadata.json': '{"title":"Network","summary":"Topology","tags":["network"]}',
+        'template/report/TEMPLATE.md': '# {{title}}\n',
+        'template/report/README.md': 'Set title.\n',
+        'structured_data/hosts/data.json': '{"hosts":["server"]}',
+        'structured_data/hosts/README.md': 'Known hosts.\n',
+    }
+    for relative, content in examples.items():
+        path = artifacts / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+    result = guest.dispatch(dict(action='tools', role='participant', root=str(guest_root)))
+    generated_tool = next(item for item in result['catalog']['tools'] if item['name'] == 'site_probe')
+    summary = next(item for item in result['tools'] if item['name'] == 'site_probe')
+    assert generated_tool['base_args'] == [str((generated / 'probe.py').resolve())]
+    assert summary['origin'] == 'generated' and summary['category'] == 'Generated MCP tools'
+    shell = next(item for item in result['tools'] if item['name'] == 'shell')
+    assert shell['has_guide'] is True
+    assert {item['kind'] for item in result['assets']} == {
+        'tool_guide', 'playbook', 'markdown', 'skill', 'rag_document',
+        'template', 'structured_data',
+    }
+    assert all(item['sha256'] and item['content'] for item in result['assets'])
+
+
 def test_host_freezes_participant_tool_catalog_for_condition_selection(pve, lab, tmp_path, monkeypatch, guest_root):
     manager, user, workspace, runtime, calls = fixture_manager(pve, lab, tmp_path, monkeypatch, guest_root)
     ev.write_json(guest_root / 'configs/cli.json', dict(settings(), tools_config='tools.json'))
@@ -108,6 +156,24 @@ def test_host_freezes_participant_tool_catalog_for_condition_selection(pve, lab,
     assert choices['participant-vm']['tools'][0] == 'shell_dangerous'
     assert participant_catalogue(workspace, 9999) == {}
     assert 'shell_dangerous' in (workspace.path / 'participant-tools-catalog.json').read_text()
+
+
+def test_host_keeps_guidance_content_private_and_vm_bound(pve, lab, tmp_path, monkeypatch, guest_root):
+    manager, user, workspace, runtime, calls = fixture_manager(pve, lab, tmp_path, monkeypatch, guest_root)
+    ev.write_json(guest_root / 'configs/cli.json', dict(settings(), tools_config='tools.json'))
+    ev.write_json(guest_root / 'tools.json', {'tools': [{'name': 'shell', 'command': 'bash'}]})
+    (guest_root / 'mcp_client.py').write_text("_TOOL_DOC_MAP = {'shell': 'tools_docs/shell.md'}\n")
+    (guest_root / 'tools_docs').mkdir()
+    (guest_root / 'tools_docs/shell.md').write_text('Private guide body')
+    result = manager.exchange(user, dict(role='participant', action='tools'))
+    assert result['guidance_assets'][0]['id'] == 'tool-guide:shell'
+    assert 'content' not in result['guidance_assets'][0]
+    from cyber_agent_flow_orchestrator.experiment_controls import participant_guidance_assets
+    public = participant_guidance_assets(workspace, 9403)
+    private = participant_guidance_assets(workspace, 9403, include_content=True)
+    assert 'content' not in public['tool-guide:shell']
+    assert 'Private guide body' in private['tool-guide:shell']['content']
+    assert participant_guidance_assets(workspace, 9999) == {}
 
 
 def fixture_manager(pve, lab, tmp_path, monkeypatch, guest_root):

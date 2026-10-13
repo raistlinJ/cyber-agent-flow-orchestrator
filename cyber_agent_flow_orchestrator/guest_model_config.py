@@ -200,6 +200,188 @@ def network_scope(url, config):
                 excluded_targets=sorted(addresses | gateways), warnings=warnings)
 
 
+_ASSET_LABELS = {
+    'tool_guide': 'Tool guide',
+    'playbook': 'Markdown playbook',
+    'markdown': 'Markdown document',
+    'skill': 'Agent skill',
+    'rag_document': 'RAG document',
+    'template': 'Reusable template',
+    'structured_data': 'Structured data',
+}
+_ASSET_FILES = {
+    'markdown': {'document.md'},
+    'skill': {'SKILL.md'},
+    'rag_document': {'document.md', 'metadata.json', 'chunks.jsonl'},
+    'template': {'TEMPLATE.md', 'README.md'},
+    'structured_data': {'data.json', 'README.md'},
+}
+_ASSET_FILE_LIMIT = 256 * 1024
+_ASSET_TOTAL_LIMIT = 2 * 1024 * 1024
+
+
+def _safe_text(path, root, limit=_ASSET_FILE_LIMIT):
+    """Read a bounded regular UTF-8 file contained by root, without symlinks."""
+    root = root.resolve()
+    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+        raise ValueError('CAF plugin artifact contains an unsafe file path')
+    with path.open('rb') as stream:
+        content = stream.read(limit + 1)
+    if len(content) > limit:
+        raise ValueError('CAF plugin artifact file exceeds 256 KiB')
+    try:
+        return content.decode('utf-8')
+    except UnicodeError:
+        raise ValueError('CAF plugin artifacts must be UTF-8 text') from None
+
+
+def _tool_doc_map(root):
+    """Read CAF's literal tool-to-guide mapping without importing the application."""
+    path = root / 'mcp_client.py'
+    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
+        return {}
+    try:
+        tree = ast.parse(_safe_text(path, root, 2 * 1024 * 1024))
+        for node in tree.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if any(isinstance(target, ast.Name) and target.id == '_TOOL_DOC_MAP' for target in targets):
+                    value = ast.literal_eval(node.value)
+                    if isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+                        return value
+    except (OSError, SyntaxError, ValueError):
+        pass
+    return {}
+
+
+def _artifact_content(kind, name, files):
+    sections = [f'# Cyber Agent Flow { _ASSET_LABELS[kind] }: {name}']
+    for filename, content in files:
+        language = 'json' if filename.endswith(('.json', '.jsonl')) else 'markdown' if filename.endswith('.md') else 'text'
+        sections.append(f'## {filename}\n\n```{language}\n{content.rstrip()}\n```')
+    return '\n\n'.join(sections).rstrip() + '\n'
+
+
+def guidance_assets(root, tool_names=None):
+    """Snapshot the guidance and document assets visible in CAF's Plugins page."""
+    plugins = root / 'plugins'
+    assets, total = [], 0
+
+    def add(asset_id, kind, name, files):
+        nonlocal total
+        content = _artifact_content(kind, name, files)
+        size = len(content.encode())
+        if size > _ASSET_FILE_LIMIT or total + size > _ASSET_TOTAL_LIMIT:
+            return
+        total += size
+        preview = ' '.join(line.strip() for _, text in files for line in text.splitlines()
+                           if line.strip() and not line.lstrip().startswith('#'))[:240]
+        assets.append(dict(id=asset_id, kind=kind, label=_ASSET_LABELS[kind], name=name,
+                           description=preview, files=[filename for filename, _ in files],
+                           bytes=size, content=content,
+                           sha256=hashlib.sha256(content.encode()).hexdigest()))
+
+    # Built-in tool guides have their own independent checkboxes in CAF.
+    for tool_name, relative in sorted(_tool_doc_map(root).items()):
+        if tool_names is not None and tool_name not in tool_names:
+            continue
+        path = root / relative
+        try:
+            add('tool-guide:' + tool_name, 'tool_guide', tool_name,
+                [(Path(relative).name, _safe_text(path, root))])
+        except (OSError, ValueError):
+            continue
+
+    playbooks = plugins / 'playbooks'
+    if playbooks.is_dir() and not playbooks.is_symlink():
+        for path in sorted(playbooks.iterdir()):
+            if path.suffix != '.md' or path.name.endswith('.PROVENANCE.md'):
+                continue
+            try:
+                add('playbook:' + path.stem, 'playbook', path.stem,
+                    [('playbook.md', _safe_text(path, plugins))])
+            except (OSError, ValueError):
+                continue
+
+    artifacts = plugins / 'artifacts'
+    for kind, allowed in _ASSET_FILES.items():
+        directory = artifacts / kind
+        if not directory.is_dir() or directory.is_symlink():
+            continue
+        for package in sorted(directory.iterdir()):
+            if not package.is_dir() or package.is_symlink() or not re.fullmatch(r'[A-Za-z0-9_-]+', package.name):
+                continue
+            files = []
+            try:
+                for path in sorted(package.rglob('*')):
+                    if not path.is_file():
+                        continue
+                    relative = path.relative_to(package).as_posix()
+                    if relative not in allowed and not (kind == 'skill' and relative.split('/', 1)[0] in {'references', 'assets'} and path.suffix in {'.md', '.txt', '.json'}):
+                        continue
+                    files.append((relative, _safe_text(path, package)))
+                if files:
+                    add(kind + ':' + package.name, kind, package.name, files)
+            except (OSError, ValueError):
+                continue
+    return assets
+
+
+def _generated_tools(root, names):
+    """Read generated MCP manifests using the same layout as CAF's Plugins page."""
+    directory = root / 'plugins' / 'mcp_tools'
+    if not directory.is_dir() or directory.is_symlink():
+        return []
+    result = []
+    for package in sorted(directory.iterdir()):
+        manifest_path = package / 'manifest.json'
+        if not package.is_dir() or package.is_symlink():
+            continue
+        try:
+            manifest = json.loads(_safe_text(manifest_path, package))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        name = manifest.get('name') if isinstance(manifest, dict) else None
+        if (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', name)
+                or name in names):
+            continue
+        command = manifest.get('command')
+        base_args = manifest.get('base_args', manifest.get('args', []))
+        if not isinstance(command, str) or not command or not isinstance(base_args, list) or not all(isinstance(arg, str) for arg in base_args):
+            continue
+        def resolve(value):
+            candidate = package / value
+            try:
+                if not candidate.is_symlink() and candidate.is_file() and candidate.resolve().is_relative_to(package.resolve()):
+                    return str(candidate.resolve())
+            except OSError:
+                pass
+            return value
+        manifest = dict(manifest, command=resolve(command), base_args=[resolve(arg) for arg in base_args])
+        manifest.pop('args', None)
+        manifest['_caf_origin'] = 'generated'
+        names.add(name)
+        result.append(manifest)
+    return result
+
+
+def _tool_category(name, risk, origin):
+    if origin == 'generated':
+        return 'Generated MCP tools'
+    if risk == 'interactive':
+        return 'Interactive sessions'
+    if risk == 'dangerous':
+        return 'Unrestricted execution'
+    lowered = name.lower()
+    if any(token in lowered for token in ('http', 'curl', 'wget', 'web', 'nikto', 'gobuster', 'dirb', 'ffuf', 'sqlmap')):
+        return 'Web and HTTP'
+    if any(token in lowered for token in ('nmap', 'masscan', 'ping', 'dns', 'arp', 'net', 'tcp', 'route', 'ospf', 'rip')):
+        return 'Network and discovery'
+    if any(token in lowered for token in ('msf', 'hydra', 'john', 'hashcat', 'smb', 'impacket', 'exploit')):
+        return 'Access and exploitation'
+    return 'Other catalog tools'
+
+
 def tool_catalog(root, config):
     """Read the participant's effective native MCP catalog without executing it."""
     configured = config.get('tools_config')
@@ -235,9 +417,13 @@ def tool_catalog(root, config):
         'interactive_session_close': 'Terminate a preserved interactive session and collect final output.',
     }
     serialized_names = {item.get('name') for item in tools if isinstance(item, dict)}
+    tools.extend(_generated_tools(root, serialized_names))
     for name, description in builtin_descriptions.items():
         if name not in serialized_names:
-            tools.append(dict(name=name, description=description))
+            tools.append(dict(name=name, description=description, _caf_origin='builtin'))
+            serialized_names.add(name)
+    assets = guidance_assets(root, serialized_names)
+    guide_names = {item['name'] for item in assets if item['kind'] == 'tool_guide'}
     seen, summaries = set(), []
     for item in tools:
         name = item.get('name') if isinstance(item, dict) else None
@@ -251,8 +437,14 @@ def tool_catalog(root, config):
             'shell', 'shell_extended', 'shell_sequence', 'msf_run',
             'interactive_session_list', 'interactive_session_read',
             'interactive_session_write', 'interactive_session_close'} else 'standard'
-        summaries.append(dict(name=name, description=description[:1000], risk=risk))
-    return dict(catalog=catalog, tools=summaries, source_path=str(path),
+        origin = item.pop('_caf_origin', 'catalog')
+        category = item.get('category')
+        if not isinstance(category, str) or not category.strip() or len(category) > 100:
+            category = _tool_category(name, risk, origin)
+        summaries.append(dict(name=name, description=description[:1000], risk=risk,
+                              origin=origin, category=category.strip(),
+                              has_guide=name in guide_names))
+    return dict(catalog=catalog, tools=summaries, assets=assets, source_path=str(path),
                 catalog_sha256=hashlib.sha256(content).hexdigest())
 
 

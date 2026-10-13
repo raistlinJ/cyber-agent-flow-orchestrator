@@ -112,6 +112,7 @@ class ModelConfigs:
                 access.current()
                 if action == 'tools':
                     catalog = result.pop('catalog', None)
+                    assets = result.pop('assets', [])
                     summaries = result.get('tools')
                     if (not isinstance(catalog, dict) or not isinstance(catalog.get('tools'), list)
                             or not isinstance(summaries, list) or not summaries):
@@ -120,17 +121,41 @@ class ModelConfigs:
                     if (len(names) != len(summaries) or len(set(names)) != len(names)
                             or any(not isinstance(name, str) or not name for name in names)):
                         raise ModelConfigError('Participant VM returned invalid tool metadata')
+                    if (not isinstance(assets, list) or len(assets) > 500
+                            or any(not isinstance(item, dict) or set(item) - {
+                                'id', 'kind', 'label', 'name', 'description', 'files',
+                                'bytes', 'content', 'sha256'} for item in assets)):
+                        raise ModelConfigError('Participant VM returned invalid CAF guidance metadata')
+                    asset_ids = []
+                    for item in assets:
+                        asset_id, body = item.get('id'), item.get('content')
+                        if (not isinstance(asset_id, str) or not re.fullmatch(r'[A-Za-z0-9_:-]{1,160}', asset_id)
+                                or asset_id in asset_ids or not isinstance(body, str)
+                                or len(body.encode()) > 256 * 1024
+                                or item.get('sha256') != hashlib.sha256(body.encode()).hexdigest()):
+                            raise ModelConfigError('Participant VM returned invalid CAF guidance content')
+                        asset_ids.append(asset_id)
+                    if sum(len(item['content'].encode()) for item in assets) > 2 * 1024 * 1024:
+                        raise ModelConfigError('Participant VM returned too much CAF guidance content')
                     content = (json.dumps(catalog, indent=2, sort_keys=True) + '\n').encode()
                     digest = hashlib.sha256(content).hexdigest()
                     catalog_path = workspace.path / 'participant-tools-catalog.json'
                     metadata_path = workspace.path / 'participant-tools.json'
+                    assets_path = workspace.path / 'participant-guidance-assets.json'
                     private_file(catalog_path, content, replace=catalog_path.exists())
+                    asset_content = (json.dumps(assets, indent=2, sort_keys=True) + '\n').encode()
+                    asset_digest = hashlib.sha256(asset_content).hexdigest()
+                    private_file(assets_path, asset_content, replace=assets_path.exists())
+                    asset_summaries = [{key: value for key, value in item.items() if key != 'content'} for item in assets]
                     metadata = dict(vmid=vmid, root=definition['root'], source='participant-vm',
                                     catalog=str(catalog_path), catalog_sha256=digest,
-                                    source_path=result.get('source_path'), tools=summaries)
+                                    source_path=result.get('source_path'), tools=summaries,
+                                    assets=str(assets_path), assets_sha256=asset_digest,
+                                    guidance_assets=asset_summaries)
                     private_file(metadata_path, json.dumps(metadata, indent=2).encode(), replace=metadata_path.exists())
                     return dict(action=action, role=role, vmid=vmid, source='participant-vm',
-                                catalog_sha256=digest, source_path=result.get('source_path'), tools=summaries)
+                                catalog_sha256=digest, source_path=result.get('source_path'), tools=summaries,
+                                guidance_assets=asset_summaries)
                 token = uuid.uuid4().hex
                 if action == 'read' and draft_path.is_file():
                     previous = ev.read_json(draft_path)

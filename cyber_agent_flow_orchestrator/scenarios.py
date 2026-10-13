@@ -341,11 +341,13 @@ class ScenarioExperiments:
             if any(roles[role] is None for role in ('scenarioforge', 'participant')):
                 raise SampleRequestError('Select and save ScenarioForge and participant VMs first')
             access.require_vms(v for v in roles.values() if v is not None)
-            from .experiment_controls import participant_catalogue
+            from .experiment_controls import participant_catalogue, participant_guidance_assets
             extra_catalogs = participant_catalogue(workspace, roles['participant'])
+            guidance_assets = participant_guidance_assets(
+                workspace, roles['participant'], include_content=True)
             if controls is not None:
                 from .experiment_controls import validate
-                controls = validate(controls, self.runtime, extra_catalogs)
+                controls = validate(controls, self.runtime, extra_catalogs, guidance_assets)
             try:
                 catalogue = ev.read_json(workspace.path / 'scenario-catalogue.json')
             except FileNotFoundError:
@@ -412,7 +414,8 @@ class ScenarioExperiments:
             if controls is not None:
                 from .experiment_controls import apply
                 apply(controls, runtime, cfg, workspace.path/'condition-inputs'/request_id,
-                      self.runtime, self.cfg, extra_catalogs=extra_catalogs)
+                      self.runtime, self.cfg, extra_catalogs=extra_catalogs,
+                      guidance_assets=guidance_assets)
             source = workspace.materialize(cfg, runtime, access, run_id)
             saved_runtime = yaml.safe_load((source.parent / 'runtime.yaml').read_text())
             for condition in saved_runtime['conditions']:

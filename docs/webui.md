@@ -332,9 +332,11 @@ editor. Clearing the file's key does not clear an independently configured envir
 Evaluation is organized into **Tasks**, **Trial limits**, **Hints & solutions**,
 **Tools & conditions**, **Helpers**, **Run controls**, and **Judge LLM**, in that
 order. Baseline and participant tool conditions are edited on Tools & conditions.
-Added helper conditions are edited on Helpers; its comparison preset sets up one
-baseline condition and one HTTP-helper condition. Switching pages preserves the
-draft and validation opens the page containing an invalid field.
+Helpers presents separate libraries for reusable tool bundles and generated guidance,
+followed by the helper conditions selected for the experiment. Each tool-helper card
+can be added alone or compared with a matched baseline. The bundled HTTP flag walker
+supports the demonstration sample; additional helper catalogs use the same card layout.
+Switching pages preserves the draft and validation opens the page containing an invalid field.
 
 In **New → Evaluation → Judge LLM**, enter an optional **Judge API key**.
 The key controls are disabled while participant model settings are inherited;
@@ -543,7 +545,7 @@ The Progress window shows the saved workflow timeline: XML verification, prepara
 
 Download counters report bytes received by the existing guest-agent transfers and mark verification only after checksum validation. During guest commands, the coordinator records QGA responses and reads up to 8 KiB of new command output every ten seconds. Partial command logs are saved on the host while execution is active; redacted excerpts appear in the troubleshooting console. A thirty-second heartbeat reports elapsed time, collected log bytes and the configured command limit even when output is quiet. Demo preparation reports backend loading, asset copying, CORE settings, topology planning and evaluation-task creation; Python demo/deployment commands run unbuffered. ScenarioForge output exposes its reported CORE operations; live model/tool calls are not streamed. Status and results requests only read host-saved data and never initiate these VM reads. Participant upload counters and service state come from evaluator transport checkpoints. Progress is retained in workflow/results JSON and the run bundle. Older runs without stage timestamps retain their recorded stage states.
 
-In **New → Evaluation**, sample task definitions are visible and locked. Custom experiments can preview ScenarioForge tasks, edit a copy, add/remove tasks or import a JSON task array. **Load tools from participant VM** reads the effective CAF native-MCP catalog, adds CAF's built-in interactive-session controls, and creates a condition with a scrollable per-tool selector. The pulled catalog is bound to the selected participant VM and frozen with the experiment. Create remains disabled for missing prompts, duplicate/invalid IDs, malformed criteria or missing readiness checks. Custom task definitions are frozen in the experiment XML and retained in reruns and downloads. See [scenario experiments](scenario-experiments.md#caf-and-evaluation-configuration).
+In **New → Evaluation**, sample task definitions are visible and locked. Custom experiments can preview ScenarioForge tasks, edit a copy, add/remove tasks or import a JSON task array. **Load CAF tools and guidance from participant VM** reads the effective CAF native-MCP catalog, generated MCP tool manifests and built-in interactive-session controls. Its searchable selector groups tools and can filter selected, generated, documented, dangerous and interactive tools. The same operation loads CAF tool guides, playbooks, skills, Markdown and RAG documents, reusable templates and structured data into a separate searchable guidance picker. The pulled catalog and selected guidance contents are bound to the selected participant VM and frozen with the experiment. Create remains disabled for missing prompts, duplicate/invalid IDs, malformed criteria or missing readiness checks. Custom task definitions are frozen in the experiment XML and retained in reruns and downloads. See [scenario experiments](scenario-experiments.md#caf-and-evaluation-configuration).
 
 When an experiment completes with errors, **Progress** and **Results** show an
 **Experiment errors** section identifying each unsuccessful trial, condition,

@@ -33,6 +33,14 @@ def main():
             {'name':'nmap','command':'nmap','description':'Inspect target services.'},
             {'name':'shell_dangerous','command':'bash','allow_args':True,'description':'Run unrestricted shell commands.'},
         ]})
+        (roots[9403]/'tools_docs').mkdir()
+        (roots[9403]/'tools_docs/shell_dangerous.md').write_text('# Dangerous shell\nUse only in the isolated participant.\n')
+        (roots[9403]/'mcp_client.py').write_text("_TOOL_DOC_MAP = {'shell_dangerous': 'tools_docs/shell_dangerous.md'}\n")
+        generated=roots[9403]/'plugins/mcp_tools/http_probe';generated.mkdir(parents=True)
+        (generated/'probe.py').write_text('print("ok")\n')
+        ev.write_json(generated/'manifest.json', {'name':'http_probe','command':'python3','args':['probe.py'],'description':'Probe HTTP services.'})
+        playbooks=roots[9403]/'plugins/playbooks';playbooks.mkdir(parents=True)
+        (playbooks/'web-triage.md').write_text('# Web triage\nInspect the HTTP response first.\n')
         (roots[9402]/'.scenarioforge.env').write_text('CORETG_AI_PROVIDER=litellm\nCORETG_AI_BASE_URL=https://models.example/v1\nCORETG_AI_MODEL=scenario-model\nCORE_HOST=10.0.0.2\n')
         patch.setattr(guest, 'network_scope', lambda url,config:dict(provider_host='models.example',excluded_targets=['192.0.2.8','192.0.2.1'],warnings=[]))
         patch.setattr(guest, 'LOCK', root/'guest-maintenance.lock')
@@ -109,13 +117,22 @@ def main():
                     expect(page.locator('#create-experiment')).to_be_enabled()
                     page.get_by_role('tab',name='Evaluation',exact=True).click()
                     page.locator('#load-participant-tools').click()
-                    expect(page.locator('#participant-tools-status')).to_contain_text('Loaded 6 tools',timeout=30000)
-                    expect(page.locator('.condition-tool-option')).to_have_count(6)
+                    expect(page.locator('#participant-tools-status')).to_contain_text('Loaded 7 tools and 2 CAF guidance assets',timeout=30000)
+                    expect(page.locator('.condition-tools .condition-tool-option')).to_have_count(7)
+                    expect(page.locator('.condition-guidance-assets .condition-tool-option')).to_have_count(2)
                     expect(page.locator('.tool-risk.dangerous')).to_have_text('dangerous')
                     expect(page.locator('.tool-risk.interactive')).to_have_count(4)
+                    expect(page.locator('.tool-origin',has_text='generated')).to_have_count(1)
+                    expect(page.locator('.tool-origin',has_text='guide')).to_have_count(1)
+                    page.get_by_label('Search available tools').fill('probe')
+                    expect(page.locator('.condition-tools .condition-tool-option')).to_have_count(1)
+                    page.get_by_label('Search available tools').fill('')
+                    page.locator('.condition-guidance-assets').click()
+                    page.locator('.condition-guidance-assets .condition-tool-option').filter(has_text='web-triage').locator('input').check()
                     controls=page.evaluate('experimentControls()')
                     assert controls['conditions'][0]['source']=='participant-vm'
                     assert 'shell_dangerous' in controls['conditions'][0]['tools']
+                    assert controls['conditions'][0]['guidance_assets']==['playbook:web-triage']
                     assert controls['auto_approve_dangerous'] is True
                     page.locator('#auto-approve-dangerous').uncheck()
                     assert page.evaluate('experimentControls().auto_approve_dangerous') is False

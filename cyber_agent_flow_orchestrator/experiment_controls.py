@@ -36,6 +36,42 @@ def participant_catalogue(workspace, vmid):
                                    definitions=deepcopy(tools), guidance_files=[])}
 
 
+def participant_guidance_assets(workspace, vmid, *, include_content=False):
+    """Return the VM-bound CAF guidance snapshot, with content only to server code."""
+    if vmid is None:
+        return {}
+    metadata_path = workspace.path / 'participant-tools.json'
+    if not metadata_path.is_file() or metadata_path.is_symlink():
+        return {}
+    try:
+        metadata = json.loads(metadata_path.read_text())
+        path = Path(metadata['assets'])
+        if path != workspace.path / 'participant-guidance-assets.json':
+            return {}
+        if not path.is_file() or path.is_symlink():
+            return {}
+        content = path.read_bytes()
+        assets = json.loads(content)
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if (metadata.get('vmid') != vmid or metadata.get('source') != 'participant-vm'
+            or metadata.get('assets_sha256') != hashlib.sha256(content).hexdigest()
+            or not isinstance(assets, list) or len(assets) > 500):
+        return {}
+    result = {}
+    for item in assets:
+        if not isinstance(item, dict):
+            return {}
+        asset_id, body = item.get('id'), item.get('content')
+        if (not isinstance(asset_id, str) or not re.fullmatch(r'[A-Za-z0-9_:-]{1,160}', asset_id)
+                or asset_id in result or not isinstance(body, str)
+                or item.get('sha256') != hashlib.sha256(body.encode()).hexdigest()):
+            return {}
+        result[asset_id] = deepcopy(item) if include_content else {
+            key: deepcopy(value) for key, value in item.items() if key != 'content'}
+    return result
+
+
 def catalogue(runtime, extra_catalogs=None):
     builtins = Path(__file__).with_name("sample_data")
     choices = {
@@ -48,6 +84,13 @@ def catalogue(runtime, extra_catalogs=None):
             catalog=str(builtins / "with-http-helper.json"),
             tools=["nmap", "curl", "python3", "http_flag_walk"],
             guidance_files=[],
+            helper=dict(
+                name="HTTP flag walker",
+                kind="tool bundle",
+                origin="Bundled sample helper",
+                description="Follows same-origin links on a bounded HTTP(S) site and reports observed FLAG{…} values.",
+                tags=["web", "discovery", "flags"],
+            ),
         ),
     }
     for item in runtime["conditions"]:
@@ -62,7 +105,7 @@ def catalogue(runtime, extra_catalogs=None):
     return choices
 
 
-def validate(value, runtime, extra_catalogs=None):
+def validate(value, runtime, extra_catalogs=None, guidance_assets=None):
     if not isinstance(value, dict) or set(value) - {
         "order_seed",
         "reset_each_trial",
@@ -101,6 +144,7 @@ def validate(value, runtime, extra_catalogs=None):
             "source",
             "tools",
             "guidance",
+            "guidance_assets",
         }:
             raise SampleRequestError("Unknown condition fields")
         if (
@@ -127,11 +171,18 @@ def validate(value, runtime, extra_catalogs=None):
             or len(row.get("guidance", "")) > 32000
         ):
             raise SampleRequestError("Condition guidance exceeds 32000 characters")
+        selected_assets = row.get('guidance_assets', [])
+        if (not isinstance(selected_assets, list)
+                or any(not isinstance(asset_id, str) or not asset_id for asset_id in selected_assets)
+                or len(set(selected_assets)) != len(selected_assets)
+                or set(selected_assets) - set(guidance_assets or {})):
+            raise SampleRequestError('Select CAF guidance available in the participant snapshot')
     return deepcopy(value)
 
 
-def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs=None):
-    value = validate(value, defaults, extra_catalogs)
+def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs=None,
+          guidance_assets=None):
+    value = validate(value, defaults, extra_catalogs, guidance_assets)
     runtime["order_seed"] = value.get("order_seed", 0)
     cfg["reset_each_trial"] = value.get("reset_each_trial", True)
     runtime.setdefault("execution", {})["auto_approve_dangerous"] = value.get(
@@ -158,6 +209,7 @@ def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs
     for row in value["conditions"]:
         original = deepcopy(catalogue(defaults, extra_catalogs)[row["source"]])
         original.pop('definitions', None)
+        original.pop('helper', None)
         collect_source = original.pop("collect_source", None)
         original.update(id=row["id"], tools=row["tools"])
         # Progressive hints are controlled once for the whole evaluation.
@@ -173,6 +225,13 @@ def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs
             path.write_text(row["guidance"])
             path.chmod(0o600)
             original.setdefault("guidance_files", []).append(str(path))
+        for index, asset_id in enumerate(row.get('guidance_assets', []), 1):
+            asset = (guidance_assets or {})[asset_id]
+            suffix = re.sub(r'[^A-Za-z0-9_-]+', '-', asset_id).strip('-')[:60]
+            path = folder / f'{row["id"]}-caf-{index}-{suffix}.md'
+            path.write_text(asset['content'])
+            path.chmod(0o600)
+            original.setdefault('guidance_files', []).append(str(path))
         original.setdefault("guidance_files", [])
         runtime["conditions"].append(original)
         if source_cfg and collect_source in source_cfg.get("collect", {}):

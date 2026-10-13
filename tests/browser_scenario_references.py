@@ -52,6 +52,8 @@ def main():
                     expect(page.locator('#scenario-reference-choice')).to_be_disabled()
                     page.locator('#load-scenarios').click();expect(page.locator('#scenario-selection option')).to_have_count(2,timeout=30000);page.locator('#scenario-selection').select_option(item['id'])
                     page.get_by_role('tab',name='Evaluation',exact=True).click()
+                    expect(page.locator('.scenario-reference-actions')).not_to_have_attribute('open','')
+                    page.locator('.scenario-reference-actions summary').click()
                     with page.expect_popup() as popup:
                         page.locator('#scenario-reference-choice').select_option('attack-graph')
                     graph=popup.value;graph.on('pageerror',lambda error:errors.append(str(error)))
@@ -100,10 +102,11 @@ def main():
                     assert tasks[0]['verification_mode']=='judge' and 'verifier' not in tasks[0]
                     assert tasks[0]['rubric']['criteria'][0]['requirement']=='Locate and read the service configuration.'
                     page.get_by_role('tab',name='Judge LLM',exact=True).click();page.locator('#judge-enabled').check()
-                    page.get_by_role('tab',name='Tasks & trial settings',exact=True).click()
-                    page.locator('#baseline-helper-conditions').click()
+                    page.get_by_role('tab',name='Helpers',exact=True).click()
+                    page.get_by_role('button',name='Compare with baseline',exact=True).click()
                     controls=page.evaluate('experimentControls()')
                     assert len(controls['conditions'])==2 and controls['reset_each_trial']
+                    page.get_by_role('tab',name='Tasks',exact=True).click()
                     page.locator('.rubric-editor').first.scroll_into_view_if_needed();page.screenshot(path='/tmp/caf-rubric-editor.png')
                     page.set_viewport_size(dict(width=390,height=844));assert page.evaluate('document.documentElement.scrollWidth<=innerWidth');page.screenshot(path='/tmp/caf-scenario-references-mobile.png')
                     assert all(op in ('list','references') for _,op in calls),calls

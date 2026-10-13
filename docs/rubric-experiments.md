@@ -94,8 +94,12 @@ been human calibrated. Describe findings as rubric-based automated judgments.
 
 Experiment controls select configured tool catalogs, permitted tools, optional
 participant guidance and hints per condition. Host paths cannot be supplied by the
-browser. Baseline and HTTP helper are built in; server-configured catalogs can use
-existing artifact-generation/collection stages. A server catalog whose ID matches
+browser. The participant loader snapshots generated MCP tools and selectable CAF tool
+guides, playbooks, skills, documents, templates, RAG material and structured data.
+Selected assets become immutable condition guidance files. Baseline and the demonstration HTTP helper catalog are built in. The Helpers
+page presents reusable tool bundles as catalog cards and generated Markdown guidance
+as a separate library; selected helper conditions remain editable below both libraries.
+Server-configured catalogs can use existing artifact-generation/collection stages. A server catalog whose ID matches
 a built-in is listed with a configured- prefix so the two sources stay distinct. Collected guide text and authored
 condition guidance are frozen together. Optional extra reset/readiness hooks can
 be selected when the server template configures them. All conditions share the participant
