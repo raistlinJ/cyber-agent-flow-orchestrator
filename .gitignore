@@ -19,3 +19,5 @@ host-secrets.env
 
 /certs/
 /ScenarioForge-Bundles/local-validation-2026-10-09
+.DS_Store
+.DS_Store
