@@ -105,7 +105,7 @@ def catalogue(runtime, extra_catalogs=None):
     return choices
 
 
-def validate(value, runtime, extra_catalogs=None, guidance_assets=None):
+def validate(value, runtime, extra_catalogs=None, guidance_assets=None, generated_helpers=None):
     if not isinstance(value, dict) or set(value) - {
         "order_seed",
         "reset_each_trial",
@@ -113,6 +113,8 @@ def validate(value, runtime, extra_catalogs=None, guidance_assets=None):
         "pricing",
         "use_configured_reset_hooks",
         "auto_approve_dangerous",
+        "helpers",
+        "generated_helpers",
     }:
         raise SampleRequestError("Unknown experiment control fields")
     if (
@@ -130,7 +132,15 @@ def validate(value, runtime, extra_catalogs=None, guidance_assets=None):
     if not isinstance(rows, list) or len(rows) > 16:
         raise SampleRequestError("Supply up to 16 experiment conditions")
     choices = catalogue(runtime, extra_catalogs)
+    available_helpers = {key for key, item in choices.items() if item.get('helper')}
+    for field, available in [('helpers', available_helpers), ('generated_helpers', set(generated_helpers or {}))]:
+        selected = value.get(field, [])
+        if (not isinstance(selected, list) or len(selected) > 64
+                or any(not isinstance(item, str) or not item for item in selected)
+                or len(set(selected)) != len(selected) or set(selected) - available):
+            raise SampleRequestError('Select available ' + field.replace('_', ' '))
     seen = set()
+    names = set()
     if "pricing" in value:
         from cyber_agent_flow_eval.usage import validate_pricing
 
@@ -141,6 +151,7 @@ def validate(value, runtime, extra_catalogs=None, guidance_assets=None):
     for row in rows:
         if not isinstance(row, dict) or set(row) - {
             "id",
+            "name",
             "source",
             "tools",
             "guidance",
@@ -154,6 +165,13 @@ def validate(value, runtime, extra_catalogs=None, guidance_assets=None):
         ):
             raise SampleRequestError("Condition IDs must be valid and unique")
         seen.add(row["id"])
+        if "name" in row:
+            name = row["name"]
+            if (not isinstance(name, str) or not name.strip() or len(name) > 80
+                    or any(ord(char) < 32 or ord(char) == 127 for char in name)
+                    or name.strip().casefold() in names):
+                raise SampleRequestError("Run configuration names must be nonempty, unique, and at most 80 characters")
+            names.add(name.strip().casefold())
         if row.get("source") not in choices:
             raise SampleRequestError("Choose a configured condition catalog")
         if (
@@ -181,8 +199,8 @@ def validate(value, runtime, extra_catalogs=None, guidance_assets=None):
 
 
 def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs=None,
-          guidance_assets=None):
-    value = validate(value, defaults, extra_catalogs, guidance_assets)
+          guidance_assets=None, generated_helpers=None):
+    value = validate(value, defaults, extra_catalogs, guidance_assets, generated_helpers)
     runtime["order_seed"] = value.get("order_seed", 0)
     cfg["reset_each_trial"] = value.get("reset_each_trial", True)
     runtime.setdefault("execution", {})["auto_approve_dangerous"] = value.get(
@@ -202,6 +220,7 @@ def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs
         # The Evaluation hint policy is the only orchestrator-level control.
         condition.pop("provide_progressive_hints", None)
     if not value.get("conditions"):
+        _apply_enabled_helpers(value, runtime, cfg, folder, defaults, extra_catalogs, generated_helpers)
         return
     folder.mkdir(parents=True, exist_ok=True)
     runtime["conditions"] = []
@@ -237,3 +256,53 @@ def apply(value, runtime, cfg, folder, defaults, source_cfg=None, extra_catalogs
         if source_cfg and collect_source in source_cfg.get("collect", {}):
             cfg["collect"][row["id"]] = deepcopy(source_cfg["collect"][collect_source])
             cfg["artifacts"] = deepcopy(source_cfg.get("artifacts", []))
+
+    _apply_enabled_helpers(value, runtime, cfg, folder, defaults, extra_catalogs, generated_helpers)
+
+
+def _apply_enabled_helpers(value, runtime, cfg, folder, defaults, extra_catalogs, generated_helpers):
+    """Extend existing conditions without creating comparison trials."""
+    tool_ids, guidance_ids = value.get('helpers', []), value.get('generated_helpers', [])
+    if not tool_ids and not guidance_ids:
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    choices = catalogue(defaults, extra_catalogs)
+    baseline_tools = set(choices['baseline']['tools'])
+    for condition in runtime['conditions']:
+        if cfg.get('collect', {}).get(condition['id'], {}).get('catalog') and tool_ids:
+            raise SampleRequestError('Use a frozen participant catalog when enabling tool helpers')
+        if tool_ids:
+            catalog = json.loads(Path(condition['catalog']).read_text())
+            definitions = {item['name']: item for item in catalog['tools']}
+            names = list(condition['tools'])
+            for helper_id in tool_ids:
+                helper = choices[helper_id]
+                # Helper bundles include baseline utilities for standalone use;
+                # enabling one only adds its helper tools to the chosen catalog.
+                added = set(helper['tools']) - baseline_tools
+                helper_catalog = json.loads(Path(helper['catalog']).read_text())
+                for item in helper_catalog['tools']:
+                    name = item['name']
+                    if name not in added:
+                        continue
+                    if name in definitions and definitions[name] != item:
+                        raise SampleRequestError('Conflicting helper tool definition: ' + name)
+                    if name not in definitions:
+                        catalog['tools'].append(deepcopy(item))
+                        definitions[name] = item
+                    if name not in names:
+                        names.append(name)
+                condition.setdefault('guidance_files', []).extend(helper.get('guidance_files', []))
+            path = folder / (condition['id'] + '-enabled-helpers-catalog.json')
+            path.write_text(json.dumps(catalog, indent=2) + '\n')
+            path.chmod(0o600)
+            condition['catalog'], condition['tools'] = str(path), names
+        for helper_id in guidance_ids:
+            helper = generated_helpers[helper_id]
+            # Include the library identity so the frozen guidance can be traced
+            # to its originating analysis without trusting browser-supplied text.
+            body = '# Generated helper: ' + helper['name'] + '\nSource: ' + helper_id + '\nSHA-256: ' + helper['helper_sha256'] + '\n\n' + helper['content']
+            path = folder / (condition['id'] + '-' + helper_id + '.md')
+            path.write_text(body)
+            path.chmod(0o600)
+            condition.setdefault('guidance_files', []).append(str(path))

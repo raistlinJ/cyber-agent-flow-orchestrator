@@ -49,8 +49,8 @@ def networks(text, required=False):
         raise SampleRequestError('Targets must be IP addresses or CIDR networks') from None
 
 
-EVALUATION_LIMITS = dict(repetitions=(1, 100), max_turns=(1, 1000), wall_seconds=(1, 86400),
-                         tool_timeout=(1, 3600), context_window=(1, 1000000), hint_stalled_turns=(1, 1000),
+EVALUATION_LIMITS = dict(repetitions=(1, 100), max_turns=(1, 1000), wall_seconds=(0, 86400),
+                         tool_timeout=(0, 3600), context_window=(1, 1000000), hint_stalled_turns=(1, 1000),
                          max_tries_before_solution=(1, 1000))
 
 
@@ -345,9 +345,17 @@ class ScenarioExperiments:
             extra_catalogs = participant_catalogue(workspace, roles['participant'])
             guidance_assets = participant_guidance_assets(
                 workspace, roles['participant'], include_content=True)
+            generated_helpers = {}
             if controls is not None:
                 from .experiment_controls import validate
-                controls = validate(controls, self.runtime, extra_catalogs, guidance_assets)
+                from . import helper_library
+                selected = controls.get('generated_helpers', []) if isinstance(controls, dict) else []
+                if not isinstance(selected, list) or len(selected) > 64:
+                    raise SampleRequestError('Select up to 64 generated helpers')
+                for helper_id in selected:
+                    helper = helper_library.read(workspace, helper_id)
+                    generated_helpers[helper_id] = helper
+                controls = validate(controls, self.runtime, extra_catalogs, guidance_assets, generated_helpers)
             try:
                 catalogue = ev.read_json(workspace.path / 'scenario-catalogue.json')
             except FileNotFoundError:
@@ -415,7 +423,7 @@ class ScenarioExperiments:
                 from .experiment_controls import apply
                 apply(controls, runtime, cfg, workspace.path/'condition-inputs'/request_id,
                       self.runtime, self.cfg, extra_catalogs=extra_catalogs,
-                      guidance_assets=guidance_assets)
+                      guidance_assets=guidance_assets, generated_helpers=generated_helpers)
             source = workspace.materialize(cfg, runtime, access, run_id)
             saved_runtime = yaml.safe_load((source.parent / 'runtime.yaml').read_text())
             for condition in saved_runtime['conditions']:
@@ -439,6 +447,9 @@ class ScenarioExperiments:
             if definitions is not None:
                 private_file(output / 'inputs/evaluation-tasks.json', json.dumps(definitions, indent=2).encode())
             record = self.record(cfg, runtime, identity, captured, request_id)
+            if controls and controls.get('conditions'):
+                record['configuration_names'] = {row['id']:row.get('name', row['id']).strip() for row in controls['conditions']}
+                private_file(output / 'inputs/configuration-names.json', json.dumps(record['configuration_names'], indent=2).encode())
             record['task_design'] = [{key:task.get(key, 'development' if key=='split' else None) for key in ('id','family','split')} for task in authored] if authored else [dict(id='collect-flags',family='flag-collection',split=cfg['scenarioforge']['split'])]
             if _sample_id is not None:
                 record['task_design'] = [dict(id=_sample_id,family='http-discovery',split=cfg['scenarioforge']['split'])]

@@ -47,7 +47,7 @@ def main():
                 # Reschedule under the controlled clock.
                 page.locator('#refresh-period').dispatch_event('change')
                 page.locator('[data-route=experiments]').click()
-                row=page.locator('[data-run-id=demo]')
+                row=page.locator('tr[data-run-id=demo]')
                 expect(row).to_contain_text('evaluating')
                 row.evaluate("(node)=>node.dataset.preserved='yes'")
                 pages=[page]

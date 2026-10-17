@@ -82,6 +82,7 @@ def main():
                         1, timeout=30000
                     )
                     page.locator("#study-members input").check()
+                    page.locator("#study-comparison").select_option("conditions")
                     page.locator("#study-name").fill("Held-out configuration study")
                     page.locator("#create-study").click()
                     expect(page.locator("#studies-list h3")).to_have_text(
@@ -165,6 +166,24 @@ def main():
                     assert page.evaluate(
                         "document.documentElement.scrollWidth<=innerWidth"
                     )
+                    page.set_viewport_size(dict(width=1440,height=1080))
+                    record['runtime']['conditions']=[dict(id='participant',tools=['curl'])]
+                    ev.write_json(folder/'workflow.json',record)
+                    from copy import deepcopy
+                    helper_record=deepcopy(record);helper_record['runtime']['conditions'][0]['tools'].append('http_flag_walk')
+                    helper_record['workflow_hash']='c'*64;helper_record['workflow']['id']='inspect-helper'
+                    helper_folder=Workspace(dashboard.root,'operator@pve').run_path('inspect-helper');helper_folder.mkdir()
+                    ev.write_json(helper_folder/'workflow.json',helper_record)
+                    page.reload()
+                    expect(page.locator('#study-members input')).to_have_count(2,timeout=30000)
+                    page.locator('#study-members input').nth(0).check();page.locator('#study-members input').nth(1).check()
+                    page.locator('#study-name').fill('Helper variants')
+                    page.locator('#study-baseline-run').select_option('inspect-lab')
+                    page.locator('#create-study').click()
+                    expect(page.locator('#studies-list h3').filter(has_text='Helper variants')).to_have_count(1,timeout=30000)
+                    variants=next(item for item in page.evaluate("studyRequest('list',{})")['items'] if item['name']=='Helper variants')
+                    assert variants['comparison_mode']=='experiments' and variants['baseline_run_id']=='inspect-lab'
+                    page.screenshot(path='/tmp/caf-study-helper-variants.png')
                     assert not errors, errors
                     browser.close()
             finally:

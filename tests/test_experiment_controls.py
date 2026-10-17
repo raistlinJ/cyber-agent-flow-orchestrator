@@ -321,3 +321,62 @@ def test_remote_guidance_and_authored_guidance_are_frozen_together(tmp_path):
         "Generated guidance",
         "Author guidance",
     ]
+
+
+@pytest.mark.parametrize('explicit_conditions', [False, True])
+def test_enabled_helpers_extend_existing_conditions_without_extra_trials(tmp_path, explicit_conditions):
+    import hashlib
+    catalog = tmp_path / 'native.json'
+    native = {'name': 'curl', 'command': 'curl', 'description': 'Participant configured tool'}
+    catalog.write_text(json.dumps({'tools': [native]}))
+    runtime = {'conditions': [dict(id='existing', catalog=str(catalog), tools=['curl'], guidance_files=[])], 'execution': {}}
+    defaults = {'conditions': [], 'execution': {}}
+    extra = {'participant-vm': dict(catalog=str(catalog), tools=['curl'], guidance_files=[])}
+    content = 'Inspect the response, then preserve the successful tool output as evidence.'
+    helper_id = 'helper-' + '1' * 24
+    helpers = {helper_id: dict(name='Evidence helper', content=content,
+                              helper_sha256=hashlib.sha256(content.encode()).hexdigest())}
+    controls = dict(conditions=[dict(id='selected', source='participant-vm', tools=['curl'])] if explicit_conditions else [],
+                    helpers=['http-helper'], generated_helpers=[helper_id])
+    apply(controls, runtime, {}, tmp_path / 'frozen', defaults, extra_catalogs=extra, generated_helpers=helpers)
+    assert len(runtime['conditions']) == 1
+    condition = runtime['conditions'][0]
+    assert condition['id'] == ('selected' if explicit_conditions else 'existing')
+    assert condition['tools'] == ['curl', 'http_flag_walk']
+    frozen = json.loads(Path(condition['catalog']).read_text())
+    assert frozen['tools'][0] == native
+    assert [tool['name'] for tool in frozen['tools']] == condition['tools']
+    assert 'Source: ' + helper_id in Path(condition['guidance_files'][0]).read_text()
+    assert content in Path(condition['guidance_files'][0]).read_text()
+    catalog.write_text('{}')
+    assert json.loads(Path(condition['catalog']).read_text())['tools'][0] == native
+
+
+@pytest.mark.parametrize('controls', [
+    {'helpers': ['baseline']}, {'helpers': ['http-helper', 'http-helper']},
+    {'generated_helpers': ['helper-' + 'a' * 24]}, {'helpers': [dict(id='http-helper')]},
+])
+def test_helper_selection_rejects_unavailable_or_invalid_ids(controls):
+    with pytest.raises(SampleRequestError, match='Select available'):
+        validate(controls, {'conditions': []})
+
+
+def test_conflicting_helper_tool_is_rejected(tmp_path):
+    catalog = tmp_path / 'conflict.json'
+    catalog.write_text(json.dumps({'tools': [dict(name='http_flag_walk', command='different')]}))
+    runtime = {'conditions': [dict(id='existing', catalog=str(catalog), tools=['http_flag_walk'], guidance_files=[])]}
+    with pytest.raises(SampleRequestError, match='Conflicting helper tool'):
+        apply({'helpers': ['http-helper']}, runtime, {}, tmp_path / 'frozen', {'conditions': []})
+
+
+def test_configuration_names_allow_display_text_without_changing_runtime_ids(tmp_path):
+    value = {'conditions': [{'id': 'configuration-1', 'name': 'Guided baseline', 'source': 'baseline', 'tools': ['curl']}]}
+    runtime = {'conditions': [], 'execution': {}}
+    apply(value, runtime, {}, tmp_path, {'conditions': [], 'execution': {}})
+    assert runtime['conditions'][0]['id'] == 'configuration-1'
+    assert 'name' not in runtime['conditions'][0]
+    for name in ['', '  ', 'x' * 81, 'invalid\nname', None]:
+        with pytest.raises(SampleRequestError, match='configuration names'):
+            validate({'conditions': [dict(value['conditions'][0], name=name)]}, {'conditions': []})
+    with pytest.raises(SampleRequestError, match='configuration names'):
+        validate({'conditions': value['conditions'] + [dict(value['conditions'][0], id='configuration-2', name='GUIDED BASELINE')]}, {'conditions': []})

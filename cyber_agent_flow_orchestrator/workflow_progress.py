@@ -206,7 +206,8 @@ def build(journal, state, active, root=None):
         dict(role='core', label='CORE', vmid=core, responsibility='Hosts the scenario network and services. Deployment is controlled through ScenarioForge’s configured CORE connection.'),
         dict(role='participant', label='CAF participant', vmid=participant, responsibility='Runs the agent and tools for each trial; returns outputs for scoring.'),
         dict(role='orchestrator', label='Orchestrator', vmid=None, responsibility='Coordinates stages, verifies transfers, scores trials and stores run artifacts.')]
-    return dict(steps=steps, current_step=current, current=selected, roles=roles,
+    from .preparation_visualization import build as preparation_graph
+    return dict(preparation=preparation_graph(steps, roles), steps=steps, current_step=current, current=selected, roles=roles,
                 completed_steps=sum(s['status'] in ('completed', 'completed_with_errors') for s in steps), total_steps=len(steps),
                 observed_at=now(), guest_observation=journal.get('guest_observation'), transfer=journal.get('transfer'), readiness=journal.get('readiness_progress'))
 

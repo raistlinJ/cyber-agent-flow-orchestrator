@@ -77,6 +77,9 @@ def export_report(report):
             svg.append(f'<text x="600" y="{y}" font-size="13">Not evaluable</text>')
     svg.append("</svg>")
     graph = "".join(svg)
+    if report.get('comparison_basis'):
+        doc.paragraph(report['comparison_basis'])
+        doc.paragraph('Baseline experiment: ' + report['baseline_run_id'])
     doc.heading("Paired comparisons")
     doc.table(
         [
@@ -163,6 +166,34 @@ def export_report(report):
     }
 
 
+def _compare_experiment_variants(report, outputs, members, baseline_run_id):
+    """Pair distinct experiment variants by task/repetition on the same source XML."""
+    from collections import defaultdict
+    from cyber_agent_flow_eval.reporting import results
+    from cyber_agent_flow_eval.studies import compare
+    rows, groups = [], defaultdict(list)
+    for output, member in zip(outputs, members):
+        label = 'baseline' if member['run_id'] == baseline_run_id else member['run_id']
+        seen = set()
+        for row in results(output)['attempts']:
+            key = (row['task_id'], row.get('repetition', 0))
+            if key in seen:
+                raise SampleRequestError('Separate-run comparisons require one trial per task and repetition')
+            seen.add(key)
+            item = dict(row, original_condition_id=row['condition_id'], condition_id=label,
+                        study_run_id='experiment-variants', pair_id=key[0]+':'+str(key[1]))
+            rows.append(item)
+            groups[(item['split'], item['family'])].append(item)
+    seed = report.get('bootstrap_seed', 0)
+    report.update(comparison_mode='experiments', baseline_run_id=baseline_run_id,
+                  comparison_basis='Separate experiment runs paired by source scenario, task and repetition; run order was not randomized by this comparison',
+                  variant_labels={('baseline' if member['run_id'] == baseline_run_id else member['run_id']): member['run_id'] for member in members},
+                  comparisons=compare(rows, 'baseline', seed=seed),
+                  by_split={split: compare([r for r in rows if r['split']==split], 'baseline', seed=seed) for split in ('development','validation','test')},
+                  by_family=[dict(split=key[0], family=key[1], comparisons=compare(value, 'baseline', seed=seed)) for key, value in sorted(groups.items())])
+    return report
+
+
 class Studies:
     def __init__(self, dashboard):
         self.dashboard = dashboard
@@ -212,6 +243,7 @@ class Studies:
         baseline="baseline",
         reference_run_ids=None,
         require_references=False,
+        baseline_run_id=None,
     ):
         if (
             not isinstance(name, str)
@@ -228,6 +260,9 @@ class Studies:
             "[A-Za-z0-9][A-Za-z0-9_-]{0,79}", baseline
         ):
             raise SampleRequestError("Invalid baseline condition ID")
+        variants = baseline_run_id is not None
+        if variants and (not isinstance(baseline_run_id, str) or baseline_run_id not in run_ids or len(run_ids) < 2):
+            raise SampleRequestError('Select a baseline experiment and at least one other experiment')
         workspace = Workspace(self.dashboard.root, access.username)
         access.current()
         members = []
@@ -245,7 +280,7 @@ class Studies:
                     fromlist=["workflow_vmids"],
                 ).workflow_vmids(record["workflow"], record["runtime"])
             )
-            if baseline not in {c["id"] for c in record["runtime"]["conditions"]}:
+            if not variants and baseline not in {c["id"] for c in record["runtime"]["conditions"]}:
                 raise SampleRequestError(
                     "Baseline condition must exist in every experiment"
                 )
@@ -275,7 +310,18 @@ class Studies:
                     for c in runtime["conditions"]
                 ],
             )
+            if variants:
+                if len(runtime['conditions']) != 1:
+                    raise SampleRequestError('Separate-run comparisons require one condition per experiment')
+                signature.pop('conditions')
+                signature.update(source_xml=record['scenario_experiment'].get('sha256'),
+                                 tasks=record['scenario_experiment'].get('evaluation_tasks'),
+                                 task_design=record.get('task_design'),
+                                 repetitions=runtime.get('repetitions', 1), order_seed=runtime.get('order_seed', 0),
+                                 engine=runtime.get('engine'), network_policy=runtime['execution'].get('network_policy'))
             if settings is not None and settings != signature:
+                if variants:
+                    raise SampleRequestError('Separate-run comparisons must share the saved scenario, tasks, model, judge, engine, repetitions and execution budgets')
                 raise SampleRequestError(
                     "Study members must share model, judge, condition selections and execution budgets"
                 )
@@ -353,7 +399,9 @@ class Studies:
         value = dict(
             id=study_id,
             name=name.strip(),
-            baseline=baseline,
+            baseline="baseline" if variants else baseline,
+            baseline_run_id=baseline_run_id,
+            comparison_mode="experiments" if variants else "conditions",
             members=members,
             references=references,
             require_references=require_references,
@@ -380,6 +428,8 @@ class Studies:
                 "Every study member needs evaluation outputs before summarizing"
             )
         report = summarize(outputs, value["baseline"])
+        if value.get('comparison_mode') == 'experiments':
+            report = _compare_experiment_variants(report, outputs, value['members'], value['baseline_run_id'])
         report.update(
             reference_completions=value.get("references", []),
             reference_coverage=value.get("reference_coverage"),

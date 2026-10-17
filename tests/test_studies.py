@@ -216,3 +216,46 @@ def test_active_study_blocks_both_individual_launch_apis():
         dashboard.run_sample(access, "smoke", "token")
     with pytest.raises(SampleBusy, match="study is running"):
         dashboard.experiment(access, "run", {})
+
+
+def test_separate_runs_can_compare_different_helper_configs(study):
+    from copy import deepcopy
+    manager, access, dashboard = study
+    workspace = Workspace(dashboard.root, access.username)
+    for name, tools in [('first', ['curl']), ('second', ['curl', 'http_flag_walk'])]:
+        path = workspace.run_path(name) / 'workflow.json'
+        record = ev.read_json(path)
+        record['scenario_experiment']['sha256'] = 'same-source'
+        record['runtime']['conditions'] = [dict(id='participant', tools=tools)]
+        ev.write_json(path, record)
+    result = manager.create(access, ['first', 'second'], 'Helper comparison', baseline_run_id='first')
+    assert result['comparison_mode'] == 'experiments' and result['baseline_run_id'] == 'first'
+    assert result['baseline'] == 'baseline'
+    path = workspace.run_path('second') / 'workflow.json'
+    record = ev.read_json(path)
+    record['scenario_experiment']['sha256'] = 'different-source'
+    ev.write_json(path, record)
+    with pytest.raises(SampleRequestError, match='share the saved scenario'):
+        manager.create(access, ['first', 'second'], 'Invalid', baseline_run_id='first')
+    with pytest.raises(SampleRequestError, match='baseline experiment'):
+        manager.create(access, ['first'], 'Invalid', baseline_run_id='first')
+
+
+def test_variant_report_pairs_by_task_repetition_and_excludes_unverified(monkeypatch):
+    from cyber_agent_flow_orchestrator.studies import _compare_experiment_variants
+    from cyber_agent_flow_eval import reporting
+    common = dict(task_id='task', family='web', split='test', scenario_definition_sha256='same',
+                  condition_id='participant', assistance_level='none', experiment_id='ignored')
+    reports = {
+        'baseline-output': [dict(common, repetition=1, verified_success=False), dict(common, repetition=2, verified_success=None)],
+        'helper-output': [dict(common, repetition=1, verified_success=True), dict(common, repetition=2, verified_success=True)],
+    }
+    monkeypatch.setattr(reporting, 'results', lambda path: {'attempts': reports[path]})
+    report = _compare_experiment_variants({'bootstrap_seed': 42}, ['baseline-output', 'helper-output'],
+                                        [dict(run_id='first'), dict(run_id='second')], 'first')
+    result = report['comparisons'][0]
+    assert result['condition'] == 'second' and result['eligible_pairs'] == 1
+    assert result['excluded_pairs'] == 1 and result['mean_success_difference'] == 1
+    assert result['confidence_interval_95'] is None
+    assert report['by_split']['test'][0] == result
+    assert report['variant_labels'] == {'baseline': 'first', 'second': 'second'}

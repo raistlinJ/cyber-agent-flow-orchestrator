@@ -68,7 +68,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
     protected_assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/studies.js': ('studies.js', 'text/javascript'),
                         '/scenario-reference': ('scenario_reference.html', 'text/html'), '/scenario_reference.js': ('scenario_reference.js', 'text/javascript'),
                         '/run': ('run.html', 'text/html'), '/run.js': ('run.js', 'text/javascript'),
-                        '/run_config.js': ('run_config.js', 'text/javascript'), '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
+                        '/run_visualize.js': ('run_visualize.js', 'text/javascript'), '/run_preparation.js': ('run_preparation.js', 'text/javascript'), '/run_activity.js': ('run_activity.js', 'text/javascript'), '/run_config.js': ('run_config.js', 'text/javascript'), '/run_render.js': ('run_render.js', 'text/javascript'), '/run_windows.js': ('run_windows.js', 'text/javascript')}
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
@@ -330,7 +330,7 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     self.respond(403, {'error': 'Invalid CSRF token'})
                     return
                 stage = {'/api/experiments/create': 'create experiment',
-                         '/api/experiments/run': 'run experiment', '/api/experiments/stop': 'stop experiment',
+                         '/api/experiments/delete': 'delete experiments', '/api/experiments/run': 'run experiment', '/api/experiments/stop': 'stop experiment',
                          '/api/experiments/analyze-rerun': 'analyze experiment and create assisted rerun',
                          '/api/generated-helpers/review': 'review generated helper',
                          '/api/model-config': 'model settings', '/api/scenarios/list': 'list scenarios',
@@ -369,10 +369,14 @@ def handler(dashboard, *, auth, proxy_key, origin):
                     access=auth.access(token,revalidate=False)
                     action=path.rsplit('/',1)[1]
                     expected={'create':{'run_ids','name','baseline'},'list':set(),'run':{'study_id'},'stop':{'study_id'},'summary':{'study_id'}}
-                    if action=='create':expected[action].update(k for k in ('reference_run_ids','require_references') if k in data)
+                    if action=='create':expected[action].update(k for k in ('reference_run_ids','require_references','baseline_run_id') if k in data)
                     if action not in expected or set(data)!=expected[action]:raise SampleRequestError('Invalid study request')
                     methods={'create':dashboard.studies.create,'list':dashboard.studies.listing,'run':dashboard.studies.start,'stop':dashboard.studies.stop,'summary':dashboard.studies.summarize}
                     self.respond(200,methods[action](access,**data))
+                elif path == '/api/experiments/delete' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
+                    if set(data) != {'run_ids', 'confirmation'}:
+                        raise SampleRequestError('Supply experiment IDs and deletion confirmation only')
+                    self.respond(200, dashboard.delete_experiments(auth.access(token, revalidate=False), **data))
                 elif path in ('/api/experiments/create', '/api/experiments/run', '/api/experiments/stop') and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     action = path.rsplit('/', 1)[1]
                     expected = {'sample_id', 'request_id'} if action == 'create' else {'run_id', 'request_id'} if action == 'run' else {'run_id'}
