@@ -319,7 +319,7 @@ one line high, leaving the rest of the dock for output.
 Each pane scrolls independently. **Follow latest** pins new output to the bottom;
 scrolling up pauses following for that pane. **Latest** resumes it. These choices
 and scroll positions are remembered per selected trial during the window session.
-Updates reuse the existing five-second host status poll, including when dashboard
+Updates use the shared SSE host-status feed (with polling fallback), including when dashboard
 refresh is Never, with no extra guest calls. Transcript updates do not redraw the
 graph or replace unchanged log entries. On narrow screens the panes stack.
 Provider-emitted reasoning is shown when available; judge output remains visible
@@ -396,7 +396,7 @@ is explicitly an interface/configuration check, not an end-to-end target probe.
 Preparation is visible before trials or exported tasks exist, and does not
 reclassify when a later trial fails. Opening it adds no VM probes.
 
-The tab refreshes the same host-saved status every five seconds while active,
+The tab streams host-saved status changes over Server-Sent Events (SSE) while active,
 without extra VM probes or model calls from opening the graph. Selected challenge,
 trial and zoom survive updates. Update both the orchestrator and
 `cyber-agent-flow-eval` on the host for new observation records; existing runs can
@@ -416,8 +416,9 @@ continue to work independently.
   and when that stage was last recorded, when supported by the host evaluator.
 - Per-trial outcomes and scores, recent timestamped events, and a link to results.
 - Recorded trial errors appear directly below the trial table and in results.
-  Both windows refresh saved host data every 5 seconds during active execution
-  and every minute after completion; Refresh reloads immediately. These reads
+  Progress streams saved host data; Results refreshes every 5 seconds during active
+  execution. After completion, both follow the dashboard refresh preference
+  (one minute by default); Refresh reloads immediately. These reads
   do not start VM checks or fetch outputs from the participant. PVE session/access
   checks still apply.
 
@@ -446,7 +447,7 @@ or response bodies. Common credential fields are redacted. Previews cover up to
 80 log lines (up to 12,000 characters). Missing or unreadable diagnostics are
 reported explicitly; opening results does not attempt remote recovery.
 
-A compact status notice follows the active sample across all pages. The dedicated Progress workspace updates saved run data every five seconds
+A compact status notice follows the active sample across all pages. The dedicated Progress workspace streams changes to saved run data
 while execution is active, including when dashboard refresh is Never. It stops
 when execution finishes if automatic refresh is off. Run/trial elapsed clocks
 advance between reads.
@@ -815,10 +816,29 @@ when the main console rolls over. Command previews show at most 60 lines, with
 common credentials redacted. These views only read saved host data. Existing runs
 can show their saved command logs and artifacts; new checkpoints require a new run.
 
-Active Progress and Results windows poll their saved run data every five seconds,
-independently of the dashboard Automatic refresh setting, including Never.
-These updates run silently without reopening the loading modal. With Never set,
-polling stops when the run finishes; dashboard VM observations remain unchanged.
+Active Progress windows use **Server-Sent Events (SSE)** for transcripts, phases,
+challenge observations, released hints and completion. One authenticated HTTPS
+connection receives an initial snapshot followed by changes. Opening another
+window for the same owned run shares its host-side watcher. Local telemetry file
+changes are checked/batched every 500ms; unchanged data is not rebuilt until the
+five-second state/lock check. No guest operations or model calls are added.
+
+Connections heartbeat while quiet, automatically reconnect with a fresh snapshot,
+and fall back to five-second polling if streaming is unavailable or stalled.
+Fallback retries streaming automatically; **Refresh** retries immediately.
+**Live updates · streaming**, reconnecting and polling labels identify the current
+transport. Stream capacity is bounded separately from normal requests. Sessions
+are checked before delivery and provider access is revalidated periodically;
+logout/revocation closes the feed. Closing a window stops only its subscription.
+
+Results windows retain five-second polling during active execution. Both views
+update independently of dashboard Automatic refresh, including **Never**, and
+updates do not reopen the loading modal. Completion arrives through the stream;
+with Never selected, all automatic run updates stop afterward. Other refresh
+intervals continue to apply to finished runs. Dashboard VM observations and the
+existing guest-to-host transcript collection cadence are unchanged: SSE can only
+send participant output after it reaches the orchestrator. Restart the
+orchestrator after installing this update; VM software updates are not needed.
 
 When you save or use participant model settings, the orchestrator calls the
 provisioner's `/usr/local/sbin/update-llm-destination` utility. It updates the

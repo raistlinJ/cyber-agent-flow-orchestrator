@@ -9,6 +9,7 @@ from .monitor import ProxmoxProbe, FusionProbe, definitions, snapshot
 from .workspaces import Workspace, ROLES
 from . import service
 from .observation_cache import CachedProbe, ObservationCache
+from .run_stream import RunStreams, signature
 
 
 class UserDashboard:
@@ -19,6 +20,7 @@ class UserDashboard:
             raise ValueError('Poll interval must be between 2 and 300 seconds')
         self.cfg, self.runtime, _, _ = load(config)
         self.root, self.interval = runs_root, interval
+        self.run_streams = RunStreams()
         self.probe_factory = probe_factory or (lambda backend, access: (FusionProbe if backend['type']=='fusion' else ProxmoxProbe)(backend, access))
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='user-monitor')
         self.lock = threading.RLock()
@@ -43,6 +45,7 @@ class UserDashboard:
         pass  # Monitoring begins only with an authenticated request.
 
     def close(self):
+        self.run_streams.close()
         self.studies.close()
         self.samples.close()
         self.updates.close()
@@ -179,6 +182,18 @@ class UserDashboard:
         value['extra_reset_hooks_available'] = bool(runtime['backend'].get('before_trial'))
         access.current()
         return value
+
+    def run_stream(self, access, run_id):
+        path = self.workspace(access).run_path(run_id)
+        from .access import AccessDenied
+        if (path / 'workflow.json').is_symlink() or (path / 'evaluation').is_symlink():
+            raise AccessDenied('Invalid run path')
+        if not (path / 'workflow.json').is_file():
+            raise FileNotFoundError('Run not found')
+        access.current()
+        return self.run_streams.subscribe(
+            (access.username, run_id), lambda: service.status(path, include_transcript=True),
+            lambda: signature(path))
 
     def run_detail(self, access, run_id, kind):
         workspace = self.workspace(access)

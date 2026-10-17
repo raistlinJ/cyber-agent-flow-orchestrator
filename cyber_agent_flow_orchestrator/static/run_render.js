@@ -46,7 +46,7 @@ function renderTranscript(run,parent,kind='caf'){
   const trial=trials.find(t=>t.trial_id+'|'+t.attempt===select.value),transcript=trial?.[field];
   const scrollKey=key+'|'+select.value,previous=stageDetailScroll.get(scrollKey);
   output.replaceChildren();
-  status.textContent=kind==='preflight'?(transcript?.live?'Testing judge connection and response format…':transcript?'Saved judge startup test output':'Waiting for the judge startup test.'):transcript?.live?'Live · updates with the progress window every 5 seconds':transcript?'Saved '+title.toLowerCase():'Waiting for trials to start.';
+  status.textContent=kind==='preflight'?(transcript?.live?'Testing judge connection and response format…':transcript?'Saved judge startup test output':'Waiting for the judge startup test.'):transcript?.live?'Live · updates with the progress window':transcript?'Saved '+title.toLowerCase():'Waiting for trials to start.';
   if(transcript?.updated_at)status.textContent+=' · Last received '+new Date(transcript.updated_at).toLocaleTimeString();
   if(transcript?.warning)output.append(el('p',transcript.warning,'notice'));
   if(transcript?.truncated)output.append(el('p','Showing recent events. The full transcript is included in the run bundle.','small'));

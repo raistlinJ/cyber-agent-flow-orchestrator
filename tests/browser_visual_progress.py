@@ -103,6 +103,8 @@ def main():
             context = browser.new_context(
                 ignore_https_errors=True, viewport={"width": 1600, "height": 1150}
             )
+            # Exercise the polling fallback explicitly; SSE has dedicated integration coverage.
+            context.add_init_script("window.EventSource=undefined")
             reads = []
 
             def status(route):

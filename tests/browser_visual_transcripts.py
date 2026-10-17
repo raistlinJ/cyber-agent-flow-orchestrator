@@ -38,6 +38,8 @@ def main():
         with pve_server(root) as pve,secure_server(Dashboard(),root/'web',auth=make_auth(pve)) as server:
             browser=pw.chromium.launch(channel='chrome',headless=True)
             context=browser.new_context(ignore_https_errors=True,viewport={'width':1600,'height':1100})
+            # Exercise the polling fallback explicitly; SSE has dedicated integration coverage.
+            context.add_init_script("window.EventSource=undefined")
             reads=[]
             def respond(route):reads.append(route.request.url);route.fulfill(json=current)
             context.route('**/api/runs/demo/status',respond)

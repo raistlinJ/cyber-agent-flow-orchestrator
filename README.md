@@ -727,7 +727,7 @@ ScenarioForge task loading can draft an editable, Judge-based challenge scaffold
 
 While an experiment runs, open **Progress → step 9 → Cyber-agent-flow transcript**
 to view emitted prompts, responses, tool calls/results and status. The scrollable
-dropdown updates every five seconds even when dashboard refresh is set to Never.
+transcript streams new host-collected output even when dashboard refresh is set to Never.
 Choose among the latest ten trial attempts. Scrolling up pauses automatic scrolling;
 return to the bottom to follow new events. Common credential fields are redacted,
 and displayed history is bounded; the full transcript remains in the run bundle.
@@ -762,3 +762,12 @@ IP/range targets pulse while CAF interacts with them, without changing completio
 colors. Tool events supply activity; cited Monitor findings supply challenge
 context. Highlights expire when execution ends or updates go stale, with static
 outlines for reduced-motion preferences.
+
+
+Active **Progress** windows use Server-Sent Events (SSE) for incremental status,
+CAF/judge transcripts, hints and visualization updates. A shared host-file watcher
+batches changes every 500ms without adding VM probes. Connections reconnect with
+a fresh snapshot and fall back to five-second polling when necessary. The
+**Never** refresh preference still allows live run updates and stops automatic
+updates after completion. Guest-to-host transcript collection is unchanged.
+Restart the orchestrator to enable the streaming endpoint; no VM update is needed.

@@ -1,4 +1,5 @@
 """Authenticated private dashboard behind the Python HTTPS proxy. Live probes run off the HTTP request path."""
+from contextlib import suppress
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -6,6 +7,7 @@ import logging
 import traceback
 from pathlib import Path
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 from .model_config import ModelConfigError
@@ -108,6 +110,72 @@ def handler(dashboard, *, auth, proxy_key, origin):
             self.end_headers()
             shutil.copyfileobj(stream, self.wfile, 1024 * 1024)
 
+        def send_run_stream(self, access, run_id, token):
+            from .run_stream import AUTH_REFRESH_SECONDS, HEARTBEAT_SECONDS, WAIT_SECONDS, StreamUnavailable, active, frame, state_frame
+            started = False
+            try:
+                with dashboard.run_stream(access, run_id) as feed:
+                    revision, value = feed.wait(0, timeout=10)
+                    if value is None:
+                        raise StreamUnavailable('Live updates are not ready; retry.')
+                    access.current()
+                    self.send_response(200)
+                    for key, value_header in {
+                        'Content-Type': 'text/event-stream; charset=utf-8',
+                        'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no',
+                        'X-Content-Type-Options': 'nosniff', 'Connection': 'close',
+                    }.items(): self.send_header(key, value_header)
+                    if getattr(self, '_desktop_cookie', None):
+                        self.send_header('Set-Cookie', session_cookie(self._desktop_cookie, auth.absolute))
+                    self.end_headers()
+                    self.close_connection = True
+                    started = True
+                    self.wfile.write(b'retry: 2000\n\n')
+                    self.wfile.flush()
+                    previous, before = None, None
+                    checked = heartbeat = time.monotonic()
+                    while not feed.stop.is_set():
+                        now = time.monotonic()
+                        # Local token checks before every delivery; periodically revalidate provider access.
+                        if not auth.session(token, revalidate=now - checked >= AUTH_REFRESH_SECONDS):
+                            self.wfile.write(frame('access-error', {'status': 401, 'error': 'Session expired or access revoked'}))
+                            self.wfile.flush()
+                            return
+                        if now - checked >= AUTH_REFRESH_SECONDS: checked = now
+                        if revision != before:
+                            self.wfile.write(state_frame(previous, value, before, revision))
+                            self.wfile.flush()
+                            previous, before = value, revision
+                            heartbeat = now
+                            if not active(value):
+                                self.wfile.write(frame('complete', {'revision': revision}))
+                                self.wfile.flush()
+                                return
+                        if now - heartbeat >= HEARTBEAT_SECONDS:
+                            self.wfile.write(frame('heartbeat', {'revision': revision}))
+                            self.wfile.flush()
+                            heartbeat = now
+                        revision, value = feed.wait(before, timeout=WAIT_SECONDS)
+            except StreamUnavailable as exc:
+                if started:
+                    with suppress(OSError):
+                        self.wfile.write(frame('unavailable', {'status': 503, 'error': str(exc)}))
+                        self.wfile.flush()
+                else:
+                    self.respond(503, {'error': str(exc)})
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                pass  # Closing a window releases its subscription, never the run itself.
+            except AccessDenied:
+                if not started: raise
+                with suppress(OSError):
+                    self.wfile.write(frame('access-error', {'status': 403, 'error': 'Access not granted'}))
+                    self.wfile.flush()
+            except (OSError, ValueError, KeyError):
+                if not started: raise
+                with suppress(OSError):
+                    self.wfile.write(frame('unavailable', {'status': 503, 'error': 'Live updates temporarily unavailable'}))
+                    self.wfile.flush()
+
         def trusted(self, *, post=False):
             key = self.headers.get('X-Orchestrator-Proxy-Key', '')
             if not secrets.compare_digest(key.encode(), proxy_key.encode()):
@@ -191,11 +259,17 @@ def handler(dashboard, *, auth, proxy_key, origin):
                         self.respond(404, {'error': 'Study not found or report unavailable'})
                 elif path.startswith('/api/runs/') and getattr(dashboard, 'scoped', False):
                     parts = path.split('/')
-                    if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv', 'artifact'):
+                    if len(parts) != 5 or parts[4] not in ('status', 'results', 'dataset.csv', 'artifact', 'stream'):
                         self.respond(404, {'error': 'Not found'})
                         return
                     try:
                         access = auth.access(token, revalidate=False)
+                        if parts[4] == 'stream':
+                            if not hasattr(dashboard, 'run_stream'):
+                                self.respond(404, {'error': 'Live streams unavailable'})
+                                return
+                            self.send_run_stream(access, parts[3], token)
+                            return
                         if parts[4] == 'artifact':
                             artifact_id = parse_qs(urlsplit(self.path).query).get('id', [''])[0]
                             with dashboard.artifact(access, parts[3], artifact_id) as (stream, mime, filename):
