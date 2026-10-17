@@ -629,7 +629,7 @@
 .visual-workspace .visual-header p{font-size:10px;margin:0}
 .visual-workspace #visual-trial{padding:4px 7px;font-size:10px}
 .visual-workspace #visualize-view-panel:not([hidden]){height:auto;min-height:0}
-#visual-editor.visual-workbench{display:grid;flex:none;grid-template-columns:36px var(--editor-prep-width,260px) var(--editor-sidebar-sash,4px) minmax(0,1fr);grid-template-rows:var(--editor-canvas-track,minmax(0,1fr)) var(--editor-panel-sash,4px) var(--editor-panel-track,260px) 22px;height:var(--editor-height,740px);min-height:0;gap:0;border:1px solid #bfc7cc;border-radius:0;overflow:hidden;background:#fff}
+#visual-editor.visual-workbench{display:grid;flex:none;grid-template-columns:36px var(--editor-prep-width,260px) var(--editor-sidebar-sash,4px) minmax(0,1fr);grid-template-rows:var(--editor-canvas-track,minmax(0,1fr)) var(--editor-panel-sash,4px) var(--editor-panel-track,260px);height:var(--editor-height,740px);min-height:0;gap:0;border:1px solid #bfc7cc;border-radius:0;overflow:hidden;background:#fff}
 .visual-canvases{display:contents;position:static;height:auto;min-height:0;max-height:none}
 .editor-activity-rail{grid-column:1;grid-row:1/4;background:#29343d;display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:5px 0}
 .editor-activity-rail button{border:0;border-left:2px solid transparent;border-radius:0;background:transparent;color:#b9c4cb;padding:9px 5px;display:grid;place-items:center}
@@ -685,8 +685,6 @@
 #visual-editor .visual-transcript-grid:has(#visual-caf-panel.is-collapsed){grid-template-columns:34px minmax(0,1fr)}
 #visual-editor .visual-transcript-grid:has(#visual-judge-panel.is-collapsed){grid-template-columns:minmax(0,1fr) 34px}
 #visual-editor .visual-transcript-grid:has(#visual-caf-panel.is-collapsed):has(#visual-judge-panel.is-collapsed){grid-template-columns:34px 34px}
-.editor-statusbar{grid-column:1/-1;grid-row:4;margin:0;padding:2px 9px;background:#086e80;color:#f2fbfd;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px;overflow:hidden}
-.editor-statusbar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #visual-editor.is-preparation-collapsed #preparation-graph,#visual-editor.is-preparation-collapsed #preparation-graph-wrap .graph-toolbar>div{display:none}
 #visual-editor.is-preparation-collapsed #preparation-graph-wrap .graph-toolbar{height:100%;flex-direction:column;justify-content:flex-start;padding:5px 1px;gap:10px;border:0}
 #visual-editor.is-preparation-collapsed #preparation-graph-wrap .graph-toolbar>span{writing-mode:vertical-rl;font-size:10px}
@@ -702,7 +700,7 @@
  #visual-editor #attack-graph-wrap .graph-toolbar{flex-wrap:wrap}#visual-editor #attack-graph-wrap .graph-toolbar>div{flex-basis:100%;justify-content:flex-start;border-top:1px solid #dce1e5}
  #visual-editor .visual-inspector-tabs{padding:0;flex-wrap:wrap;overflow:visible;min-height:34px}
  #visual-editor .visual-inspector-tabs button[role=tab]{padding:6px 7px;font-size:9px}
- #visual-editor .visual-transcripts{padding:6px}.editor-statusbar{font-size:9px}.editor-statusbar span:last-child{display:none}
+ #visual-editor .visual-transcripts{padding:6px}
  #visual-editor .visual-transcript-grid,#visual-editor .visual-transcript-grid:has(#visual-caf-panel.is-collapsed),#visual-editor .visual-transcript-grid:has(#visual-judge-panel.is-collapsed){grid-template-columns:minmax(0,1fr)}
  #visual-editor .visual-transcript-grid:has(#visual-caf-panel.is-collapsed){grid-template-rows:30px 100%}
  #visual-editor .visual-transcript-grid:has(#visual-judge-panel.is-collapsed){grid-template-rows:100% 30px}
@@ -798,3 +796,11 @@
  #visual-editor .visual-transcript-controls button{padding:1px 3px;font-size:9px}
  #visual-editor .visual-transcript-panel.is-collapsed>.visual-transcript-heading{height:100%;min-height:26px}
 }
+
+/* Keep connection status above the workbench, clear of every dock pane. */
+.visual-header .visual-monitor-heading{min-width:0;flex:1}
+.visual-monitor-title{display:flex;align-items:baseline;gap:10px;min-width:0}
+.visual-monitor-title h2{flex:none}
+.visual-workspace .visual-header .visual-monitor-title p{margin:0;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.visual-workspace .visual-header .visual-run-status{margin:2px 0 0;font-size:10px;line-height:1.5;overflow-wrap:anywhere;color:#536b78}
+@media(max-width:850px){.visual-monitor-title #visual-now-phase{display:none}}

@@ -211,7 +211,7 @@ function initVisualEditor(){
  $('visual-step-open').addEventListener('click',()=>{const phase=currentVisualStep(visualState.run);if(phase){setProgressDisplay('phases');setProgressPhase(phase.id,{follow:true});}});
  initEditorSash('editor-sidebar-sash',true);initEditorSash('editor-panel-sash',false);
  new ResizeObserver(resizeVisualEditor).observe($('debug-console'));new ResizeObserver(resizeVisualEditor).observe(document.querySelector('.visual-header'));window.addEventListener('resize',resizeVisualEditor);
- const status=()=>{const text=$('run-status').textContent;if($('visual-editor-status').textContent!==text)$('visual-editor-status').textContent=text;$('visual-editor-trial').textContent=$('visual-trial').selectedOptions[0]?.textContent||'Lab preparation';};new MutationObserver(status).observe($('run-status'),{childList:true,subtree:true,characterData:true});$('visual-trial').addEventListener('change',status);
+ const status=()=>{const text=$('run-status').textContent;if($('visual-editor-status').textContent!==text)$('visual-editor-status').textContent=text;};new MutationObserver(status).observe($('run-status'),{childList:true,subtree:true,characterData:true});$('visual-trial').addEventListener('change',status);
  applyVisualEditor();status();
 }
 function setVisualEditorCollapsed(name,collapsed){

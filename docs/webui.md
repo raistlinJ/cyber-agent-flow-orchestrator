@@ -286,6 +286,9 @@ preparation-check details, status and legend sections also collapse. Pane sizes
 and main collapse choices persist in the browser, independently of experiment
 configuration. Clicking a node reopens its details panel.
 
+Run state, last-update time and streaming/polling status appear beside **Run
+monitor**, above the canvases. The dock has no status footer covering its content.
+
 The bottom panel provides **Selected node**, **Transcripts**, **Hints & solutions**
 and **Run log** tabs. The troubleshooting console is available in Phase progress.
 Each output scrolls

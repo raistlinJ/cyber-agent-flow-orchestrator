@@ -216,6 +216,10 @@ def main():
             sidebar.focus();sidebar.press('ArrowRight')
             assert int(sidebar.get_attribute('aria-valuenow'))>=before_width+70
             sidebar.dblclick()
+            # Status lives above the workbench, never over dock content or controls.
+            expect(page.locator('#visual-editor footer')).to_have_count(0)
+            status_box=page.locator('#visual-editor-status').bounding_box()
+            assert status_box['y']+status_box['height']<=page.locator('#visual-editor').bounding_box()['y']
             panel_sash=page.locator('#editor-panel-sash');old_panel=page.locator('.visual-inspector').bounding_box()['height']
             panel_sash.focus();panel_sash.press('ArrowUp')
             assert page.locator('.visual-inspector').bounding_box()['height']>=old_panel+15
@@ -648,6 +652,10 @@ def main():
             page.set_viewport_size({"width": 430, "height": 900})
             page.get_by_role("button", name="Fit graph", exact=True).click()
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+            status_box=page.locator('#visual-editor-status').bounding_box()
+            assert status_box['y']+status_box['height']<=page.locator('#visual-editor').bounding_box()['y']
+            dock=page.locator('.visual-inspector').bounding_box();editor=page.locator('#visual-editor').bounding_box()
+            assert dock['y']+dock['height']<=editor['y']+editor['height']
             page.screenshot(path="/tmp/caf-visual-monitor-mobile.png", full_page=True)
             # An empty snapshot clears old evidence instead of displaying a stale graph.
             current["sample_progress"]["visualization"]["trials"] = []
