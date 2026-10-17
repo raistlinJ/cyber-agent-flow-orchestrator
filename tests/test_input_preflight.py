@@ -99,6 +99,7 @@ def test_participant_synthetic_probe_exercises_generation_and_tools(monkeypatch,
     result=guest.check_model({'provider':provider,'url':'http://model.invalid/v1','name':'configured'},'private-test-key',tools=True)
     body=json.loads(calls[0].data)
     assert body['model']=='configured' and body['tools']
+    assert (body['options']['num_predict'] if provider=='ollama_direct' else body['max_tokens']) == 1024
     assert 'Synthetic' in body['messages'][0]['content']
     assert 'private-test-key' not in json.dumps(result)
 
@@ -175,3 +176,17 @@ def test_old_caf_no_timeout_fails_before_model_probe(tmp_path,monkeypatch):
     (tmp_path/'mcp_kali.py').write_text('# Old CAF version')
     with pytest.raises(ValueError,match='No-timeout tool actions require an updated'):
         guest.dispatch(dict(role='participant',user='participant',engine=dict(path=str(tmp_path),python='/python'),tool_timeout=0,model={}))
+
+
+def test_participant_probe_still_requires_final_text_or_tool_call(monkeypatch):
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, size):
+            return json.dumps({'choices': [{'finish_reason': 'length', 'message': {
+                'content': None, 'reasoning_content': 'Synthetic private reasoning only'}}]}).encode()
+    monkeypatch.setattr(guest.urllib.request, 'urlopen', lambda *args, **kwargs: Response())
+    with pytest.raises(ValueError, match='no usable text or tool call') as error:
+        guest.check_model({'provider': 'openai', 'url': 'http://model.invalid/v1', 'name': 'reasoning'}, 'private-test-key')
+    assert 'private-test-key' not in str(error.value)
+    assert 'Synthetic private reasoning' not in str(error.value)

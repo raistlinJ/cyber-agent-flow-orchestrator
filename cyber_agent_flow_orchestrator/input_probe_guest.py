@@ -13,6 +13,10 @@ import urllib.parse
 import urllib.request
 
 
+# Reasoning-capable models need room to reach the short final probe response.
+PROBE_MAX_TOKENS = 1024
+
+
 def env_values(text):
     result = {}
     for line in text.splitlines():
@@ -51,16 +55,16 @@ def check_model(model, key, timeout=60, tools=False):
     if provider == 'ollama_direct':
         endpoint = base if base.endswith('/api/chat') else base + '/api/chat'
         body = {'model':model['name'],'messages':[{'role':'user','content':prompt}], 'stream':False,
-                'options':{'temperature':0,'num_predict':256}}
+                'options':{'temperature':0,'num_predict':PROBE_MAX_TOKENS}}
         if tools: body['tools'] = [tool]
     elif provider == 'claude':
         endpoint = base if base.endswith('/v1/messages') else base + ('/messages' if base.endswith('/v1') else '/v1/messages')
         headers.update({'x-api-key':key,'anthropic-version':'2023-06-01'})
-        body = {'model':model['name'],'messages':[{'role':'user','content':prompt}],'max_tokens':256}
+        body = {'model':model['name'],'messages':[{'role':'user','content':prompt}],'max_tokens':PROBE_MAX_TOKENS}
         if tools: body['tools'] = [{'name':'caf_preflight_echo','description':tool['function']['description'],'input_schema':tool['function']['parameters']}]
     elif provider in ('openai', 'litellm'):
         endpoint = base if base.endswith('/chat/completions') else base + ('/chat/completions' if base.endswith('/v1') else '/v1/chat/completions')
-        body = {'model':model['name'],'messages':[{'role':'user','content':prompt}], 'max_tokens':256}
+        body = {'model':model['name'],'messages':[{'role':'user','content':prompt}], 'max_tokens':PROBE_MAX_TOKENS}
         if tools: body['tools'] = [tool]
         if parsed.hostname == 'api.openai.com': body['max_completion_tokens'] = body.pop('max_tokens')
     else:

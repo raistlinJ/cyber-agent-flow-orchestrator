@@ -1001,7 +1001,7 @@ function initTrialLimitHelp(){
  const descriptions={
   repetitions:'Repeat every task once per run configuration for each repetition. Total trials = tasks × run configurations × repetitions.',
   max_turns:'Maximum agent conversation turns per trial. The trial ends when the agent finishes or reaches a turn or time limit. With progressive hints enabled, this must exceed the hint interval.',
-  wall_seconds:'Maximum participant active time per trial, in seconds. Intermediate evidence-transfer and progress-judge waiting time are excluded and recorded separately. Judge reviews have separate time limits.',
+  wall_seconds:'Maximum participant active time per trial, in seconds. This is the limit behind “Guest wall-clock budget exceeded” and “Participant active-time budget exceeded”. Select No timeout to disable it (saved as wall_seconds: 0). Intermediate evidence-transfer and progress-judge waiting time are excluded and recorded separately. Judge reviews have separate time limits; maximum agent turns still applies.',
   tool_timeout:'Time in seconds before a running tool reaches its timeout checkpoint. CAF handles waiting, backgrounding or stopping according to the trial policy. If the participant active time limit is enabled, it can still stop an active tool. No timeout disables elapsed and idle tool checkpoints; a tool can wait indefinitely.',
   context_window:'Token budget used by CAF to manage conversation history and summarize older context. Choose a budget supported by the participant model; this setting does not increase the model’s own context capacity.'
  };

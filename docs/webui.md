@@ -840,6 +840,13 @@ existing guest-to-host transcript collection cadence are unchanged: SSE can only
 send participant output after it reaches the orchestrator. Restart the
 orchestrator after installing this update; VM software updates are not needed.
 
+A trial error of **Guest wall-clock budget exceeded** or **Participant active-time
+budget exceeded** is controlled by **New experiment → Trial limits → Participant
+active time limit (seconds)**, saved as `runtime.execution.wall_seconds`. Its
+**No timeout** toggle saves `0`; maximum turns and other enabled timeouts still
+apply. The review page shows the chosen limit. Rerunning an existing experiment
+reuses its frozen settings; create a new experiment to use a different limit.
+
 When you save or use participant model settings, the orchestrator calls the
 provisioner's `/usr/local/sbin/update-llm-destination` utility. It updates the
 persistent Netplan route or DHCP route-service destination and reconciles only
@@ -934,3 +941,10 @@ confirmation, then permanently removes the selected experiments’ private saved
 inputs and local outputs (results, logs and bundles). Active runs and experiments
 referenced by saved studies are protected; the server checks the complete
 selection before deleting anything. Deletion is scoped to the signed-in owner.
+
+
+Participant connectivity preflight allows up to 1,024 output tokens for its short
+synthetic response so reasoning-capable models can reach final text. It still
+requires usable text or a tool call within the existing probe time limit;
+reasoning-only output does not count as a successful probe. No real tool is
+executed during this check.
