@@ -96,6 +96,13 @@ def dispatch(data):
     if role == 'participant':
         access(data['engine']['path'], user)
         access(data['engine']['python'], user, executable=True)
+        if data.get('tool_timeout') == 0:
+            import ast
+            source = Path(data['engine']['path']) / 'mcp_kali.py'
+            tree = ast.parse(source.read_text())
+            supported = any(isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'UNLIMITED_TOOL_TIMEOUT_SUPPORTED' for target in node.targets) and isinstance(node.value, ast.Constant) and node.value.value is True for node in tree.body)
+            if not supported:
+                raise ValueError('No-timeout tool actions require an updated cyber-agent-flow checkout on the participant VM; update CAF in Applications before running')
         variable = data['model'].get('api_key_env')
         environment = {}
         try:

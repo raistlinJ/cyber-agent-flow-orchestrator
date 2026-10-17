@@ -14,7 +14,7 @@ from test_pve_auth import pve_server, make_auth
 from https_fixture import secure_server, PASSWORD
 
 
-def main():
+def main(unlimited=False):
     with tempfile.TemporaryDirectory() as temp, pytest.MonkeyPatch.context() as patch:
         root=Path(temp)
         config,_,agent,manifest=lab.__wrapped__(root,patch)
@@ -50,6 +50,8 @@ def main():
                     model_reads=[]
                     def read_model(route):
                         data=route.request.post_data_json
+                        if data==dict(role='participant',action='tools'):
+                            route.fulfill(json=dict(vmid=9403,tools=[dict(name='curl',description='Fetch HTTP',risk='standard')],guidance_assets=[]));return
                         assert data==dict(role='participant',action='read')
                         model_reads.append(data)
                         route.fulfill(json=dict(token='c'*32,vmid=9403,exists=True,
@@ -71,12 +73,21 @@ def main():
                     for sample,trials in [('smoke',2),('tools-vs-helper',4)]:
                         page.locator('#new-experiment').click()
                         page.get_by_label('Experiment type',exact=True).select_option(sample)
-                        page.get_by_role('tab',name='ScenarioForge',exact=True).click()
+                        page.locator('[data-wizard-step=scenario]').click()
                         expect(page.locator('#sample-sf-companion')).to_be_disabled()
                         expect(page.locator('#sample-sf-companion')).to_have_value('demo-'+sample+'.xml · fixed sample XML')
-                        page.get_by_role('tab',name='Evaluation',exact=True).click()
-                        page.get_by_role('tab',name='Judge LLM',exact=True).click()
-                        expect(page.locator('#judge-enabled')).not_to_be_checked()
+                        page.locator('[data-wizard-step=tasks]').click()
+                        sample_task=page.locator('#sample-task-info')
+                        sample_task.get_by_role('tab',name='Readiness',exact=True).click()
+                        expect(sample_task.locator('#sample-checks')).to_be_visible()
+                        expect(sample_task.locator('#sample-success')).to_be_hidden()
+                        sample_task.get_by_role('tab',name='Progressive hints',exact=True).click()
+                        expect(sample_task.locator('#sample-task-panel-hints')).to_contain_text('Sample guidance')
+                        sample_task.get_by_role('tab',name='Verification',exact=True).click()
+                        expect(sample_task.locator('#sample-success')).to_be_visible()
+                        expect(sample_task.locator('#sample-success')).to_be_disabled()
+                        page.locator('[data-wizard-step=judge]').click()
+                        expect(page.locator('#judge-enabled')).to_be_checked()
                         page.locator('#judge-enabled').check()
                         expect(page.locator('#judge-inherit')).to_be_checked()
                         expect(page.locator('#judge-monitor_progress')).to_be_checked()
@@ -93,44 +104,53 @@ def main():
                             page.locator('#judge-provider').select_option('openai')
                             page.locator('#judge-url').fill('http://judge.fixture/v1')
                             page.locator('#judge-name').fill('independent-judge')
-                        page.get_by_role('tab',name='Tasks & trial settings',exact=True).click()
+                        page.locator('[data-wizard-step=limits]').click()
                         settings=dict(repetitions=2,max_turns=9,wall_seconds=333,tool_timeout=41,context_window=4096,hint_stalled_turns=3,max_tries_before_solution=4)
                         expect(page.locator('#eval-repetitions')).to_have_value('1' if sample=='smoke' else '3')
                         expect(page.locator('#eval-wall_seconds')).to_have_value('120')
                         expect(page.locator('#eval-max_tries_before_solution')).to_have_value('6')
                         expect(page.locator('#eval-hint_stalled_turns')).to_have_value('2')
+                        expect(page.locator('#eval-hint_stalled_turns')).to_be_enabled()
+                        page.locator('[data-wizard-step=hints]').click()
+                        expect(page.locator('#provide-progressive-hints')).to_be_checked()
+                        page.locator('#provide-progressive-hints').uncheck()
                         expect(page.locator('#eval-hint_stalled_turns')).to_be_disabled()
                         page.locator('#provide-progressive-hints').check()
                         expect(page.locator('#eval-hint_stalled_turns')).to_be_enabled()
+                        page.locator('[data-wizard-step=limits]').click()
                         page.locator('#eval-max_turns').fill('2')
+                        page.locator('[data-wizard-step=hints]').click()
                         page.locator('#eval-hint_stalled_turns').fill('2')
                         assert page.locator('#eval-hint_stalled_turns').evaluate('(input)=>!input.validity.valid')
                         for key,value in settings.items():
+                            page.locator('[data-wizard-step='+('hints' if key in ('hint_stalled_turns','max_tries_before_solution') else 'limits')+']').click()
                             expect(page.locator('#eval-'+key)).to_be_enabled()
                             page.locator('#eval-'+key).fill(str(value))
                         assert page.locator('#eval-hint_stalled_turns').evaluate('(input)=>input.validity.valid')
-                        page.get_by_role('tab',name='Experiment',exact=True).click()
+                        page.locator('[data-wizard-step=overview]').click()
                         page.get_by_label('Experiment type',exact=True).select_option('tools-vs-helper' if sample=='smoke' else 'smoke')
-                        page.get_by_role('tab',name='Evaluation',exact=True).click()
+                        page.locator('[data-wizard-step=tasks]').click()
                         expect(page.locator('#eval-wall_seconds')).to_have_value('120')
-                        page.get_by_role('tab',name='Experiment',exact=True).click()
+                        page.locator('[data-wizard-step=overview]').click()
                         page.get_by_label('Experiment type',exact=True).select_option(sample)
-                        page.get_by_role('tab',name='Evaluation',exact=True).click()
+                        page.locator('[data-wizard-step=tasks]').click()
                         expect(page.locator('#eval-wall_seconds')).to_have_value('333')
+                        page.locator('[data-wizard-step=hints]').click()
                         page.locator('#eval-max_tries_before_solution').fill('0')
                         expect(page.locator('#create-experiment')).to_be_disabled()
                         page.locator('#eval-max_tries_before_solution').fill('4')
+                        page.locator('[data-wizard-step=limits]').click()
                         page.locator('#eval-repetitions').fill('0')
                         expect(page.locator('#create-experiment')).to_be_disabled()
                         page.locator('#eval-repetitions').fill('2')
                         if sample=='smoke':
-                            page.get_by_role('tab',name='Judge LLM',exact=True).click()
+                            page.locator('[data-wizard-step=judge]').click()
                             page.locator('#judge-max_turns').scroll_into_view_if_needed()
                             page.screenshot(path='/tmp/caf-judge-configuration.png')
-                            page.get_by_role('tab',name='Tasks & trial settings',exact=True).click()
+                            page.locator('[data-wizard-step=hints]').click()
                             page.locator('#eval-max_tries_before_solution').scroll_into_view_if_needed()
                             page.screenshot(path='/tmp/caf-solution-tries.png')
-                        page.get_by_role('tab',name='Cyber-agent-flow',exact=True).click()
+                        page.locator('[data-wizard-step=caf]').click()
                         expect(page.locator('#caf-settings-summary')).to_have_count(0)
                         if sample=='smoke':
                             expect(page.locator('#create-experiment')).to_be_enabled(timeout=30000)
@@ -142,21 +162,66 @@ def main():
                             expect(page.locator('#create-experiment')).to_be_enabled()
                             expect(page.locator('#create-experiment-hint')).to_be_hidden()
                             assert len(model_reads)==1
-                        page.get_by_role('tab',name='ScenarioForge',exact=True).click()
+                        page.locator('[data-wizard-step=scenario]').click()
                         page.locator('#sample-scenario-info').scroll_into_view_if_needed()
                         page.screenshot(path='/tmp/caf-fixed-'+sample+'.png')
                         if sample=='smoke':
-                            page.get_by_role('tab',name='Evaluation',exact=True).click()
-                            page.get_by_role('tab',name='Judge LLM',exact=True).click()
+                            page.locator('[data-wizard-step=tasks]').click()
+                            page.locator('[data-wizard-step=judge]').click()
                             page.locator('#judge-max_turns').fill('0')
-                            page.get_by_role('tab',name='Tasks & trial settings',exact=True).click()
+                            page.locator('[data-wizard-step=limits]').click()
                             assert page.evaluate("validateExperimentFields(document.getElementById('experiment-form'))") is False
                             expect(page.locator('#evaluation-page-judge')).to_be_visible()
                             page.locator('#judge-max_turns').fill('4')
-                            page.locator('#evaluation-tab-judge').press('ArrowLeft')
-                            expect(page.locator('#evaluation-page-settings')).to_be_visible()
+                            page.locator('[data-wizard-step=controls]').click()
+                            expect(page.locator('#evaluation-page-controls')).to_be_visible()
+                        if unlimited:
+                            page.locator('[data-wizard-step=limits]').click()
+                            for key in ('wall_seconds','tool_timeout'):
+                                field=page.locator('#eval-'+key).locator('..')
+                                before_height=field.bounding_box()['height']
+                                toggle=page.locator('#eval-'+key+'-no-timeout');toggle.check()
+                                expect(page.locator('#eval-'+key)).to_have_value('0')
+                                expect(page.locator('#eval-'+key)).to_be_disabled()
+                                warning=page.locator('#eval-'+key+'-timeout-warning')
+                                expect(warning).to_be_visible()
+                                expect(warning.locator('button')).to_have_text('!')
+                                tooltip=warning.get_by_role('tooltip',include_hidden=True)
+                                expect(tooltip).to_be_hidden()
+                                assert abs(field.bounding_box()['height']-before_height)<1
+                                warning.locator('button').hover()
+                                expect(tooltip).to_be_visible()
+                                expect(tooltip).to_contain_text('infinite wait')
+                                page.mouse.move(0,0)
+                                expect(tooltip).to_be_hidden()
+                                warning.locator('button').focus()
+                                expect(tooltip).to_be_visible()
+                                assert abs(field.bounding_box()['height']-before_height)<1
+                                page.keyboard.press('Tab')
+                                expect(tooltip).to_be_hidden()
+                                expect(toggle).to_be_checked()
+                                toggle.uncheck();expect(page.locator('#eval-'+key)).to_be_enabled()
+                                expect(page.locator('#eval-'+key)).to_have_value(str(settings[key]))
+                                toggle.check()
+                            settings.update(wall_seconds=0,tool_timeout=0)
+                            page.screenshot(path='/tmp/caf-no-timeout-trial-limits.png',full_page=True)
+                            page.locator('[data-wizard-step=judge]').click()
+                            for key in ('timeout_seconds','progress_timeout_seconds'):
+                                page.locator('#judge-'+key+'-no-timeout').check()
+                                expect(page.locator('#judge-'+key)).to_be_disabled()
+                                warning=page.locator('#judge-'+key+'-timeout-warning')
+                                expect(warning.locator('button')).to_have_text('!')
+                                warning.locator('button').focus()
+                                expect(warning.get_by_role('tooltip')).to_contain_text('infinite wait')
+                                page.keyboard.press('Tab')
+                            page.locator('#judge-monitor_progress').uncheck()
+                            expect(page.locator('#judge-progress_timeout_seconds-no-timeout')).to_be_disabled()
+                            page.locator('#judge-monitor_progress').check()
+                            expect(page.locator('#judge-progress_timeout_seconds')).to_be_disabled()
+                            page.screenshot(path='/tmp/caf-no-timeout-judge.png',full_page=True)
+                        page.locator('[data-wizard-step=review]').click()
                         page.get_by_role('button',name='Create experiment',exact=True).click()
-                        expect(page.locator('#experiment-dialog')).to_be_hidden(timeout=30000)
+                        expect(page.locator('#experiment-builder')).to_be_hidden(timeout=30000)
                         row=page.locator('#runs tr').filter(has_text='ready').first
                         row.get_by_role('button',name='Deploy and run',exact=True).click()
                         try:
@@ -177,10 +242,10 @@ def main():
                         assert record['runtime']['judge']['enabled']
                         assert record['runtime']['judge']['model']['name']==('independent-judge' if sample=='tools-vs-helper' else record['runtime']['model']['name'])
                         assert record['runtime']['judge']['monitor_progress'] is True
-                        assert record['runtime']['judge']['progress_timeout_seconds']==12
+                        assert record['runtime']['judge']['progress_timeout_seconds']==(0 if unlimited else 12)
                         assert record['runtime']['judge']['progress_max_checks']==8
                         assert record['runtime']['judge']['max_turns']==4
-                        assert record['runtime']['judge']['timeout_seconds']==45
+                        assert record['runtime']['judge']['timeout_seconds']==(0 if unlimited else 45)
                         assert record['runtime']['repetitions']==2
                         assert all(record['runtime']['execution'][key]==value for key,value in settings.items() if key!='repetitions')
                         from cyber_agent_flow_orchestrator import service
@@ -189,20 +254,24 @@ def main():
                         assert result['run_configuration']['scenarioforge']['xml_available']
                     progress_page=page.context.new_page()
                     progress_page.on('pageerror',lambda e:errors.append(str(e)))
-                    progress_page.goto(server['origin']+'/run?view=progress&run='+path.parent.name)
+                    progress_page.goto(server['origin']+'/run?view=progress&run='+path.parent.name+'&display=phases')
+                    progress_page.locator('#phase-navigation [data-phase-id=overview]').click()
                     expect(progress_page.get_by_text('Workflow across VMs',exact=True)).to_be_visible()
-                    expect(progress_page.locator('.workflow-step')).to_have_count(10)
-                    expect(progress_page.locator('.workflow-step.completed')).to_have_count(10)
+                    expect(progress_page.locator('#phase-navigation .progress-phase-link')).to_have_count(11)
+                    expect(progress_page.locator('#phase-navigation [data-state=completed]')).to_have_count(11)
                     expect(progress_page.locator('.workflow-vms')).to_contain_text('VM 9404')
                     expect(progress_page.locator('.workflow-readiness')).to_contain_text('containers: pass')
-                    preflight=progress_page.locator('.workflow-step').first
+                    progress_page.locator('#phase-navigation [data-phase-id=preflight]').click()
+                    preflight=progress_page.locator('.workflow-step')
                     preflight.get_by_text('Stage details and output',exact=True).click()
-                    expect(preflight).to_contain_text('Judge endpoint and host credentials · pass')
+                    expect(preflight).to_contain_text('Test LLM Judge · pass')
                     expect(preflight).to_contain_text('Participant model, guest credentials and connectivity · pass')
                     expect(preflight).to_contain_text('CORE upload paths and HITL interface · pass')
-                    preflight.get_by_text('Judge output',exact=True).click()
-                    expect(preflight.locator('[aria-label="Judge output output"]')).to_contain_text('Synthetic fixture judge output.')
-                    judge_output=progress_page.locator('.workflow-step').last.locator('details').filter(has=progress_page.get_by_text('Judge output',exact=True))
+                    preflight.get_by_text('Test LLM Judge',exact=True).click()
+                    expect(preflight.locator('.judge-test-explanation')).to_contain_text('does not mean the experiment failed')
+                    expect(preflight.locator('[aria-label="Test LLM Judge output"]')).to_contain_text('Synthetic fixture judge output.')
+                    progress_page.locator('#phase-navigation [data-phase-id=evaluate]').click()
+                    judge_output=progress_page.locator('.workflow-step').locator('details').filter(has=progress_page.get_by_text('Judge output',exact=True))
                     judge_output.locator('summary').click()
                     expect(judge_output.locator('[aria-label="Judge output output"]')).to_contain_text('Synthetic fixture judge output.')
                     progress_page.screenshot(path='/tmp/caf-judge-streaming-progress.png',full_page=True)
@@ -210,35 +279,33 @@ def main():
                     assert progress_page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     progress_page.close()
                     page.locator('#new-experiment').click()
-                    overview=page.get_by_role('tab',name='Experiment',exact=True)
-                    expect(overview).to_have_attribute('aria-selected','true')
+                    overview=page.locator('[data-wizard-step=overview]')
+                    expect(overview).to_have_attribute('aria-current','step')
                     # Opening New also resolves model routing asynchronously.
                     # Wait for that operation before checking keyboard focus.
                     expect(overview).to_be_enabled(timeout=30000)
-                    overview.focus();page.keyboard.press('End')
-                    expect(page.get_by_role('tab',name='Evaluation',exact=True)).to_be_focused()
-                    page.keyboard.press('Home');expect(overview).to_be_focused()
+                    overview.focus();page.keyboard.press('Tab')
+                    expect(page.locator('[data-wizard-step=scenario]')).to_be_focused()
                     page.get_by_label('Experiment type',exact=True).select_option('scenarioforge-xml')
-                    page.get_by_role('tab',name='Evaluation',exact=True).click()
-                    scaffold=dict(id='challenge',family='web',prompt='Read the challenge proof and report evidence.',verification_mode='judge',
-                        rubric=dict(version=1,criteria=[dict(id='recover',requirement='Recover the proof.',evidence='Successful HTTP tool output.',private_reference='PRIVATE_PROOF')]),
-                        challenge_plan=dict(version=1,steps=[dict(id='first',node_id='web',title='HTTP proof',criterion_ids=['recover'],requires=[],hints=['Inspect the response.'],solution='PRIVATE_PROOF')]),required_checks=['ports'])
-                    page.evaluate("task=>{document.getElementById('task-source').value='custom';customTaskRows=[taskRow(task)];renderTaskEditor();}",scaffold)
-                    expect(page.get_by_text('Intermediate challenge scaffold · 1 steps',exact=True)).to_be_visible()
-                    expect(page.locator('#task-0-criteria')).to_be_disabled()
-                    # A judge-only task never needs a handcrafted final JSON check.
-                    page.evaluate("()=>{customTaskRows=readTaskRows();customTaskRows[0].criteria='{not-json';}")
-                    assert page.evaluate("()=>parseTaskRows(customTaskRows)[0].challenge_plan.steps[0].id")=='first'
-                    page.locator('#eval-repetitions').fill('0')
+                    expect(page.locator('[data-wizard-step=tasks]')).to_be_disabled()
+                    page.locator('[data-wizard-step=scenario]').click()
+                    expect(page.get_by_text('Define my own task for this experiment',exact=True)).to_have_count(0)
+                    expect(page.locator('#task-load-state')).to_have_text('Waiting for scenario')
+                    expect(page.locator('[data-wizard-step=limits]')).to_be_disabled()
                     overview.click()
-                    expect(page.get_by_role('button',name='Create experiment',exact=True)).to_be_disabled()
-                    expect(page.get_by_role('tab',name='Experiment',exact=True)).to_have_attribute('aria-selected','true')
-                    page.get_by_role('tab',name='Evaluation',exact=True).click()
+                    expect(page.locator('#create-experiment')).to_be_disabled()
+                    expect(page.locator('[data-wizard-step=overview]')).to_have_attribute('aria-current','step')
+                    expect(page.locator('[data-wizard-step=tasks]')).to_be_disabled()
+                    page.locator('[data-wizard-step=scenario]').click()
                     page.screenshot(path='/tmp/caf-new-tabs-desktop.png')
                     page.set_viewport_size({'width':390,'height':844})
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
-                    assert page.locator('#experiment-dialog').evaluate('(n)=>n.getBoundingClientRect().width<=innerWidth && n.getBoundingClientRect().height<=innerHeight')
-                    assert page.locator('#create-experiment').evaluate('(n)=>n.getBoundingClientRect().bottom<=innerHeight')
+                    assert page.locator('#experiment-builder').evaluate('(n)=>n.getBoundingClientRect().width<=innerWidth')
+                    expect(page.locator('#wizard-step-select')).to_be_visible()
+                    expect(page.locator('#wizard-step-select option[value=review]')).to_have_js_property('disabled',True)
+                    assert page.evaluate("showWizardStep('review')") is False
+                    expect(page.locator('#wizard-step-title')).to_have_text('Scenario')
+                    expect(page.locator('#experiment-review')).to_be_hidden()
                     page.screenshot(path='/tmp/caf-new-tabs-mobile.png')
                     assert not errors,errors
                     browser.close()
@@ -248,4 +315,4 @@ def main():
 
 
 if __name__=='__main__':
-    main()
+    main('--unlimited' in sys.argv)

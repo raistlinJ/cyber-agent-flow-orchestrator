@@ -296,3 +296,17 @@ def test_capture_reports_missing_sources_and_propagates_revocation():
             raise AccessDenied('revoked')
     with pytest.raises(AccessDenied):
         capture(xml, {'scenarioforge': {}}, runtime, RevokedAgent())
+
+
+def test_saved_configuration_names_are_exposed_without_changing_engine_inputs(lab):
+    config, output, agent, _ = lab
+    workflow.run(config, output, agent=agent)
+    record = ev.read_json(output / 'workflow.json')
+    original = run_artifacts.configuration(output)['conditions'][0]
+    record['configuration_names'] = {original['id']: 'Guided baseline'}
+    ev.write_json(output / 'workflow.json', record)
+    named = run_artifacts.configuration(output)['conditions'][0]
+    assert named['name'] == 'Guided baseline'
+    assert {key: value for key, value in named.items() if key != 'name'} == original
+    manifest = ev.read_json(output / 'evaluation/manifest.json')
+    assert 'name' not in manifest['spec']['conditions'][0]

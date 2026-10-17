@@ -79,7 +79,9 @@ def build(root, journal, report, state, coordinator, *, include_transcript=False
                     trial['transcript']['warning'] = clean(record['transcript_warning'])
         trials.append(trial)
     events.sort(key=lambda event: event['at'])
-    return dict(name=item.get('name', journal.get('sample_id', 'Scenario experiment')), active=active, phase=journal.get('phase', state),
+    from .progress_visualization import build as graph_snapshot
+    visualization = graph_snapshot(root,journal,rows,active=active) if include_transcript else None
+    return dict(visualization=visualization,name=item.get('name', journal.get('sample_id', 'Scenario experiment')), active=active, phase=journal.get('phase', state),
                 started_at=journal.get('started_at', journal.get('created_at')), ended_at=journal.get('ended_at'),
                 updated_at=journal.get('updated_at', journal.get('created_at')), observed_at=datetime.now(timezone.utc).isoformat(),
                 elapsed_seconds=elapsed(journal.get('started_at', journal.get('created_at')),

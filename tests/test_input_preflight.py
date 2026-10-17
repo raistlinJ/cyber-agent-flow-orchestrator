@@ -20,15 +20,19 @@ def test_missing_judge_key_fails_before_any_model_request(monkeypatch):
         input_preflight.check_judge(judge_runtime())
 
 
-def test_judge_probe_is_synthetic_and_validates_contract(monkeypatch):
+def test_judge_probe_is_synthetic_and_validates_contract(monkeypatch,tmp_path):
     monkeypatch.setenv('TEST_PREFLIGHT_KEY','never-log-this-key')
     calls=[]
     def completion(config,messages,timeout, **kwargs):
         calls.append((config,messages,timeout))
         return json.dumps({'action':'verdict','passed':False,'score':0,'reason':'probe','evidence':[]}),{}
     monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',completion)
-    result=input_preflight.check_judge(judge_runtime())
+    result=input_preflight.check_judge(judge_runtime(),tmp_path)
     assert 'authenticated' in result['message']
+    assert 'synthetic passed=false verdict is expected' in result['message']
+    events=(tmp_path/'judge-preflight-events.jsonl').read_text()
+    assert 'Test LLM Judge' in events
+    assert 'does not mean the experiment failed' in events
     assert 'never-log-this-key' not in json.dumps(calls)
     assert all('Synthetic' in m['content'] or 'preflight' in m['content'] for m in calls[0][1])
     monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',lambda *args, **kwargs:('{"action":"read_evidence","file":"anything"}',{}))
@@ -151,3 +155,23 @@ def test_judge_preflight_honors_600_second_budget_and_persists_stream(tmp_path,m
     events=(tmp_path/'judge-preflight-events.jsonl').read_text()
     assert 'Synthetic check only.' in events and 'passed' in events
     assert 'private-key' not in events
+
+
+def test_judge_probe_supports_no_timeout_and_logs_warning(monkeypatch,tmp_path):
+    runtime=judge_runtime();runtime['judge']['timeout_seconds']=0
+    monkeypatch.setenv('TEST_PREFLIGHT_KEY','fixture-key')
+    def completion(config,messages,timeout,**kwargs):
+        assert timeout==0
+        return json.dumps(dict(action='verdict',passed=False,score=0,reason='synthetic',evidence=[])),{}
+    monkeypatch.setattr('cyber_agent_flow_eval.judge._completion',completion)
+    assert 'authenticated' in input_preflight.check_judge(runtime,tmp_path)['message']
+    assert 'no timeout (may wait indefinitely)' in (tmp_path/'judge-preflight-events.jsonl').read_text()
+
+
+def test_old_caf_no_timeout_fails_before_model_probe(tmp_path,monkeypatch):
+    monkeypatch.setattr(guest,'access',lambda *a,**k:None)
+    monkeypatch.setattr(guest.pwd,'getpwnam',lambda name:object())
+    monkeypatch.setattr(guest,'check_model',lambda *a,**k:pytest.fail('Must fail before endpoint probe'))
+    (tmp_path/'mcp_kali.py').write_text('# Old CAF version')
+    with pytest.raises(ValueError,match='No-timeout tool actions require an updated'):
+        guest.dispatch(dict(role='participant',user='participant',engine=dict(path=str(tmp_path),python='/python'),tool_timeout=0,model={}))

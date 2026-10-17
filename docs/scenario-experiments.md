@@ -106,11 +106,11 @@ XML defines the ScenarioForge lab. CAF's checkout, Python executable, model and 
 
 The **Cyber-agent-flow** tab contains model controls that are editable immediately and prefilled from saved experiment defaults. **Pull from VM** optionally replaces the displayed values with the application configuration. **Apply settings** saves changes and requires application-maintenance access. Creating an experiment captures the saved settings without another VM write.
 
-The **Evaluation** tab shows each sample’s locked task ID, prompt template, success criteria and required readiness checks. Custom scenarios can use their saved tasks or define an experiment-specific list. **Load scenario tasks** previews the selected XML’s definitions; **Edit loaded tasks** copies them into the editor. Add/remove tasks or import a JSON array (1–32 tasks, up to 64 KiB). Each task has an ID, family, prompt, success criteria and required checks. Advanced settings preserve split and discovery/fact declarations.
+The **Evaluation** tab shows each sample’s locked task ID, prompt template, success criteria and required readiness checks. For a custom scenario, selecting a resolved XML automatically loads `FlowState.evaluation_tasks`; when none are saved, ScenarioForge builds its default from the resolved Flow chain, guides, attack graph, flags and topology. The orchestrator presents a read-only task review with the agent prompt first, a plain-language verification and readiness summary, and expandable criteria, hints, challenge steps and private verifier details. Author or revise the task in ScenarioForge and save the Flow before selecting it here.
 
 Success criteria support exact JSON equality (`json_equals`), required output strings (`contains_all`), or scenario flag node IDs (`flag_nodes`). Flag-node tasks may omit the prompt to use ScenarioForge’s generated prompt. Expected answers are evaluator-only; they are not added to the participant prompt. Enter real scenario targets in custom prompts; the editor does not interpolate addresses. ScenarioForge checks graph references, discovery facts and flag disclosure against the deployed scenario during export.
 
-Task overrides are embedded in a private snapshot of the selected XML. The source scenario is unchanged. Definitions are also saved as `inputs/evaluation-tasks.json`, retained on reruns and included in the run bundle; the reproduction bundle contains the evaluated XML with those tasks. Choosing the scenario source sends no override, preserving ScenarioForge’s embedded definitions or default flag-collection behavior.
+The effective saved or generated definitions are embedded in a private snapshot of the selected XML. The source scenario is unchanged. Definitions are also saved as `inputs/evaluation-tasks.json`, retained on reruns and included in the run bundle; the reproduction bundle contains the evaluated XML with those tasks.
 
 Custom scenarios can set repetitions, maximum turns, trial seconds, tool timeout and context window below the tasks. Their baseline tools remain fixed. Sample tasks, budgets and conditions are locked to preserve the experiment design.
 
@@ -120,11 +120,11 @@ The enlarged modal separates **Experiment** (type), **ScenarioForge** (selected 
 
 ### Optional progressive hints
 
-**New → Evaluation → Provide progressive hints** defaults to off and is editable for both fixed samples. It is the single hint policy for every condition, is saved as `execution.provide_progressive_hints`, and is retained on reruns.
+**New → Evaluation → Provide progressive hints** defaults to on for new experiments and remains editable for scenarios and both fixed samples. It is the single hint policy for every condition, is saved as `execution.provide_progressive_hints`, and is retained on reruns.
 
 With hints enabled, the evaluator can release at most three hints per trial after two agent turns without observed progress, or after an incorrect final answer. A correct final answer stops normally. Assistance consumes the existing turn/time budget. Observed progress means a newly observed declared fact in bounded successful tool output; without fact declarations, it means a new nonempty successful tool output. This is a stall heuristic, not proof of what the model knows.
 
-Both demos prepare three ordered hints in the saved scenario XML. Custom task definitions can include `"progressive_hints": ["First pointer", "More specific guidance"]` in their advanced JSON. Use reviewed participant/facilitator-guide excerpts here; entire guide documents are **not** automatically sent to the agent. ScenarioForge exports these hints only in private `evaluator/task-metadata.json`. Discovery tasks can also use their existing `discoverable_facts`, `evidence`, and prerequisite declarations: the evaluator offers an artifact pointer, evidence guidance, then an explicit fact value. It skips already observed or supplied facts and filters literal verifier answers from assistance. Enabling hints without a usable hint/fact source fails the trial with an explicit error.
+Both demos prepare three ordered hints in the saved scenario XML. Custom ScenarioForge tasks can include ordered `progressive_hints`; entire guide documents are **not** automatically sent to the agent. ScenarioForge exports these hints only in private `evaluator/task-metadata.json`. Discovery tasks can also use their existing `discoverable_facts`, `evidence`, and prerequisite declarations: the evaluator offers an artifact pointer, evidence guidance, then an explicit fact value. It skips already observed or supplied facts and filters literal verifier answers from assistance. Enabling hints without a usable hint/fact source fails the trial with an explicit error.
 
 The participant receives only released hints, never the private plan or verifier. Results show unassisted/assisted successes, hints released and facts revealed; Progress includes timestamped hint events. Each trial's `assistance.json` records policy version, text, source, trigger, turn, elapsed time, and observed/revealed fact IDs. JSON results and the full run ZIP retain this audit. “Unassisted success” means success without a released hint; it is not a counterfactual estimate of what an assisted trial would have achieved alone.
 
@@ -166,10 +166,9 @@ not invent hints or convert facilitator solutions into hints. ScenarioForge can
 inherit public saved Flow hints for flag-collection tasks without an explicit
 hint plan. Answer-bearing hints and unresolved templates are excluded.
 
-For custom tasks, use **Progressive hints (one per line)** on Evaluation. Imported
-hint plans remain editable. Clearing an existing plan explicitly leaves it empty;
-facts remain separate in Advanced settings. Hints containing a known explicit
-verifier answer are rejected before creation.
+For custom scenarios, define progressive hints and discovery facts in ScenarioForge.
+The orchestrator reviews the resulting task but does not edit it. Hints containing a
+known explicit verifier answer are rejected before creation.
 
 With assistance enabled but no usable guidance, a trial runs unassisted rather
 than failing. Results record `progressive_hints_available`, the unavailable

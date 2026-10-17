@@ -1,9 +1,11 @@
 let studyPoll=null,renderedStudies=null,renderedStudyMembers=null;
 function renderStudyMembers(data){
  const serialized=JSON.stringify((data.runs||[]).map(r=>[r.output,r.recorded_status]));if(serialized===renderedStudyMembers)return;renderedStudyMembers=serialized;
+ const baseline=$('study-baseline-run'),previousBaseline=baseline.value;baseline.replaceChildren(new Option('Select an experiment',''));
  const references=$('study-references'),referenceSelected=new Set([...references.querySelectorAll('input:checked')].map(i=>i.value));references.replaceChildren();
  const target=$('study-members'),selected=new Set([...target.querySelectorAll('input:checked')].map(i=>i.value));target.replaceChildren();
- for(const run of data.runs||[]){if(!run.scenario_experiment)continue;const id=run.output?.split('/').pop()||run.workflow_id;const label=el('label',null,'study-member'),check=el('input');check.type='checkbox';check.value=id;check.checked=selected.has(id);label.append(check,el('span',(run.scenario_experiment.scenario||id)+' · '+id+' · '+run.recorded_status));target.append(label);if(['completed','completed_with_errors'].includes(run.recorded_status)){const copy=label.cloneNode(true),ref=copy.querySelector('input');ref.checked=referenceSelected.has(id);references.append(copy);}}
+ for(const run of data.runs||[]){if(!run.scenario_experiment)continue;const id=run.output?.split('/').pop()||run.workflow_id;const label=el('label',null,'study-member'),check=el('input');check.type='checkbox';check.value=id;check.checked=selected.has(id);label.append(check,el('span',(run.scenario_experiment.scenario||id)+' · '+id+' · '+run.recorded_status));target.append(label);baseline.add(new Option((run.scenario_experiment.scenario||id)+' · '+id,id));if(['completed','completed_with_errors'].includes(run.recorded_status)){const copy=label.cloneNode(true),ref=copy.querySelector('input');ref.checked=referenceSelected.has(id);references.append(copy);}}
+ if([...baseline.options].some(option=>option.value===previousBaseline))baseline.value=previousBaseline;
 }
 async function studyRequest(action,data){const response=await apiFetch('/api/studies/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(data)});const value=await dashboardJSON(response);if(!response.ok)throw Error(value.error||'Study request failed');return value;}
 async function refreshStudies(background=false){
@@ -19,6 +21,8 @@ async function refreshStudies(background=false){
  }catch(error){$('study-message').textContent=error.message;}finally{loadingModal.set('studies',false);}
 }
 $('reload-studies').addEventListener('click',()=>refreshStudies());
-$('create-study').addEventListener('click',async()=>{loadingModal.set('study-create',true,'Validating study members and saving the study…');try{await studyRequest('create',{name:$('study-name').value,baseline:$('study-baseline').value,run_ids:[...$('study-members').querySelectorAll('input:checked')].map(i=>i.value),reference_run_ids:[...$('study-references').querySelectorAll('input:checked')].map(i=>i.value),require_references:$('study-require-references').checked});await refreshStudies();}catch(error){$('study-message').textContent=error.message;}finally{loadingModal.set('study-create',false);}});
+$('create-study').addEventListener('click',async()=>{loadingModal.set('study-create',true,'Validating study members and saving the study…');try{await studyRequest('create',{name:$('study-name').value,baseline:$('study-baseline').value,...($('study-comparison').value==='experiments'?{baseline_run_id:$('study-baseline-run').value}:{}),run_ids:[...$('study-members').querySelectorAll('input:checked')].map(i=>i.value),reference_run_ids:[...$('study-references').querySelectorAll('input:checked')].map(i=>i.value),require_references:$('study-require-references').checked});await refreshStudies();}catch(error){$('study-message').textContent=error.message;}finally{loadingModal.set('study-create',false);}});
 window.addEventListener('hashchange',()=>{if(location.hash==='#studies')refreshStudies();else clearTimeout(studyPoll);});
 if(location.hash==='#studies')refreshStudies();
+
+$('study-comparison').addEventListener('change',()=>{const variants=$('study-comparison').value==='experiments';$('study-baseline-run-field').hidden=!variants;$('study-baseline-condition-field').hidden=variants;});

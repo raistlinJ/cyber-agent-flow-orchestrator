@@ -9,11 +9,12 @@ continuation.
 
 ## Define a challenge
 
-In New → Evaluation → Tasks & trial settings, load the scenario's task draft and
-choose Edit loaded tasks. Tasks with no generated flags receive an editable Flow
-rubric draft. Review the intended objective using the reference-document dropdown;
-topology alone does not establish the objective. Refine generic draft requirements
-before using them in a study.
+Define the challenge objective and evaluation task in ScenarioForge and save the
+resolved Flow. In New → Evaluation → Tasks, selecting that scenario automatically
+loads its saved task. When no task is saved, ScenarioForge builds its default from
+the Flow, guides, attack graph, flags and topology. The orchestrator shows a read-only
+review. Use the scenario-information dropdown to inspect source documents; topology
+alone does not establish the objective.
 
 Choose Exact checks, Judge review, or Both. Judge and Both require an enabled judge
 under Evaluation → Judge LLM. Judge-only tasks need no flag or expected final value.
@@ -92,13 +93,13 @@ been human calibrated. Describe findings as rubric-based automated judgments.
 
 ## Controlled conditions and resets
 
-Experiment controls select configured tool catalogs, permitted tools, optional
-participant guidance and hints per condition. Host paths cannot be supplied by the
+Tools & conditions uses a compact condition navigator with separate Tools, Guidance & documents, and Condition settings views. Adding a comparison condition copies the current resources into an independently editable configuration. Experiment controls select configured tool catalogs, permitted tools, and optional participant guidance per condition; the hint policy is shared. Host paths cannot be supplied by the
 browser. The participant loader snapshots generated MCP tools and selectable CAF tool
 guides, playbooks, skills, documents, templates, RAG material and structured data.
 Selected assets become immutable condition guidance files. Baseline and the demonstration HTTP helper catalog are built in. The Helpers
-page presents reusable tool bundles as catalog cards and generated Markdown guidance
-as a separate library; selected helper conditions remain editable below both libraries.
+page presents tool bundles and generated Markdown guidance with enable/disable
+checkboxes. Enabled helpers augment each configured condition without adding trials.
+Compare separate helper configurations through the Studies page.
 Server-configured catalogs can use existing artifact-generation/collection stages. A server catalog whose ID matches
 a built-in is listed with a configured- prefix so the two sources stay distinct. Collected guide text and authored
 condition guidance are frozen together. Optional extra reset/readiness hooks can
@@ -124,8 +125,14 @@ is solvable; retain a known successful reference execution for each scenario.
 
 ## Studies and uncertainty
 
-The Studies page collects saved scenario experiments. Creation checks baseline
-presence, equal model/judge/budget/condition settings and per-trial reset policy.
+The Studies page collects saved scenario experiments. Separate runs of the same
+scenario accepts experiments with one condition each and different helper/tool/guidance
+selections. Select a baseline experiment; the saved source scenario, tasks, model,
+judge, engine, repetitions and budgets must match. Conditions across scenarios retains
+the matched-condition design, requiring baseline presence and equal model/judge/budget/
+condition settings. Both modes require per-trial reset. Separate-run reports pair
+results by source scenario, task and repetition, exclude unverified pairs, and label
+the comparison as separate runs whose order was not randomized by the report.
 Execution runs members sequentially with the same access checks as individual
 experiments. Stop finishes the active stage/trial and collects results. Individual
 launches are blocked while the account's study is active. Optional reference-run
@@ -186,11 +193,11 @@ For a task using Both, rubric completion credit is retained even if the final an
 
 ## Scenario-derived scaffold and intermediate progress
 
-For a resolved ScenarioForge Flow without saved evaluation tasks, **New → Evaluation → Load tasks from ScenarioForge** now drafts a Judge task from the Flow, attack graph and participant/facilitator guide data. Saved per-step guide sections are reused when available; otherwise ScenarioForge's shared guide renderer supplies structured hints and solutions. The draft is persistently cached by XML, graph and producer-source identity. Existing authored task definitions remain authoritative.
+For a resolved ScenarioForge Flow without saved evaluation tasks, selecting the scenario in **New** automatically drafts a Judge task from the Flow, attack graph and participant/facilitator guide data. Saved per-step guide sections are reused when available; otherwise ScenarioForge's shared guide renderer supplies structured hints and solutions. The draft is persistently cached by XML, graph and producer-source identity. Existing authored task definitions remain authoritative.
 
-Choose **Edit loaded tasks** to review the draft. The public rubric states what must be accomplished and what evidence supports it. Private references include resolved outputs and guide solutions. No predetermined final JSON or output directory is needed. Generated descriptions are drafts: where the scenario has no explicit objective or solution, refine the requirement instead of treating topology as ground truth.
+The Tasks page reviews the participant prompt and public rubric, then places private references, resolved outputs and guide solutions in expandable evaluator details. No predetermined final JSON or output directory is needed. If the generated description is too generic, refine and save the task in ScenarioForge before creating the experiment.
 
-Creating an experiment freezes its effective task definitions into the selected XML and run inputs. If no explicit task edits are submitted, the server uses saved tasks, separate bundle tasks or the generated scaffold in that order. Missing tasks or a Judge task without an enabled Judge LLM block creation before deployment; a non-flag scenario does not fall back to flag collection. Create a new experiment to capture updated tasks; reruns retain the original frozen definitions.
+Creating an experiment freezes its effective task definitions into the selected XML and run inputs. The server uses saved tasks, separate bundle tasks or the generated scaffold in that order. Missing tasks or a Judge task without an enabled Judge LLM block creation before deployment; a non-flag scenario does not fall back to flag collection. Create a new experiment to capture updated tasks; reruns retain the original frozen definitions.
 
 A private version 1 `challenge_plan` maps every rubric criterion to a step, its graph node, prerequisites, ordered hints and a walkthrough. The editor shows the step mapping; advanced settings preserve it. When changing criterion IDs, update their mapping too. The [plan schema](../../cyber-agent-flow-eval/schemas/challenge-plan-v1.schema.json) is also shipped independently by ScenarioForge.
 

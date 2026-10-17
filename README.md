@@ -322,9 +322,9 @@ before claiming general improvement. It does not publish executable MCP tools.
 
 Each generated Markdown helper is also saved automatically in the signed-in
 user's private **Evaluation → Helpers** library. A new experiment can preview it,
-mark it reviewed, and add an editable copy as a condition. Library entries retain
+mark it reviewed, and enable a frozen copy for the experiment. Library entries retain
 their source run, scenario, model, timestamps and content hashes. They are never
-silently enabled for another experiment; adding one freezes its current content
+silently enabled for another experiment; enabling one freezes its current content
 into that experiment's normal saved inputs.
 
 For one exported task, examples 1/2 schedule **2 trials** (1 condition × 2
@@ -491,7 +491,9 @@ you can keep them open alongside the dashboard.
 
 Select and save **ScenarioForge**, **Cyber-agent-flow participant**, and **CoreVM** roles on Lab setup. Configure ScenarioForge's CORE connection and ensure the participant can reach its lab network. Under **Experiments → New**, choose a sample and create it. Creation imports and freezes the fixed package; **Deploy and run** prepares topology and fresh task secrets, deploys the XML, checks readiness, exports the evaluation suite, and starts CAF.
 
-The modal shows effective CAF settings and locked sample XML and prompt templates. Model controls are in the **Cyber-agent-flow** tab. **Evaluation** has separate pages for **Tasks**, **Trial limits**, **Hints & solutions**, **Tools & conditions**, **Helpers**, **Run controls**, and **Judge LLM** (last). Tasks supports loading, importing, adding and editing custom scenario prompts, success criteria and readiness checks. Trial limits remain editable for samples and custom scenarios. **Load CAF tools and guidance from participant VM** imports the participant's effective native-MCP catalog, generated MCP tools, interactive-session controls, tool guides, playbooks, skills, Markdown and RAG documents, templates, and structured data. Tools are searchable, filterable and grouped; selected documents are copied into the condition's immutable guidance snapshot. Dangerous-tool selection and unattended approval are separate settings; both are frozen with the run.
+New opens a full-page experiment wizard at `#experiments/new`, with left navigation, Back/Continue controls, and a final **Review & create** step. Choose or revise any step before saving. **Back to experiments** keeps the draft; **Continue draft** reopens it (page reload clears it). The wizard shows effective CAF settings and locked sample XML and prompt templates. Model controls are on **Agent & network**. **Task**, **Run configurations**, **Helpers**, **Trial limits**, **Hints & solutions**, **Run controls**, and **LLM judge** each have their own step. A run configuration is one selection of tools and guidance; add another only to repeat tasks with different resources. Selecting a resolved custom scenario automatically loads its saved task or ScenarioForge’s generated default. Tasks show the agent prompt first, followed by **Verification**, **Readiness**, and **Progressive hints** tabs. Optional **Scenario details** shows challenge targets, generator information, and imported files when available. Trial limits remain editable for samples and custom scenarios. Opening New automatically loads CAF tools and guidance from the selected participant VM. **Reload from participant** refreshes the participant's effective native-MCP catalog, generated MCP tools, interactive-session controls, tool guides, playbooks, skills, Markdown and RAG documents, templates, and structured data. The participant’s full tool catalog is always available; tools and documents use compact searchable lists with **?** description popovers, and helpers use the same compact format; selected documents are copied into the condition's immutable guidance snapshot. Tools and document selections are remembered in this browser per account and workflow as defaults for subsequent experiments, with unavailable resources omitted from the current catalog. Dangerous-tool selection and unattended approval are separate settings; both are frozen with the run.
+
+**Open progress** uses a phase workspace with wizard-style navigation: an overview plus one page per reported workflow phase, showing status, timing, VM activity and saved outputs. Browse with Back/Next or the mobile phase selector; choose **Follow active phase** to track execution. Live updates preserve the page, transcript selection and log scrolling. The evaluation phase contains participant and judge transcripts. Phase links can be bookmarked.
 
 | Sample | Runs | What it checks |
 | --- | --- | --- |
@@ -731,3 +733,32 @@ return to the bottom to follow new events. Common credential fields are redacted
 and displayed history is bounded; the full transcript remains in the run bundle.
 Participant transcript bytes travel with the existing guest status checks for both
 Fusion and Proxmox. Provider reasoning is shown only when CAF emits it.
+
+
+Progress opens **Visualize** first, with **Phase progress** second. Visualize shows the
+frozen challenge dependency graph with green solved, amber partial, blue targeted
+and grey other states. Select a challenge for cited discoveries, completion
+criteria and released hints/solutions; pan, zoom, switch trials or focus on CAF's
+latest monitor-observed activity. The judge's intermediate Monitor observations
+are separate from the final score. See [visual progress](docs/webui.md#loading-and-progress).
+
+
+Every experiment time-limit field has a **No timeout** option: participant active
+time, tool actions, final judge review, and Monitor checks. It saves integer `0`
+for that limit. **No timeout can lead to an infinite wait if the operation hangs.**
+Other enabled limits still apply; finite defaults are unchanged. See
+[optional timeouts](docs/webui.md#optional-timeouts) for configuration and participant
+update requirements.
+
+
+Visualize also includes a vertical **Lab preparation** canvas to the left of
+the agent activity and challenge canvas. Cyber-Agent-Flow, ScenarioForge and CORE blocks
+show recorded checks and turn green when they pass. Select blocks/connections
+for details and phase links; **Fit preparation** centers this canvas. Package handoff,
+SSH/gRPC and HITL interface checks are labelled separately, without extra VM probes.
+
+Live actions blink in **Visualize**: current challenge outlines and recorded
+IP/range targets pulse while CAF interacts with them, without changing completion
+colors. Tool events supply activity; cited Monitor findings supply challenge
+context. Highlights expire when execution ends or updates go stale, with static
+outlines for reduced-motion preferences.

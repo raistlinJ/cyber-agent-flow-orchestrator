@@ -42,14 +42,14 @@ function renderRunConfiguration(config){
  for(const [label,value] of [
   ['Model',config.model?.name],['Provider',config.model?.provider],['Endpoint',config.model?.url],
   ['Repetitions',config.repetitions],['Order seed',config.order_seed],
-  ['Progressive hints',config.execution?.provide_progressive_hints?'On · up to 3 hints, then current-challenge solution':'Off'],['Turns without progress before hint',config.execution?.hint_stalled_turns??2],['Max tries before solution',config.execution?.max_tries_before_solution??6],['Maximum turns',config.execution?.max_turns],['Worker budget',config.execution?.wall_seconds==null?null:config.execution.wall_seconds+' seconds'],
-  ['Tool timeout',config.execution?.tool_timeout==null?null:config.execution.tool_timeout+' seconds'],
+  ['Progressive hints',config.execution?.provide_progressive_hints?'On · up to 3 hints, then current-challenge solution':'Off'],['Turns without progress before hint',config.execution?.hint_stalled_turns??2],['Max tries before solution',config.execution?.max_tries_before_solution??6],['Maximum turns',config.execution?.max_turns],['Worker budget',config.execution?.wall_seconds==null?null:config.execution.wall_seconds===0?'No timeout':config.execution.wall_seconds+' seconds'],
+  ['Tool timeout',config.execution?.tool_timeout==null?null:config.execution.tool_timeout===0?'No timeout':config.execution.tool_timeout+' seconds'],
   ['Context window',config.execution?.context_window]]){
   const row=el('div');row.append(el('dt',label),el('dd',value??'Not recorded'));settings.append(row);
  }
  target.append(settings);if(config.judge?.enabled)target.append(configurationDetails('Judge LLM settings',config.judge,'judge-config'));target.append(el('h3','Tools and guidance'));
  for(const condition of config.conditions||[]){
-  const section=el('section',null,'run-condition');section.append(el('h4',condition.id),
+  const section=el('section',null,'run-condition');section.append(el('h4',condition.name||condition.id),
    el('p',condition.tools?.length?condition.tools.join(', '):'No tools'));
   if(condition.catalog_snapshot)section.append(configurationDetails('Exact tool catalog',condition.catalog_snapshot,'catalog-'+condition.id));
   if(condition.guidance_snapshot?.length)section.append(configurationDetails('Additional guidance',condition.guidance_snapshot,'guidance-'+condition.id));

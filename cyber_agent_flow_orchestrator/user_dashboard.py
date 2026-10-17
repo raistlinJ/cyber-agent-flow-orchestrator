@@ -268,6 +268,10 @@ class UserDashboard:
                 return {'run': self.scenarios.run_saved, 'stop': self.scenarios.stop}[action](access, **data, **({'progress':progress} if action == 'run' else {}))
         return {'create':self.samples.create, 'run':self.samples.run_saved, 'stop':self.samples.stop}[action](access, **data, **({'progress':progress} if action == 'run' else {}))
 
+    def delete_experiments(self, access, run_ids, confirmation):
+        from .experiment_deletion import delete_selected
+        return delete_selected(self, access, run_ids, confirmation)
+
     def creation_status(self, access, request_id, *, starting=False):
         import re
         if not re.fullmatch('[0-9a-f]{32}', request_id):

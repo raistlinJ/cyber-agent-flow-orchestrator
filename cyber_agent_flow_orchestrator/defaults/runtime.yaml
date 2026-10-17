@@ -20,6 +20,7 @@ model:
   url: http://localhost:11434  # Endpoint reachable from participant-vm.
   name: llama3
 execution:
+  # Time limits accept 0 = no timeout; a hung operation may wait indefinitely.
   wall_seconds: 300
   max_turns: 20
   tool_timeout: 30

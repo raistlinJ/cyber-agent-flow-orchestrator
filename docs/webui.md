@@ -16,7 +16,7 @@ The screenshot uses simulated data for browser verification, not a live Proxmox 
   elapsed time and unfinished workflow commands. Links lead to setup, experiments
   and application maintenance.
 - **Experiments** (`/#experiments`): an experiment table with Run, Stop, View results
-  and Open progress icons. **New** opens a sample configuration modal. Condition
+  and Open progress icons. **New** opens a full-page experiment wizard. Run configuration
   summaries and CSV downloads are available in a separate results window; full JSON is under
   **Full result details**. **Download Markdown summary** and **Download HTML report + charts** provide shareable run reports with task and system prompts, configured and observed tools, trial outcomes, stage/trial timing, scores, hints, flag progress and reported usage. HTML embeds its charts and opens offline; Markdown uses the companion `experiment-charts.svg`. All three files are also included in the run ZIP and CLI result export. Reports use the latest attempt per trial for comparisons and mark unavailable metrics explicitly.
 - **Applications** (`/#applications`): version checks, Update with process-stop
@@ -76,6 +76,32 @@ To reuse ScenarioForge VM IDs and model settings, add
 `--provision-config /path/to/scenarioforge-lab.conf`. This creates a separate
 profile and initializes eligible roles once per user; saved selections are
 preserved. See [provision import](provision-config.md).
+
+## Optional timeouts
+
+**Trial limits** provides **No timeout** beside the participant active time and
+tool action limits. **LLM judge** provides the same choice for final judge reviews
+and intermediate Monitor checks. Selecting it disables the seconds field and
+shows a small **!** icon without expanding the form. Hover or focus the icon
+to read the infinite-wait warning; unchecking restores the previous finite value.
+The review page and saved settings retain the choice for reruns and derived
+experiments. Defaults remain finite.
+
+**No timeout can cause an infinite wait if a tool or model request hangs.** Other
+enabled limits still apply: an unlimited tool can be stopped by the participant
+active time limit, and judge turn/token or Monitor check-count limits remain in
+force. To remove all elapsed-time limits, select all four choices. Cancellation
+and guest cleanup controls remain available; unlimited guest services have no
+runtime backstop and may need manual cleanup if their coordinator is lost.
+
+Configuration files use integer **0** for `execution.wall_seconds`,
+`execution.tool_timeout`, `judge.timeout_seconds`, and
+`judge.progress_timeout_seconds`. The choice covers streamed judge requests,
+Monitor evidence-review waits, and tool elapsed/idle checkpoints. Explicit
+command options such as a tool's own network timeout still apply. Update CAF on
+the participant for unlimited tool support; input preflight reports older CAF
+checkouts before deployment. Infrastructure RPC/transfer health checks remain
+bounded and are separate from these operation budgets.
 
 ## Loading and progress
 
@@ -160,8 +186,10 @@ Session/access errors clear the private console view along with the dashboard.
 See the [illustrated sample guide](bundled-samples.md) for a figure and detailed
 explanation of what each included experiment does and measures.
 
-Choose **New**, select either bundled sample, and press **Create experiment**.
-The modal shows its description, trial budgets, current experiment model and
+Choose **New**, select either bundled sample, and move through the wizard with
+**Continue** or the left navigation. On **Review & create**, review the settings
+and press **Create experiment**.
+The builder shows its description, trial budgets, current experiment model and
 CAF model settings. The model fields are editable immediately and prefilled from
 saved experiment defaults. **Pull from VM** optionally replaces them with the
 participant's configuration after confirmation. **Apply settings** saves edits to
@@ -171,7 +199,8 @@ Creation captures the saved VM and model configuration in a **Ready** row withou
 starting it or writing settings to the VM again. Its progress shows each creation
 step and retains any failure details for retry.
 
-![New experiment modal with simulated lab data](images/new-experiment.png)
+The final review links back to each step and lists any missing requirements.
+Creation saves the experiment without starting it.
 
 ![Saving an experiment with simulated VM acknowledgement progress](images/experiment-save-progress.png)
 
@@ -200,7 +229,7 @@ A stopped run retains its collected results with status **Cancelled**; rerunning
 creates a separate run and preserves the original. Trials that never started
 have no output to collect.
 
-**Open progress** opens a separate browser window for the selected run. Starting
+**Open progress** opens a phase workspace in a separate browser window for the selected run. Starting
 or stopping a run provides an Open progress link. Closing the window does not stop
 execution. You can keep Results and Progress beside the dashboard, or close the
 dashboard and leave either window open. Each window has its own persistent
@@ -208,6 +237,172 @@ troubleshooting console. Browser preferences may open a tab instead of a window;
 if popups are blocked, the dashboard offers a new-tab link.
 
 ![Separate progress window with simulated execution](images/progress-window.png)
+
+The progress workspace keeps **Phase progress** and adds **Visualize**, an
+interactive attack graph built from the frozen ScenarioForge challenge plan.
+Select a trial or run configuration, zoom, drag to pan, use **Fit graph**, or
+**Focus CAF** to center the activity lane (or the latest Monitor challenge
+when no activity lane exists). Selecting a node
+shows its supported criteria, discovered evidence and citations, checkpoint
+turn, dependencies, and hints or solutions actually released. The assistance
+timeline shows the same releases across challenges. Unreleased hints, solutions
+and private expected answers are excluded from the visualization snapshot.
+
+| Color | Meaning |
+| --- | --- |
+| Green / solved | Required challenge criteria have supporting verification. |
+| Amber / partial | Some criteria or cited discoveries are supported; completion is not verified. |
+| Blue / targeted | Execution evidence shows an attempted target; completion is not verified. |
+| Grey / other | No supported progress classification is available yet. |
+
+The judge serves as the **Monitor** at intermediate evidence checkpoints, using
+the configured judge model, progress-check timeout and check limit. Monitoring
+can run with hints disabled; it supplies no guidance in that case. Monitor focus
+is the latest observed activity, not a continuously tracked VM location. A
+missing or failed check stays unverified and is shown explicitly. Final criterion
+results override intermediate completion judgments; final scoring remains an
+independent review. Tasks without a dependency plan show independent success
+criteria instead of invented connections.
+
+**Visualize** is the first and default progress view; **Phase progress** is the
+second tab. Explicit phase links still open Phase progress. Visualize uses an
+editor-style workbench. A narrow **Lab preparation** canvas
+on the left stacks CAF, ScenarioForge and CORE vertically. The adjacent
+**Execution** canvas shows agent activity vertically on its left and challenges
+to the right. Both canvases start zoomed out to include their nodes, with
+independent zoom and pan. **Fit preparation** and **Fit graph** restore their
+overview.
+
+A collapsible **Current step** box at the bottom left follows the
+coordinator, showing the step number/total, status, purpose and latest operation
+or error. **Open phase details** opens that step in Phase progress. The box stays
+on the live coordinator step when a different trial or node is inspected.
+
+Drag the dividers to resize the preparation sidebar and bottom output panel,
+or focus a divider and use arrow keys. Double-click a divider to reset its size.
+Pane chevrons and the activity rail collapse/reopen preparation, execution and
+output. Agent activity, challenges, individual CAF/judge transcript panes,
+preparation-check details, status and legend sections also collapse. Pane sizes
+and main collapse choices persist in the browser, independently of experiment
+configuration. Clicking a node reopens its details panel.
+
+The bottom panel provides **Selected node**, **Transcripts**, **Hints & solutions**
+and **Run log** tabs. The troubleshooting console is available in Phase progress.
+Each output scrolls
+independently; live updates preserve tab and transcript scroll positions. The
+**Now** strip shows action/targets and the tab row identifies the active speaker.
+**Challenges** and **Focus CAF** navigate the execution canvas. Smaller screens
+keep the canvases adjacent and stack transcript panes in the bottom panel.
+
+**Dock Follow Actions**, at the top right, follows the current trial and switches the
+bottom dock to Run log during preparation, Transcripts during CAF/judge work,
+and Hints & solutions when new assistance is released. It is off by default;
+the browser remembers the toggle. Unchanged status polls leave your chosen tab
+alone, and following stops when the run finishes or updates go stale. It does
+not move keyboard focus, pan the canvas or change transcript **Follow latest**
+scrolling preferences. Turn it off to stay on a chosen tab.
+
+The **Transcripts** dock places **Cyber-Agent-Flow** and
+**LLM Judge** side by side. Both show the trial selected above the graph. The
+working speaker is highlighted; CAF shows **Paused** during a Monitor/judge
+review. Judge startup output is explicitly labelled **Test LLM Judge** and is
+separate from trial scoring. Completion and expired status feeds stop the active
+markers without clearing the recorded text.
+
+Transcripts show readable message text and labelled tool/judge fields.
+Original structured events are included in the run bundle.
+
+Speaker names, activity badges and scroll controls share a compact toolbar.
+Hover the toolbar for trial and last-update details. The hint-unlock strip stays
+one line high, leaving the rest of the dock for output.
+
+Each pane scrolls independently. **Follow latest** pins new output to the bottom;
+scrolling up pauses following for that pane. **Latest** resumes it. These choices
+and scroll positions are remembered per selected trial during the window session.
+Updates reuse the existing five-second host status poll, including when dashboard
+refresh is Never, with no extra guest calls. Transcript updates do not redraw the
+graph or replace unchanged log entries. On narrow screens the panes stack.
+Provider-emitted reasoning is shown when available; judge output remains visible
+only to the experiment owner and can contain private references or solutions.
+
+Released assistance has its own visual state: a **teal unlocked badge** for
+hints and a **purple unlocked badge** for solutions. Each challenge shows counts
+and the last assisted turn. A new release briefly highlights its node and its
+color-coded timeline entry, and the latest-release banner links straight to the
+delivered text. Badges remain when you return to a saved run; opening or polling
+an existing release does not replay the effect. Reduced-motion preferences use a
+static highlight. Task-wide guidance stays task-wide. These indicators use
+saved assistance-release events, never unreleased guide content or the judge's
+inference that a hint might have been useful. Receiving guidance does not mark
+a challenge complete or unlock its prerequisites.
+
+An **Agent activity** lane connects **Cyber-Agent-Flow → tool → recorded
+IP/range → matching challenge**. Flowing blue arrows show tool targets, including
+unmapped hosts and IPv6; tool actions without an IP use a generic node. Matching
+a target to a challenge does not mark that challenge solved. Dotted purple links
+show Monitor context separately from network contact. Select a tool/action or
+IP node for its recorded source; **View agent transcript** opens that trial's
+CAF pane below the graph. During review, **View judge transcript** opens the
+adjacent judge pane. The existing pan/zoom and trial selection work
+across all lanes.
+
+Thinking bubbles distinguish **Reasoning** (only when the provider emitted a
+reasoning event), **Model response** (waiting), and **Responding** (streamed
+answer). A model event replaces the previous tool action immediately; IPs in
+reasoning text never become scan targets. During a progress review, the lane
+shows CAF paused and the **LLM Monitor** working. Arrow motion stops on stale
+updates or finished execution and respects reduced-motion preferences. Historical
+arrows remain labelled as recorded activity. No extra VM probes or LLM calls are
+made to draw this lane.
+
+Live activity adds a blinking blue outline to the current challenge and chips
+for literal IPs or CIDR ranges in recorded tool arguments, including IPv6.
+Matched targets also pulse inside the graph; targets without a known challenge
+remain selectable in the activity bar. These are attempted interactions, not
+proof of connectivity or success, so the solved/partial colors stay unchanged.
+Reasoning, prompts, guides and tool-output mentions alone do not create live IP
+targets. The Monitor can associate a challenge with IPs only when they appear in
+its cited execution evidence; its recent focus supplies challenge context when
+an action has no recorded IP. No extra judge calls are added for animation.
+
+Completed actions flash briefly (12 seconds); in-flight actions require a fresh
+worker heartbeat (45 seconds), and Monitor-only context expires after two
+minutes. Blinking pauses during Monitor review or transcript catch-up and stops
+when execution finishes, status updates stall, or the activity lease expires.
+The working lab component and active challenge card also blink, with a
+**WORKING** label on lab components. This follows the current workflow phase
+even between tool events; during deployment both ScenarioForge and CORE show
+work. The Monitor indicator blinks while reviewing and pauses the participant
+component indicator for that review. Completion colors stay unchanged.
+Reduced-motion preferences use a static
+active outline instead. New runs collect action timestamps automatically with
+the updated evaluator worker; no CAF or ScenarioForge VM update is needed for
+this display change.
+
+A separate **Lab preparation** canvas sits to the left of execution. **Cyber-Agent-Flow**, **ScenarioForge**, and
+**CORE** blocks show recorded guest, runtime/model, scenario-input, deployment
+and readiness checks. Green checkmarks mean the listed checks passed; running,
+incomplete, pending and failed checks have separate states. Selecting a block
+opens its full check list and links to the existing phase details. The currently
+running check in the selected-node panel blinks with an **ACTIVE** badge and a blue
+background. Passed, failed and pending rows stay still. The blink stops at
+completion, after status updates stall, or when the run ends; reduced-motion
+preferences keep a static active highlight. **Fit preparation** resets the
+sidebar canvas; **Fit graph** resets the execution canvas.
+
+Connection arrows show the task/package handoff **via the orchestrator**, the
+ScenarioForge-to-CORE **SSH/gRPC** check, and the **HITL interface** check. The last
+is explicitly an interface/configuration check, not an end-to-end target probe.
+Preparation is visible before trials or exported tasks exist, and does not
+reclassify when a later trial fails. Opening it adds no VM probes.
+
+The tab refreshes the same host-saved status every five seconds while active,
+without extra VM probes or model calls from opening the graph. Selected challenge,
+trial and zoom survive updates. Update both the orchestrator and
+`cyber-agent-flow-eval` on the host for new observation records; existing runs can
+still display saved criterion progress and assistance. ScenarioForge and CAF
+continue to work independently.
+
 
 - Preparation steps: participant checks, exclusive access, demo-site setup, and
   study/catalog preparation.
@@ -251,14 +446,15 @@ or response bodies. Common credential fields are redacted. Previews cover up to
 80 log lines (up to 12,000 characters). Missing or unreadable diagnostics are
 reported explicitly; opening results does not attempt remote recovery.
 
-A compact status notice follows the active sample across all pages. The full
-panel and console update with five-second progress reads when automatic refresh
-is enabled. Never keeps the displayed progress stable until experiment completion
-or a manual refresh. Run/trial elapsed clocks advance between reads.
+A compact status notice follows the active sample across all pages. The dedicated Progress workspace updates saved run data every five seconds
+while execution is active, including when dashboard refresh is Never. It stops
+when execution finishes if automatic refresh is off. Run/trial elapsed clocks
+advance between reads.
 All guest stages come from host transport journals; viewing progress adds no
 guest RPCs. Slow guest calls may leave a stage unchanged until they return.
-Live model tokens, conversation turns and individual tool calls are not streamed;
-verification scores appear after outputs are collected. A finished trial can fail
+The evaluation phase displays emitted CAF prompts, responses, tool calls/results
+and judge output as they are collected; provider reasoning appears only if emitted.
+Verification scores appear after outputs are collected. A finished trial can fail
 verification without being an execution error.
 
 Trials can reach 100% while demo-site cleanup is pending. The run remains active
@@ -272,8 +468,9 @@ there is no new guest installation or API compatibility requirement.
 Sample events are recorded in each owner's run journal and derived from trial
 and transport records. The console includes the latest three sample runs along
 with maintenance traces and browser requests, bounded to the latest 300 entries.
-Progress includes identifiers and outcomes, not prompts, answers, credentials,
-or worker command arguments.
+The main console shows bounded run events. Owner-only transcript panels in
+Progress can include prompts, responses and private judge references; common
+credential fields are redacted.
 
 Select and save ScenarioForge, participant and CoreVM roles before creating a sample. The fixed XML/bundle and evaluation controls are visible and greyed out. CAF's effective runtime/model configuration is shown separately; model settings can be edited with the existing maintenance permissions.
 
@@ -329,16 +526,32 @@ only in an interactive terminal is not inherited by the systemd evaluation worke
 Either configure that guest EnvironmentFile or save a replacement key through this
 editor. Clearing the file's key does not clear an independently configured environment.
 
-Evaluation is organized into **Tasks**, **Trial limits**, **Hints & solutions**,
-**Tools & conditions**, **Helpers**, **Run controls**, and **Judge LLM**, in that
-order. Baseline and participant tool conditions are edited on Tools & conditions.
-Helpers presents separate libraries for reusable tool bundles and generated guidance,
-followed by the helper conditions selected for the experiment. Each tool-helper card
-can be added alone or compared with a matched baseline. The bundled HTTP flag walker
-supports the demonstration sample; additional helper catalogs use the same card layout.
+The full-page New experiment wizard groups setup, agent resources, evaluation,
+and final review in its left navigation. Run configurations shows one selection
+of tools and guidance at a time, with **Tools** and **Guidance & documents** resource tabs. Categories start expanded;
+search and selection filters remain available. **Add run configuration**
+copies the current selections for another set of trials. Tool and guidance/document
+selections (including separate named run configurations) are saved automatically
+in this browser for the signed-in account and workflow. New experiments restore
+those defaults, including deliberately empty selections, against the current
+participant catalog; unavailable items are omitted. New catalog items stay
+unselected when saved defaults exist. Additional free-text guidance, helpers,
+and evaluation/model settings are not included in these resource defaults.
+Existing experiments keep their frozen inputs.
+Each field on **Trial limits** has a **?** popup describing the setting and its
+current minimum and maximum. Related hint/time constraints are included in the description.
+Helpers presents reusable tool bundles and generated guidance in **Tools** and
+**Guidance & documents** tabs, using the same compact checkbox rows and description
+popups as Run configurations. Each tab has **Select visible** and **Clear visible**;
+these affect only helpers matching the search and preserve hidden selections.
+Generated guidance retains its full preview and review controls. Enabled helpers augment every existing condition without adding trials.
+Tools extend the frozen catalog; generated guidance is resolved from the owner's
+library and copied into saved inputs. Create runs with different helper selections,
+then compare them on Studies using Separate runs of the same scenario and a baseline
+experiment. The bundled HTTP flag walker supports the demonstration sample.
 Switching pages preserves the draft and validation opens the page containing an invalid field.
 
-In **New → Evaluation → Judge LLM**, enter an optional **Judge API key**.
+New experiments enable Judge LLM by default and inherit the participant provider, endpoint and model. These settings remain editable. In **New → Evaluation → Judge LLM**, enter an optional **Judge API key** when choosing a separate model.
 The key controls are disabled while participant model settings are inherited;
 the stored host judge key for that endpoint is reused. Uncheck the inheritance
 option to edit a separate judge key. An entered key is saved when you create the
@@ -541,11 +754,22 @@ uv run --group dev python tests/browser_loading.py /tmp/caf-loading-preview
 uv run --group dev python tests/browser_refresh.py /tmp/caf-refresh-preview
 ```
 
-The Progress window shows the saved workflow timeline: XML verification, preparation, ScenarioForge deployment/readiness/export, package download, readiness validation, reproduction capture, configuration freeze, evaluation-plan import and agent trials. Each stage shows its VM, state, elapsed time, timestamps, attempts, saved log path and any failure. VM cards describe each role. Workflow-stage counts and trial completion are separate; neither is an estimate of time remaining.
+The Progress workspace uses the same left navigation and Back/Next layout as the
+New experiment wizard. **Overview** summarizes the run and VM roles; each reported
+workflow phase has its own page, status, timing and output. The sidebar lists every
+phase, including pending, skipped and failed phases. Phases beyond the last
+reached phase are greyed out and unavailable in the sidebar, mobile selector,
+Back/Next navigation and direct links. They unlock when saved status shows the
+run has reached them; completed and failed phases remain reviewable. The phase list comes from the
+run rather than assuming a fixed number of steps. On mobile, **Go to phase**
+replaces the sidebar links. Phase pages can be bookmarked using `#phase=<id>`.
+**Follow active phase** tracks execution automatically; choosing another page turns
+following off so live updates preserve the page being inspected. `#phase=active`
+keeps following on when the view reloads. The reported phases include: XML verification, preparation, ScenarioForge deployment/readiness/export, package download, readiness validation, reproduction capture, configuration freeze, evaluation-plan import and agent trials. Each stage shows its VM, state, elapsed time, timestamps, attempts, saved log path and any failure. VM cards describe each role. Workflow-stage counts and trial completion are separate; neither is an estimate of time remaining.
 
 Download counters report bytes received by the existing guest-agent transfers and mark verification only after checksum validation. During guest commands, the coordinator records QGA responses and reads up to 8 KiB of new command output every ten seconds. Partial command logs are saved on the host while execution is active; redacted excerpts appear in the troubleshooting console. A thirty-second heartbeat reports elapsed time, collected log bytes and the configured command limit even when output is quiet. Demo preparation reports backend loading, asset copying, CORE settings, topology planning and evaluation-task creation; Python demo/deployment commands run unbuffered. ScenarioForge output exposes its reported CORE operations; live model/tool calls are not streamed. Status and results requests only read host-saved data and never initiate these VM reads. Participant upload counters and service state come from evaluator transport checkpoints. Progress is retained in workflow/results JSON and the run bundle. Older runs without stage timestamps retain their recorded stage states.
 
-In **New → Evaluation**, sample task definitions are visible and locked. Custom experiments can preview ScenarioForge tasks, edit a copy, add/remove tasks or import a JSON task array. **Load CAF tools and guidance from participant VM** reads the effective CAF native-MCP catalog, generated MCP tool manifests and built-in interactive-session controls. Its searchable selector groups tools and can filter selected, generated, documented, dangerous and interactive tools. The same operation loads CAF tool guides, playbooks, skills, Markdown and RAG documents, reusable templates and structured data into a separate searchable guidance picker. The pulled catalog and selected guidance contents are bound to the selected participant VM and frozen with the experiment. Create remains disabled for missing prompts, duplicate/invalid IDs, malformed criteria or missing readiness checks. Custom task definitions are frozen in the experiment XML and retained in reruns and downloads. See [scenario experiments](scenario-experiments.md#caf-and-evaluation-configuration).
+In **New → Evaluation**, sample task definitions are visible and locked. Selecting a resolved custom scenario automatically loads its saved task or asks ScenarioForge to build the default from the saved Flow. The Task step keeps the agent prompt visible above **Verification**, **Readiness**, and **Progressive hints** tabs. Verification contains success criteria, challenge steps, and private exact checks; Readiness lists deployment checks; Progressive hints shows challenge-scoped guidance and discovery declarations. Sample tasks use the same tabs. Optional **Scenario details** shows challenge targets, generator information, and imported files when available; it omits repeated task summaries and generic source labels. Tab lists support Left/Right, Home/End, and horizontal scrolling on smaller screens; switching tabs preserves the experiment draft. Experiment-specific task authoring is currently disabled. Opening New automatically loads CAF tools and guidance from the selected participant. **Reload CAF tools and guidance** refreshes the effective CAF native-MCP catalog, generated MCP tool manifests and built-in interactive-session controls. Its searchable selector groups tools and can filter selected, generated, documented, dangerous and interactive tools. The same operation loads CAF tool guides, playbooks, skills, Markdown and RAG documents, reusable templates and structured data into a separate searchable guidance picker. The pulled catalog and selected guidance contents are bound to the selected participant VM and frozen with the experiment. Create remains disabled until the scenario task has loaded and validated. See [scenario experiments](scenario-experiments.md#caf-and-evaluation-configuration).
 
 When an experiment completes with errors, **Progress** and **Results** show an
 **Experiment errors** section identifying each unsuccessful trial, condition,
@@ -578,9 +802,13 @@ pending. Once the coordinator accepts the run, the Progress view reports the
 actual deployment and evaluation stages. Launch status is scoped to the owner and
 request ID independently of creation status.
 
-Every workflow stage has an expandable **Stage details and output** panel. Active
-and failed stages open automatically; expansion choices persist while the window
-is open. Panels show saved checkpoints, recent output, per-stage guest responses,
+Each phase page has an expandable **Stage details and output** panel. Expansion
+choices, transcript trial selection and output scrolling persist as you browse
+phases and receive live updates while the window is open. The input-check phase
+includes **Test LLM Judge**, a synthetic connectivity, authentication
+and JSON-format check. Its deliberately false sample verdict is not an experiment
+failure. Check logs explicitly identify the startup test; the evaluation phase includes trial status,
+failures, hints and live CAF/judge transcripts. Panels show saved checkpoints, recent output, per-stage guest responses,
 command limits/exit codes, checksum-verified transfer counts, saved artifact paths,
 readiness checks and trial outcomes. Checkpoint history is retained per stage even
 when the main console rolls over. Command previews show at most 60 lines, with
@@ -629,3 +857,60 @@ When ScenarioForge exports a package but blocks it on readiness, the deployment
 stage collects `scenario-readiness.json` before stopping. Progress shows the
 failed check and its per-target reasons; the report is included in the run bundle.
 Infrastructure failures and missing challenge access procedures remain blocking.
+
+
+### New experiment wizard
+
+Choose **Experiments → New** to open the full-page builder at `#experiments/new`.
+The left navigation groups the steps into Setup, Agent resources, Evaluation,
+and Review. Later steps stay greyed out until required fields in the earlier
+steps are valid, including applying changed participant model settings and
+loading the selected scenario task. Hover a locked step or disabled **Continue**
+for the reason; the next-step message also explains what to finish. Defaults and
+optional settings do not require extra actions. Earlier steps remain editable;
+clearing a required field locks later steps again. On smaller screens the step
+selector follows the same rules.
+
+The builder keeps its draft while navigating within the application. **Back to
+experiments** returns to the list; **Continue draft** resumes it. **New** asks
+before replacing an existing draft. Reloading the page clears the draft.
+Secrets are kept only in the existing credential controls and are never printed
+in the review summary.
+
+**Run configuration** is the UI name for one selection of tools and guidance.
+Usually one is enough. Add another to repeat the same tasks with different
+resources; repetitions apply to each task and run configuration. Model, budgets,
+hints, helpers, and judge settings are shared. Existing result JSON still uses
+the schema field `conditions` and trial field `condition_id`.
+
+**Review & create** shows the scenario, participant model and network, exact
+task prompts, tools and guidance, helpers, trial limits, hints, run controls,
+and judge settings. Edit links return to the relevant step. Missing requirements
+are listed with links, and creation remains disabled until they are resolved.
+Creating saves the experiment without starting it.
+
+
+Run configuration selectors start as **Configuration 1**, **Configuration 2**,
+and so on. **Add run configuration** sits beside the selectors and copies the
+current tools and guidance. Use a selector’s pencil to unlock its name; Enter or
+leaving the field saves it, and Escape cancels the edit. Names must be nonempty,
+unique, and at most 80 characters. The trash icon removes that configuration.
+Display names are saved with the experiment; internal IDs remain stable when
+renaming, so trial records and frozen tool files keep their original references.
+
+
+Run configurations always use the complete tool catalog pulled from the selected
+participant VM; there is no catalog-selection setting. Tools and CAF guidance
+are compact checkbox lists. Categories start expanded, and search and filters
+remain available. Each item’s **?** button opens a short description popup with
+relevant metadata without changing its selection. Escape or clicking outside
+closes the popup. Helpers use the same compact layout and can be searched
+across tool helpers and generated guidance. Generated guidance retains a full
+preview and review controls.
+
+On **Experiments**, select individual inactive experiments or use the header
+checkbox to select all inactive experiments. **Delete selected** asks for
+confirmation, then permanently removes the selected experiments’ private saved
+inputs and local outputs (results, logs and bundles). Active runs and experiments
+referenced by saved studies are protected; the server checks the complete
+selection before deleting anything. Deletion is scoped to the signed-in owner.

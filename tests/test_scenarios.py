@@ -244,3 +244,13 @@ def test_evaluation_settings_add_hint_default_and_accept_custom_limits():
     settings['max_tries_before_solution'] = 7
     assert scenarios.evaluation_settings(settings)['hint_stalled_turns'] == 3
     assert scenarios.evaluation_settings(settings)['max_tries_before_solution'] == 7
+
+
+def test_unlimited_trial_time_settings_are_explicit():
+    settings=dict(repetitions=1,max_turns=9,wall_seconds=0,tool_timeout=0,context_window=8192)
+    value=scenarios.evaluation_settings(settings)
+    assert value['wall_seconds']==value['tool_timeout']==0
+    for key in ('wall_seconds','tool_timeout'):
+        for invalid in (-1,False):
+            with pytest.raises(scenarios.SampleRequestError):
+                scenarios.evaluation_settings(dict(settings,**{key:invalid}))
