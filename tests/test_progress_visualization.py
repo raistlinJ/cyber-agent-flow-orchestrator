@@ -102,6 +102,15 @@ def fixture(root):
                     at="2026-10-16T20:00:00Z",
                     text="Inspect the configuration endpoint.",
                     solution=False,
+                    tier="medium",
+                    interpretation="The configuration service is the strongest lead.",
+                    next_action="Inspect the configuration endpoint.",
+                    success_signal="A response containing the required setting.",
+                    source="catalog_assistance",
+                    monitor_observation={
+                        "summary": "The service configuration was reached.",
+                        "evidence": [citation],
+                    },
                 ),
                 dict(
                     id="solution1",
@@ -132,6 +141,10 @@ def test_graph_states_dependencies_evidence_and_released_assistance(tmp_path):
         "Service version found"
     ]
     assert nodes[1]["hints"] == 1 and nodes[1]["solutions"] == 1
+    release = graph["releases"][0]
+    assert release["tier"] == "medium"
+    assert release["next_action"] == "Inspect the configuration endpoint."
+    assert release["monitor_observation"]["summary"] == "The service configuration was reached."
     assert nodes[2]["focus"] and not nodes[1]["focus"] and nodes[1]["assistance_focus"]
     assert (
         graph["monitor"]["checks"] == 1

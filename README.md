@@ -724,6 +724,12 @@ For editable challenge rubrics, evidence-based judging, controlled conditions, l
 
 ScenarioForge task loading can draft an editable, Judge-based challenge scaffold from resolved Flow data and guide solutions. Progressive hints can use separate intermediate evidence reviews to select the current unfinished step. See [scaffolds and intermediate progress](docs/rubric-experiments.md#scenario-derived-scaffold-and-intermediate-progress) for configuration, limits and audit files.
 
+Catalog-backed tasks also carry structured teammate coaching. Live progress
+shows the monitor's cited observation separately from the authored
+interpretation, next action, and success signal, together with the hint tier and
+source. Up to twelve ordered entries can be released for the current challenge;
+the facilitator walkthrough and answer remain a separately gated solution.
+
 
 While an experiment runs, open **Progress → step 9 → Cyber-agent-flow transcript**
 to view emitted prompts, responses, tool calls/results and status. The scrollable

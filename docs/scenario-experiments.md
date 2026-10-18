@@ -122,7 +122,7 @@ The enlarged modal separates **Experiment** (type), **ScenarioForge** (selected 
 
 **New → Evaluation → Provide progressive hints** defaults to on for new experiments and remains editable for scenarios and both fixed samples. It is the single hint policy for every condition, is saved as `execution.provide_progressive_hints`, and is retained on reruns.
 
-With hints enabled, the evaluator can release at most three hints per trial after two agent turns without observed progress, or after an incorrect final answer. A correct final answer stops normally. Assistance consumes the existing turn/time budget. Observed progress means a newly observed declared fact in bounded successful tool output; without fact declarations, it means a new nonempty successful tool output. This is a stall heuristic, not proof of what the model knows.
+With hints enabled, the evaluator can release up to twelve authored coaching entries for the current challenge after the configured number of turns without observed progress, or after an incorrect final answer. A correct final answer stops normally. Assistance consumes the existing turn/time budget. Observed progress means a newly observed declared fact in bounded successful tool output; without fact declarations, it means a new nonempty successful tool output. This is a stall heuristic, not proof of what the model knows.
 
 Both demos prepare three ordered hints in the saved scenario XML. Custom ScenarioForge tasks can include ordered `progressive_hints`; entire guide documents are **not** automatically sent to the agent. ScenarioForge exports these hints only in private `evaluator/task-metadata.json`. Discovery tasks can also use their existing `discoverable_facts`, `evidence`, and prerequisite declarations: the evaluator offers an artifact pointer, evidence guidance, then an explicit fact value. It skips already observed or supplied facts and filters literal verifier answers from assistance. Enabling hints without a usable hint/fact source fails the trial with an explicit error.
 
@@ -192,7 +192,7 @@ Observed flags advance to the next unsolved challenge and reset its try count.
 For older task packages without guide sections, the fallback uses the reviewed
 task procedure/hints and exact verifier answer.
 
-There are up to three ordinary hints per trial and at most one full solution per
+There are up to twelve ordinary coaching entries per challenge and at most one full solution per
 challenge. The same policy applies to every condition and is saved for reruns
 and in the run summary. Turn and time budgets still apply; a smaller trial budget
 may end before the limit is reached. Results distinguish **unassisted**,
@@ -285,3 +285,14 @@ before trials. Passing preflight establishes configuration/access readiness;
 it does not guarantee a task will be solved or that the model stays available.
 
 Judge preflight and final review honor the configured judge time limit (default 600 seconds). In the progress modal, step 1 has a Judge output dropdown for the synthetic check, and step 9 has one for final and intermediate reviews. Compatible OpenAI and Ollama providers stream responses; servers returning a normal JSON response remain supported. Provider-emitted reasoning is shown when available. Private reference answers may appear in judge output, which remains owner-scoped and is included in the run bundle. The modal refreshes these incremental outputs every five seconds.
+
+### Structured teammate coaching
+
+Scenario-derived tasks freeze the catalogs' ordered low/medium/high coaching.
+The evaluator can release up to twelve authored entries for the current challenge
+within the configured stall, turn, and solution limits. A live release combines
+an evidence-cited monitor observation, when available, with the authored
+interpretation, next action, and success signal. The judge does not invent the
+technical guidance. After the configured try limit, the facilitator walkthrough
+and answer are released as the solution; remaining hints for that challenge are
+suppressed.

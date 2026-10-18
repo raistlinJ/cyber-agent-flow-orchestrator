@@ -382,6 +382,8 @@
 .visual-assistance-heading h3{font-size:16px;margin:0 0 14px}
 .visual-assistance-event{border-left:3px solid #3179d3;background:white;border-radius:0 6px 6px 0;margin:8px 0;padding:12px 15px;font-size:12px}
 .visual-assistance-event.solution{border-color:#9161ba}
+.released-coaching{margin-top:8px;padding:8px 10px;border-radius:6px;background:#f6f9f7}
+.released-coaching p{margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.5}
 .visual-assistance-event summary{cursor:pointer;font-weight:600}
 @media(max-width:1100px){.visual-graph-layout{grid-template-columns:minmax(0,1fr)}.visual-node-detail{max-height:none}.visual-node-detail h3{font-size:17px}}
 @media(max-width:650px){#attack-graph{height:450px}.visual-header{align-items:stretch}.visual-header label{width:100%}.visual-legend{gap:10px 18px}.graph-toolbar{padding:8px}.graph-toolbar>span{width:100%}.visual-node-detail{padding:15px}.visual-header h2{font-size:25px}}

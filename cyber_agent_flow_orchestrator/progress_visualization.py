@@ -96,6 +96,12 @@ def build(root, journal, rows, *, active=False):
                 text=text(e.get("text"), 4000),
                 truncated=len(e.get("text", "")) > 4000,
                 reason=text(e.get("reason")),
+                tier=text(e.get("tier"), 20),
+                interpretation=text(e.get("interpretation"), 1500),
+                next_action=text(e.get("next_action"), 1500),
+                success_signal=text(e.get("success_signal"), 2000),
+                source=text(e.get("source"), 100),
+                monitor_observation=e.get("monitor_observation") if isinstance(e.get("monitor_observation"), dict) else None,
             )
             for e in assistance.get("events", [])[-100:]
         ]

@@ -951,3 +951,11 @@ synthetic response so reasoning-capable models can reach final text. It still
 requires usable text or a tool call within the existing probe time limit;
 reasoning-only output does not count as a successful probe. No real tool is
 executed during this check.
+
+### Structured assistance display
+
+Released coaching is shown as **What I observed** (only when the monitor cited
+direct execution output), **What that suggests**, **What I would do next**, and
+**What would confirm progress**. The low/medium/high tier is shown beside the
+unlock event. The run bundle retains the same fields, catalog provenance, and
+monitor citations.
