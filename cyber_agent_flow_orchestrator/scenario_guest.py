@@ -55,6 +55,29 @@ def _flow_chain(state):
     return [nodes.get(node_id, {'id': node_id, 'name': node_id}) for node_id in ids]
 
 
+def _flow_runtime_ready(state):
+    """Match ScenarioForge execute readiness for saved, remotely run Flow values."""
+    if not isinstance(state, dict) or state.get('topology_dirty'):
+        return False
+    if state.get('flow_enabled') is False:
+        tasks = state.get('evaluation_tasks')
+        return isinstance(tasks, list) and bool(tasks)
+    assignments = state.get('flag_assignments')
+    if not isinstance(assignments, list) or not assignments:
+        return False
+    for assignment in assignments:
+        if not isinstance(assignment, dict):
+            return False
+        outputs = assignment.get('resolved_outputs')
+        flag = _text(assignment.get('flag_value'))
+        if not flag and isinstance(outputs, dict):
+            flag = _text(outputs.get('Flag(flag_id)') or outputs.get('flag'))
+        artifacts = _text(assignment.get('artifacts_dir') or assignment.get('run_dir'))
+        if not flag and not (isinstance(outputs, dict) and outputs) and not artifacts:
+            return False
+    return True
+
+
 def _flag_value(assignment):
     value = assignment.get('flag_value') if isinstance(assignment, dict) else None
     return _text(value)
@@ -335,10 +358,17 @@ def inspect(path):
         name = scenario.get('name', '').strip()
         if not name or len(name) > 500 or len(str(path)) > 4096:
             continue
-        chain = _flow_chain(_flow_state(scenario))
+        state = _flow_state(scenario)
+        chain = _flow_chain(state)
+        runtime_ready = bool(chain) and _flow_runtime_ready(state)
         identity = hashlib.sha256((str(path) + '\0' + name + '\0' + digest).encode()).hexdigest()
         rows.append(dict(id=identity, path=str(path), scenario=name, sha256=digest,
-                         bytes=len(content), resolved_chain=bool(chain), chain_length=len(chain),
+                         bytes=len(content), resolved_chain=runtime_ready,
+                         chain_saved=bool(chain), runtime_ready=runtime_ready,
+                         resolution_error=(None if runtime_ready else
+                             ('Flow runtime values are missing; run Generate (resolve) and Save XML.'
+                              if chain else 'No saved resolved Flow chain.')),
+                         chain_length=len(chain),
                          target_subnets=target_subnets(scenario),
                          modified_epoch=stat.st_mtime,
                          modified_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()))
@@ -720,7 +750,8 @@ def dispatch(data):
         raise ValueError('Unknown scenario operation')
     selected, content = selected_source(data)
     if not selected['resolved_chain'] and not data.get('allow_unresolved', False):
-        raise ValueError('Resolve and save the Flow chain in ScenarioForge before evaluation')
+        raise ValueError(selected.get('resolution_error') or
+                         'Resolve and save the Flow chain in ScenarioForge before evaluation')
     if data.get('tasks') is not None:
         tasks = data['tasks']
         if not isinstance(tasks, list) or not 1 <= len(tasks) <= 32 or len(json.dumps(tasks, allow_nan=False).encode()) > 64 * 1024:

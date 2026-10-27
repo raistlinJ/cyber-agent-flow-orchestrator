@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import zipfile
 
 import pytest
 
@@ -187,11 +188,192 @@ def test_active_experiment_refuses_service_stop_or_update(installation, tmp_path
 
 def test_settings_reject_arbitrary_urls_refs_and_disable():
     assert updates.settings(False) is None
-    assert updates.settings(None)['group'] == 'caf-maintainers'
+    defaults = updates.settings(None)
+    assert defaults['group'] == 'caf-maintainers'
+    assert defaults['catalogs'] == {
+        'url': 'https://github.com/raistlinJ/flag-generators.git', 'ref': 'main'}
     for url in ('file:///tmp/repo', 'https://user:password@example.com/repo', 'http://example.com/repo'):
         with pytest.raises(ValueError): updates.settings({'participant': {'url': url}})
+        with pytest.raises(ValueError): updates.settings({'catalogs': {'url': url}})
     for ref in ('--upload-pack=evil', '../main', 'branch:destination', 'main; echo bad'):
         with pytest.raises(updates.UpdateError): updates.ref_name(ref)
+
+
+def test_catalog_package_contains_every_supported_catalog_family(tmp_path):
+    source = tmp_path / 'catalog-source'
+    source.mkdir()
+    git(source, 'init', '-b', 'main')
+    git(source, 'config', 'user.email', 'test@example.invalid')
+    git(source, 'config', 'user.name', 'Test')
+    (source / 'pack.json').write_text('{"name": "test"}\n')
+    for name in ('flag_generators', 'flag_node_generators', 'vulnhub'):
+        item = source / name / 'sample'
+        item.mkdir(parents=True)
+        (item / 'catalog.txt').write_text(name + '\n')
+    git(source, 'add', '.')
+    git(source, 'commit', '-m', 'Catalog fixtures')
+    destination = tmp_path / 'package'
+    destination.mkdir()
+
+    revision, archive = updates.package_catalogs(
+        {'url': str(source)}, 'main', destination)
+
+    assert revision == git(source, 'rev-parse', 'HEAD')
+    with zipfile.ZipFile(archive) as catalog:
+        names = set(catalog.namelist())
+    assert 'pack.json' in names
+    assert {f'{name}/sample/catalog.txt' for name in
+            ('flag_generators', 'flag_node_generators', 'vulnhub')} <= names
+
+
+def _catalog_archive(path):
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('pack.json', '{"name": "test"}\n')
+        archive.writestr('flag_generators/one/manifest.yaml', 'id: one\n')
+        archive.writestr('flag_node_generators/two/manifest.yaml', 'id: two\n')
+        archive.writestr('vulnhub/three/docker-compose.yml', 'services: {}\n')
+
+
+@pytest.mark.parametrize('import_succeeds', [True, False])
+def test_catalog_reinstall_replaces_all_roots_or_restores_previous_set(tmp_path, monkeypatch,
+                                                                       import_succeeds):
+    root = tmp_path / 'scenarioforge'
+    root.mkdir()
+    outputs = root / 'outputs'
+    old_generator = outputs / 'installed_generators' / 'old.txt'
+    old_vulnerability = outputs / 'installed_vuln_catalogs' / 'old.txt'
+    for path in (old_generator, old_vulnerability):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('previous catalog\n')
+    directory = tmp_path / 'maintenance'
+    directory.mkdir()
+    token = 'a' * 32
+    archive = directory / (token + '.catalogs.zip')
+    _catalog_archive(archive)
+    monkeypatch.setattr(guest, 'PENDING', tmp_path / 'pending.json')
+    monkeypatch.setattr(guest, 'active_processes', lambda application: None)
+    monkeypatch.setattr(guest.os, 'chown', lambda *args, **kwargs: None)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ['systemctl', 'is-active']:
+            return subprocess.CompletedProcess(argv, 0, b'active\n', b'')
+        if len(argv) > 2 and argv[1] == '-c':
+            if 'CATALOG_ROOTS_JSON:' in argv[2]:
+                payload = json.dumps({
+                    'installed_generators': str(outputs / 'installed_generators'),
+                    'installed_vuln_catalogs': str(outputs / 'installed_vuln_catalogs'),
+                })
+                return subprocess.CompletedProcess(
+                    argv, 0, ('CATALOG_ROOTS_JSON:' + payload + '\n').encode(), b'')
+            (outputs / 'installed_generators').mkdir(parents=True, exist_ok=True)
+            (outputs / 'installed_vuln_catalogs').mkdir(parents=True, exist_ok=True)
+            (outputs / 'installed_generators/new.txt').write_text('new catalog\n')
+            (outputs / 'installed_vuln_catalogs/new.txt').write_text('new catalog\n')
+            if not import_succeeds:
+                raise ValueError('simulated catalog importer failure')
+            revision = argv[-2]
+            expected = json.loads(argv[-1])
+            payload = json.dumps({
+                'revision': revision, **expected,
+            })
+            return subprocess.CompletedProcess(
+                argv, 0, ('import message\nCATALOG_REINSTALL_JSON:' + payload + '\n').encode(), b'')
+        return subprocess.CompletedProcess(argv, 0, b'', b'')
+
+    monkeypatch.setattr(guest, 'run', run)
+    if import_succeeds:
+        prepared = guest.prepare_catalog_reinstall(
+            root, directory, archive, token=token, revision='b' * 40,
+            python=Path(sys.executable), service='scenarioforge-web.service')
+        assert prepared['expected'] == {
+            'vulnerabilities': 1, 'flag_generators': 1, 'flag_node_generators': 1,
+        }
+        assert json.loads(guest.PENDING.read_text())['status'] == 'purged'
+        assert ['systemctl', 'start', 'scenarioforge-web.service'] not in calls
+        result = guest.install_catalogs(root, directory, json.loads(guest.PENDING.read_text()))
+        assert json.loads(guest.PENDING.read_text())['status'] == 'installed'
+        assert ['systemctl', 'start', 'scenarioforge-web.service'] not in calls
+        result = guest.finalize_catalog_reinstall(
+            root, directory, json.loads(guest.PENDING.read_text()))
+        assert result == {
+            'revision': 'b' * 40, 'vulnerabilities': 1,
+            'flag_generators': 1, 'flag_node_generators': 1,
+        }
+        assert not old_generator.exists() and not old_vulnerability.exists()
+        assert (outputs / 'installed_generators/new.txt').is_file()
+        assert (outputs / 'installed_vuln_catalogs/new.txt').is_file()
+    else:
+        with pytest.raises(ValueError, match='simulated catalog importer failure'):
+            guest.reinstall_catalogs(
+                root, directory, archive, token=token, revision='b' * 40,
+                python=Path(sys.executable), service='scenarioforge-web.service')
+        assert old_generator.read_text() == 'previous catalog\n'
+        assert old_vulnerability.read_text() == 'previous catalog\n'
+        assert not (outputs / 'installed_generators/new.txt').exists()
+        assert not (outputs / 'installed_vuln_catalogs/new.txt').exists()
+    assert not archive.exists()
+    assert not guest.PENDING.exists()
+    assert not (directory / (token + '-catalog-backup')).exists()
+    assert ['systemctl', 'stop', 'scenarioforge-web.service'] in calls
+    assert ['systemctl', 'start', 'scenarioforge-web.service'] in calls
+
+
+def test_interrupted_catalog_reinstall_restores_only_roots_already_moved(tmp_path, monkeypatch):
+    root = tmp_path / 'scenarioforge'
+    directory = tmp_path / 'maintenance'
+    outputs = root / 'outputs'
+    backup = directory / ('a' * 32 + '-catalog-backup')
+    backup_generator = backup / 'installed_generators'
+    untouched_vulnerabilities = outputs / 'installed_vuln_catalogs'
+    backup_generator.mkdir(parents=True)
+    untouched_vulnerabilities.mkdir(parents=True)
+    (backup_generator / 'old.txt').write_text('old generator\n')
+    (untouched_vulnerabilities / 'old.txt').write_text('untouched vulnerability\n')
+    pending_path = tmp_path / 'pending.json'
+    pending = {
+        'operation': 'catalog-reinstall', 'status': 'prepared', 'token': 'a' * 32,
+        'root': str(root), 'backup': str(backup),
+        'service': 'scenarioforge-web.service', 'service_was_active': True,
+    }
+    guest.save(pending_path, pending)
+    monkeypatch.setattr(guest, 'PENDING', pending_path)
+    calls = []
+    monkeypatch.setattr(guest, 'run', lambda argv, **kwargs: (
+        calls.append(argv) or subprocess.CompletedProcess(argv, 0, b'', b'')))
+
+    guest.recover_interrupted_catalog_reinstall(root, directory, pending)
+
+    assert (outputs / 'installed_generators/old.txt').read_text() == 'old generator\n'
+    assert untouched_vulnerabilities.joinpath('old.txt').read_text() == 'untouched vulnerability\n'
+    assert calls == [
+        ['systemctl', 'stop', 'scenarioforge-web.service'],
+        ['systemctl', 'start', 'scenarioforge-web.service'],
+        ['systemctl', 'is-active', '--quiet', 'scenarioforge-web.service'],
+    ]
+    assert not pending_path.exists() and not backup.exists()
+
+
+def test_completed_catalog_reinstall_recovery_keeps_new_catalogs(tmp_path, monkeypatch):
+    root = tmp_path / 'scenarioforge'
+    directory = tmp_path / 'maintenance'
+    new_catalog = root / 'outputs/installed_generators/new.txt'
+    new_catalog.parent.mkdir(parents=True)
+    new_catalog.write_text('new catalog\n')
+    pending_path = tmp_path / 'pending.json'
+    pending = {
+        'operation': 'catalog-reinstall', 'status': 'completed', 'token': 'a' * 32,
+        'root': str(root), 'backup': str(directory / ('a' * 32 + '-catalog-backup')),
+        'service': None, 'service_was_active': False,
+    }
+    guest.save(pending_path, pending)
+    monkeypatch.setattr(guest, 'PENDING', pending_path)
+
+    guest.recover_interrupted_catalog_reinstall(root, directory, pending)
+
+    assert new_catalog.read_text() == 'new catalog\n'
+    assert not pending_path.exists()
 
 
 def test_maintenance_group_and_vm_permission_rechecked(pve):

@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 import uuid
 import yaml
 
@@ -40,6 +41,21 @@ def export_marker(log):
     from cyber_agent_flow_eval.backends import guest_path
     guest_path(result.get('archive'), 'export archive')
     return result
+
+
+def command_failure_reason(text):
+    """Extract one actionable, redacted error from a failed command log."""
+    from .diagnostics import clean
+    lines = str(text or '').splitlines()[-240:]
+    for line in reversed(lines):
+        match = re.search(r'\b(?:ERROR|CRITICAL)\b[^\r\n]*?\s-\s+(.+)$', line)
+        if match and match.group(1).strip():
+            return clean(match.group(1).strip(), 2000)
+    for line in reversed(lines):
+        match = re.match(r'^\s*(?:[A-Za-z_][\w.]*Error|Exception):\s+(.+)$', line)
+        if match and match.group(1).strip():
+            return clean(match.group(1).strip(), 2000)
+    return None
 
 
 class Workflow:
@@ -165,6 +181,9 @@ class Workflow:
                             reason = self.deployment_readiness_failure(log.read_text(), command['vmid'])
                             if reason:
                                 raise ValueError(f'{reason}; see {log}')
+                        reason = command_failure_reason(log.read_text())
+                        if reason:
+                            raise ValueError(f'{key} failed: {reason}; see {log}')
                         raise ValueError(f'{key} exited {result["exitcode"]}; see {log}')
                 finally:
                     self.agent.call(command['vmid'], 'stop', unit=attempt['unit'])

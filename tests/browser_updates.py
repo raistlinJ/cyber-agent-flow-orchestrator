@@ -27,6 +27,7 @@ def main():
         calls, agent, _ = install_backend(patch, root)
         revisions = {9402: 'a' * 40, 9403: 'a' * 40}
         finish_upload = threading.Event()
+        finish_catalog_install = threading.Event()
         dirty = set()
         replaceable = set()
         process_blockers = {}
@@ -35,6 +36,20 @@ def main():
         def call(self, vmid, op, **data):
             original(self, vmid, op, **data)
             if op == 'app_stage': return {'path': '/tmp/test-source.bundle'}
+            if op == 'catalog_stage': return {'path': '/tmp/test-catalogs.zip'}
+            if op == 'catalog_prepare':
+                assert vmid == 9402 and data['catalog_revision'] == 'c' * 40
+                return {'expected': {'vulnerabilities': 306, 'flag_generators': 60,
+                                     'flag_node_generators': 88}}
+            if op in ('catalog_install', 'catalog_finalize'):
+                assert vmid == 9402 and data['catalog_revision'] == 'c' * 40
+                if op == 'catalog_install':
+                    assert finish_catalog_install.wait(90)
+                return {
+                    'revision': revisions[vmid], 'modified': False, 'processes': [],
+                    'catalogs': {'revision': 'c' * 40, 'vulnerabilities': 306,
+                                 'flag_generators': 60, 'flag_node_generators': 88},
+                }
             if op == 'app_update' and vmid in activation_failures: raise ValueError('Tracked local edits appeared before activation. No files changed.')
             if op == 'app_update':
                 if vmid in dirty and vmid not in replaceable:
@@ -62,6 +77,13 @@ def main():
                 trace.emit('response', '<img src=x onerror="window.consoleInjected=true">', force=True)
             return 'b' * 40, file
         patch.setattr(updates, 'package', package)
+        def package_catalogs(source, ref, directory, *, trace=None, progress=None):
+            file = directory / 'scenarioforge-catalogs.zip'
+            file.write_bytes(b'simulated ScenarioForge catalogs')
+            if progress:
+                progress('package', 'Download complete; packaging the three catalog families')
+            return 'c' * 40, file
+        patch.setattr(updates, 'package_catalogs', package_catalogs)
         with pve_server(root) as pve:
             pve[0]['resources']['operator@pve'] = [vm(9402), vm(9403)]
             dashboard = UserDashboard(root / 'examples/01-reuse-export.yaml', root / 'runs', 2, lambda b, a: Probe(b, a, []))
@@ -129,6 +151,23 @@ def main():
                         expect(button(role, 'rollback')).to_be_enabled(timeout=30000)
                         button(role, 'rollback').click()
                         expect(page.locator('#update-cards article').filter(has=button(role, 'update'))).to_contain_text('aaaaaaaaaaaa', timeout=30000)
+                    expect(button('scenarioforge', 'reinstall-catalogs')).to_have_count(1)
+                    page.locator('#refresh-period').evaluate(
+                        "el => { el.value = '0'; el.dispatchEvent(new Event('change', {bubbles: true})); }")
+                    page.once('dialog', lambda dialog: dialog.accept())
+                    button('scenarioforge', 'reinstall-catalogs').click()
+                    expect(page.locator('#update-jobs article').first).to_contain_text(
+                        'Installing all catalog families and verifying exact item counts', timeout=30000)
+                    expect(page.locator('#update-jobs article').first).to_contain_text('Step 7 / 8')
+                    finish_catalog_install.set()
+                    expect(page.locator('#update-jobs article').first).to_contain_text(
+                        '306 vulnerabilities · 60 flag generators · 88 flag-node generators', timeout=30000)
+                    expect(page.locator('#update-jobs article').first).to_contain_text(
+                        '8 / 8 steps complete')
+                    expect(page.locator('#update-jobs article').first).to_contain_text(
+                        'Install and verify catalogs')
+                    expect(page.locator('#update-jobs article').first).to_contain_text(
+                        'Catalog revision: ' + 'c' * 40)
                     dirty.add(9403)
                     expect(button('participant', 'update')).to_be_enabled(timeout=30000)
                     before = len(calls)

@@ -81,6 +81,31 @@ activation can finish its bounded transaction; an authorized maintainer can insp
 and recover it afterward. Updates affect everyone using
 the VM, not just the operator's private experiment results.
 
+## Reinstall ScenarioForge catalogs
+
+The ScenarioForge card has a separate **Reinstall all catalogs** action. It
+downloads the configured catalog repository on the orchestrator host and replaces
+all installed vulnerability, flag-generator, and flag-node-generator catalogs in
+the ScenarioForge VM. The guest itself does not need internet access.
+
+This action intentionally purges the current installed catalog directories, so
+custom catalog changes are lost after the confirmation prompt. ScenarioForge is
+stopped while the import runs. The guest preserves the old directories until all
+three catalog families have exact verified counts and the service restarts; any import,
+verification, or restart failure restores the previous catalog set. A successful
+job reports the source commit and the imported counts in Maintenance history.
+Maintenance history displays eight live steps: inspect, download, package, guest
+preparation, transfer, backup/purge, install/verify, and service restart. Transfer
+shows acknowledged bytes, percentage, and throughput. The dashboard reads the
+saved job every two seconds while maintenance is active, including when
+**Automatic refresh** is **Never**; these reads do not start VM inventory probes.
+
+Catalog reinstall does not change ScenarioForge application source, CORE, or the
+participant VM. Tracked edits in the ScenarioForge checkout do not block it, but
+active experiments and unmanaged processes still do. The default source is
+`https://github.com/raistlinJ/flag-generators.git` at `main`; only the host
+administrator can change it.
+
 ## Use the WebUI
 
 1. Save the participant and ScenarioForge VM roles on **Lab setup**.
@@ -101,6 +126,9 @@ the VM, not just the operator's private experiment results.
    acknowledged, percentage, average transfer rate and checksum verification.
 5. Use **Roll back** to restore the previous successful revision. Files generated
    since the update remain in place.
+6. On the ScenarioForge card, use **Reinstall all catalogs** when you need to
+   purge and rebuild the vulnerability and both generator catalogs from their
+   latest configured repository revision.
 
 **Dashboard loaded** describes the dashboard read, not an application update.
 Upload **100%** describes acknowledged file bytes; **checksum verified** confirms
@@ -210,6 +238,9 @@ updates:
   scenarioforge:
     url: https://github.com/raistlinJ/scenarioforge.git
     ref: main
+  catalogs:
+    url: https://github.com/raistlinJ/flag-generators.git
+    ref: main
 ```
 
 Only the host administrator can change source URLs. Use a trusted HTTPS repository
@@ -278,6 +309,7 @@ The CLI uses the same saved VM roles, authorization, workers and records:
 uv run cyber-agent-flow-orchestrator user-app inspect --role participant --username researcher@pve
 uv run cyber-agent-flow-orchestrator user-app update --role participant --ref main --username researcher@pve
 uv run cyber-agent-flow-orchestrator user-app update --role scenarioforge --ref main --username researcher@pve
+uv run cyber-agent-flow-orchestrator user-app reinstall-catalogs --role scenarioforge --ref main --username researcher@pve
 uv run cyber-agent-flow-orchestrator user-app rollback --role scenarioforge --username researcher@pve
 ```
 

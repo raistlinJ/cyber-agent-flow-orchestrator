@@ -441,6 +441,14 @@ or app-to-participant connection is required. Updates preserve local runtime dat
 and use the existing Python environment. Changed dependency manifests or conflicting
 local edits block activation.
 
+The ScenarioForge card also provides **Reinstall all catalogs**. After an explicit
+confirmation, it purges and imports the latest configured vulnerability,
+flag-generator, and flag-node-generator catalogs from the `flag-generators`
+repository. The guest restores its previous catalogs if import, verification, or
+service restart fails. Maintenance history tracks inspect, download, packaging,
+guest preparation, byte/percentage transfer, backup/purge, install/verification,
+and restart as separate live steps, even when dashboard refresh is **Never**.
+
 If an application is running, **Check version** lists its blocking PIDs. Choose
 **Update** to review and confirm that list. The updater requests
 a graceful stop before activation; it never force-kills a process. Listed terminals
@@ -746,7 +754,8 @@ frozen challenge dependency graph with green solved, amber partial, blue targete
 and grey other states. Select a challenge for cited discoveries, completion
 criteria and released hints/solutions; pan, zoom, switch trials or focus on CAF's
 latest monitor-observed activity. The judge's intermediate Monitor observations
-are separate from the final score. See [visual progress](docs/webui.md#loading-and-progress).
+are separate from the final score. See [how the Visualize canvas gets progress](docs/webui.md#how-the-visualize-canvas-gets-progress)
+and the complete [visual progress reference](docs/webui.md#loading-and-progress).
 
 
 Every experiment time-limit field has a **No timeout** option: participant active

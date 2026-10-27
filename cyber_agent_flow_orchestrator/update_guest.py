@@ -11,8 +11,10 @@ import re
 import signal
 import stat
 import subprocess
+import shutil
 import sys
 import time
+import zipfile
 
 STATE_ROOT = Path('/var/lib/caf-application-updates')
 LOCK_PATH = Path('/run/caf-application-maintenance.lock')
@@ -95,6 +97,394 @@ def prepare_bundle_for_application_user(bundle, root):
     elif uploaded.st_uid != owner.st_uid:
         raise ValueError('Source bundle is not readable by the application account')
     os.chmod(bundle, 0o600, follow_symlinks=False)
+
+
+def _catalog_archive_members(archive):
+    """Validate the host-created repository archive before extracting it."""
+    required = {'flag_generators', 'flag_node_generators', 'vulnhub'}
+    seen, expanded, members, pack_metadata = set(), 0, [], False
+    expected = {'flag_generators': 0, 'flag_node_generators': 0, 'vulnerabilities': 0}
+    with zipfile.ZipFile(archive, 'r') as source:
+        infos = source.infolist()
+        if len(infos) > 50000:
+            raise ValueError('Catalog archive contains too many files')
+        for info in infos:
+            name = str(info.filename or '').replace('\\', '/')
+            parts = [part for part in name.split('/') if part not in ('', '.')]
+            if not parts or name.startswith('/') or any(part == '..' for part in parts):
+                raise ValueError('Catalog archive contains an unsafe path')
+            mode = (int(info.external_attr) >> 16) & 0o170000
+            if mode == stat.S_IFLNK:
+                raise ValueError('Catalog archive contains a symbolic link')
+            expanded += int(info.file_size)
+            if expanded > 2 * 1024 * 1024 * 1024:
+                raise ValueError('Expanded catalog archive exceeds 2 GiB')
+            if parts[0] in required:
+                seen.add(parts[0])
+            if parts == ['pack.json']:
+                pack_metadata = True
+            if not info.is_dir() and parts[-1] in ('manifest.yaml', 'manifest.yml'):
+                if parts[0] in ('flag_generators', 'flag_node_generators'):
+                    expected[parts[0]] += 1
+            if not info.is_dir() and parts[0] == 'vulnhub' and parts[-1] in (
+                    'docker-compose.yml', 'docker-compose.yaml'):
+                expected['vulnerabilities'] += 1
+            members.append((info, parts))
+    missing = sorted(required - seen)
+    if missing:
+        raise ValueError('Catalog archive is missing: ' + ', '.join(missing))
+    if not pack_metadata:
+        raise ValueError('Catalog archive is missing pack.json')
+    if any(not count for count in expected.values()):
+        raise ValueError('Catalog archive has an empty catalog family')
+    return members, expected
+
+
+def _split_catalog_archive(archive, directory):
+    """Create the two ZIP layouts consumed by ScenarioForge's importers."""
+    members, expected = _catalog_archive_members(archive)
+    generators = directory / 'generators.zip'
+    vulnerabilities = directory / 'vulnerabilities.zip'
+    with zipfile.ZipFile(archive, 'r') as source, \
+            zipfile.ZipFile(generators, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as generator_zip, \
+            zipfile.ZipFile(vulnerabilities, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as vuln_zip:
+        for info, parts in members:
+            if info.is_dir():
+                continue
+            target = None
+            if parts[0] in ('flag_generators', 'flag_node_generators') or parts == ['pack.json']:
+                target = generator_zip
+            elif parts[0] == 'vulnhub':
+                target = vuln_zip
+            if target is None:
+                continue
+            output = zipfile.ZipInfo('/'.join(parts), date_time=info.date_time)
+            output.external_attr = info.external_attr
+            output.compress_type = zipfile.ZIP_DEFLATED
+            with source.open(info, 'r') as src, target.open(output, 'w', force_zip64=True) as dst:
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
+    return generators, vulnerabilities, expected
+
+
+def _scenarioforge_catalog_roots(root, python, owner):
+    """Confirm the importer and root-side transaction address the same directories."""
+    script = r'''
+import json
+from webapp import app_backend
+print('CATALOG_ROOTS_JSON:' + json.dumps({
+    'installed_generators': app_backend._installed_generators_root(),
+    'installed_vuln_catalogs': app_backend._installed_vuln_catalogs_root(),
+}))
+'''
+    completed = run([str(python), '-c', script], cwd=root, user=owner, timeout=120)
+    try:
+        lines = completed.stdout.decode().splitlines()
+        payload = next(line.removeprefix('CATALOG_ROOTS_JSON:') for line in reversed(lines)
+                       if line.startswith('CATALOG_ROOTS_JSON:'))
+        reported = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, StopIteration) as exc:
+        raise ValueError('ScenarioForge did not report its installed catalog roots') from exc
+    expected = {
+        'installed_generators': root / 'outputs' / 'installed_generators',
+        'installed_vuln_catalogs': root / 'outputs' / 'installed_vuln_catalogs',
+    }
+    if not isinstance(reported, dict) or any(
+            Path(str(reported.get(name) or '')).resolve(strict=False) != path.resolve(strict=False)
+            for name, path in expected.items()):
+        raise ValueError(
+            'ScenarioForge uses custom installed catalog directories; catalog reinstall requires '
+            'the standard outputs/installed_generators and outputs/installed_vuln_catalogs paths')
+    return expected
+
+
+def _catalog_transaction_paths(directory, token):
+    return {
+        'archive': directory / (token + '.catalogs.zip'),
+        'workspace': directory / (token + '-catalog-workspace'),
+        'backup': directory / (token + '-catalog-backup'),
+    }
+
+
+def _catalog_cleanup(pending):
+    for key in ('workspace', 'backup'):
+        value = pending.get(key)
+        if value:
+            shutil.rmtree(Path(value), ignore_errors=True)
+    value = pending.get('archive')
+    if value:
+        Path(value).unlink(missing_ok=True)
+
+
+def _restore_catalog_transaction(root, pending):
+    """Restore roots moved by a prepared catalog transaction."""
+    backup = Path(pending['backup'])
+    outputs = root / 'outputs'
+    for name in ('installed_generators', 'installed_vuln_catalogs'):
+        current = outputs / name
+        old = backup / name
+        if old.exists():
+            if current.exists() or current.is_symlink():
+                if current.is_symlink():
+                    current.unlink()
+                else:
+                    shutil.rmtree(current)
+            outputs.mkdir(parents=True, exist_ok=True)
+            os.replace(old, current)
+    shutil.rmtree(backup, ignore_errors=True)
+
+
+def prepare_catalog_reinstall(root, directory, archive, *, token, revision, python, service):
+    """Validate, back up and purge catalogs, leaving a durable transaction."""
+    if not re.fullmatch('[0-9a-f]{32}', token or ''):
+        raise ValueError('Invalid maintenance request ID')
+    if not re.fullmatch('[0-9a-f]{40}', revision or ''):
+        raise ValueError('Invalid catalog revision')
+    if archive.is_symlink() or not archive.is_file():
+        raise ValueError('Catalog archive is missing')
+    prepare_bundle_for_application_user(archive, root)
+    owner = pwd.getpwuid(root.stat().st_uid).pw_name
+    paths = _catalog_transaction_paths(directory, token)
+    workspace, backup = paths['workspace'], paths['backup']
+    if workspace.exists() or workspace.is_symlink() or backup.exists() or backup.is_symlink():
+        raise ValueError('Catalog transaction already exists; use a fresh maintenance request')
+    workspace.mkdir(mode=0o700)
+    os.chown(workspace, root.stat().st_uid, root.stat().st_gid)
+    outputs = root / 'outputs'
+    installed = _scenarioforge_catalog_roots(root, python, owner)
+    record = {
+        'operation': 'catalog-reinstall',
+        'status': 'preparing',
+        'token': token,
+        'role': 'scenarioforge',
+        'root': str(root),
+        'catalog_revision': revision,
+        'service': service,
+        'python': str(python),
+        'started_at': time.time(),
+        'backup': str(backup),
+        'workspace': str(workspace),
+        'archive': str(archive),
+    }
+    journal = directory / 'state.json'
+    service_was_active = False
+    moved = []
+    purge_started = False
+
+    try:
+        generators, vulnerabilities, expected = _split_catalog_archive(archive, workspace)
+        for path in (generators, vulnerabilities):
+            os.chown(path, root.stat().st_uid, root.stat().st_gid)
+            os.chmod(path, 0o600)
+        if service:
+            state = run(['systemctl', 'is-active', service], check=False).stdout.strip()
+            service_was_active = state in (b'active', b'activating', b'reloading')
+        outputs.mkdir(parents=True, exist_ok=True)
+        if os.geteuid() == 0:
+            os.chown(outputs, root.stat().st_uid, root.stat().st_gid)
+        backup.mkdir(mode=0o700)
+        record.update(
+            status='prepared', service_was_active=service_was_active,
+            catalog_roots=list(installed), expected=expected,
+            generators=str(generators), vulnerabilities=str(vulnerabilities),
+        )
+        save(journal, record)
+        save(PENDING, record)
+        if service_was_active:
+            run(['systemctl', 'stop', service], timeout=60)
+        active_processes(root)
+        purge_started = True
+        for name, path in installed.items():
+            if path.is_symlink():
+                raise ValueError(f'Installed catalog root cannot be a symlink: {path}')
+            if path.exists():
+                os.replace(path, backup / name)
+                moved.append(name)
+        record.update(status='purged', service_was_active=service_was_active, moved=moved)
+        save(journal, record)
+        save(PENDING, record)
+        return {'expected': expected, 'moved': moved}
+    except Exception as exc:
+        record.update(status='restoring', error=str(exc))
+        save(journal, record)
+        if purge_started:
+            save(PENDING, record)
+            _restore_catalog_transaction(root, record)
+        else:
+            shutil.rmtree(backup, ignore_errors=True)
+        if service_was_active:
+            run(['systemctl', 'start', service], timeout=60)
+            run(['systemctl', 'is-active', '--quiet', service])
+        PENDING.unlink(missing_ok=True)
+        record.update(status='failed', ended_at=time.time())
+        save(journal, record)
+        _catalog_cleanup(record)
+        raise
+
+
+CATALOG_IMPORT_SCRIPT = r'''
+import json, sys
+from webapp import app_backend
+
+generator_zip, vuln_zip, revision, expected_json = sys.argv[1:5]
+expected = json.loads(expected_json)
+ok, generator_note = app_backend._install_generator_pack_or_bundle(
+    zip_path=generator_zip,
+    pack_label='raistlinJ flag-generators',
+    pack_origin='https://github.com/raistlinJ/flag-generators@' + revision,
+)
+if not ok:
+    raise RuntimeError('Generator catalog import failed: ' + str(generator_note))
+vulnerability = app_backend._install_vuln_catalog_zip_file(
+    zip_file_path=vuln_zip,
+    label='raistlinJ flag-generators Vulhub snapshot',
+    origin='https://github.com/raistlinJ/flag-generators@' + revision,
+)
+packs = app_backend._load_installed_generator_packs_state().get('packs') or []
+items = [item for pack in packs if isinstance(pack, dict) for item in (pack.get('installed') or []) if isinstance(item, dict)]
+flag_generators = sum(str(item.get('kind') or '') == 'flag-generator' for item in items)
+flag_node_generators = sum(str(item.get('kind') or '') == 'flag-node-generator' for item in items)
+vulnerabilities = int(vulnerability.get('compose_count') or 0)
+actual = {
+    'vulnerabilities': vulnerabilities,
+    'flag_generators': flag_generators,
+    'flag_node_generators': flag_node_generators,
+}
+if actual != expected:
+    raise RuntimeError(
+        f'Catalog verification failed: expected={expected}, actual={actual}'
+    )
+print('CATALOG_REINSTALL_JSON:' + json.dumps({
+    'revision': revision,
+    **actual,
+    'generator_import': str(generator_note),
+}))
+'''
+
+
+def install_catalogs(root, directory, pending):
+    """Import and verify a prepared transaction, retaining rollback data."""
+    if pending.get('status') != 'purged':
+        raise ValueError('Catalog transaction is not ready for installation')
+    token = pending.get('token', '')
+    if not re.fullmatch('[0-9a-f]{32}', token):
+        raise ValueError('Catalog transaction has an invalid request ID')
+    python = Path(pending['python'])
+    owner = pwd.getpwuid(root.stat().st_uid).pw_name
+    journal = directory / 'state.json'
+    try:
+        completed = run(
+            [str(python), '-c', CATALOG_IMPORT_SCRIPT, pending['generators'],
+             pending['vulnerabilities'], pending['catalog_revision'],
+             json.dumps(pending['expected'], separators=(',', ':'))],
+            cwd=root,
+            user=owner,
+            timeout=1500,
+        )
+        try:
+            lines = completed.stdout.decode().splitlines()
+            payload = next(line.removeprefix('CATALOG_REINSTALL_JSON:') for line in reversed(lines)
+                           if line.startswith('CATALOG_REINSTALL_JSON:'))
+            result = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError, StopIteration) as exc:
+            raise ValueError('ScenarioForge catalog importer returned invalid output') from exc
+        if not isinstance(result, dict) or result.get('revision') != pending['catalog_revision']:
+            raise ValueError('ScenarioForge catalog importer did not verify the requested revision')
+        pending.update(status='installed', result=result)
+        save(journal, pending)
+        save(PENDING, pending)
+        return result
+    except Exception as exc:
+        pending.update(status='restoring', error=str(exc))
+        save(journal, pending)
+        save(PENDING, pending)
+        if pending.get('service_was_active'):
+            run(['systemctl', 'stop', pending['service']], check=False, timeout=60)
+        _restore_catalog_transaction(root, pending)
+        if pending.get('service_was_active'):
+            run(['systemctl', 'start', pending['service']], timeout=60)
+            run(['systemctl', 'is-active', '--quiet', pending['service']])
+        PENDING.unlink(missing_ok=True)
+        pending.update(status='failed', ended_at=time.time())
+        save(journal, pending)
+        _catalog_cleanup(pending)
+        raise
+
+
+def finalize_catalog_reinstall(root, directory, pending):
+    """Restart ScenarioForge and commit a verified catalog transaction."""
+    if pending.get('status') != 'installed' or not isinstance(pending.get('result'), dict):
+        raise ValueError('Catalog transaction is not ready to finalize')
+    journal = directory / 'state.json'
+    try:
+        if pending.get('service_was_active'):
+            run(['systemctl', 'start', pending['service']], timeout=60)
+            run(['systemctl', 'is-active', '--quiet', pending['service']])
+        pending.update(status='completed', ended_at=time.time())
+        save(journal, pending)
+        save(PENDING, pending)
+        result = pending['result']
+        _catalog_cleanup(pending)
+        PENDING.unlink(missing_ok=True)
+        return result
+    except Exception as exc:
+        pending.update(status='restoring', error=str(exc))
+        save(journal, pending)
+        save(PENDING, pending)
+        if pending.get('service_was_active'):
+            run(['systemctl', 'stop', pending['service']], check=False, timeout=60)
+        _restore_catalog_transaction(root, pending)
+        if pending.get('service_was_active'):
+            run(['systemctl', 'start', pending['service']], timeout=60)
+            run(['systemctl', 'is-active', '--quiet', pending['service']])
+        PENDING.unlink(missing_ok=True)
+        pending.update(status='failed', ended_at=time.time())
+        save(journal, pending)
+        _catalog_cleanup(pending)
+        raise
+
+
+def reinstall_catalogs(root, directory, archive, *, token, revision, python, service):
+    """Replace all catalogs as one call; retained for direct/offline callers."""
+    prepare_catalog_reinstall(
+        root, directory, archive, token=token, revision=revision, python=python, service=service)
+    pending = read(PENDING)
+    install_catalogs(root, directory, pending)
+    return finalize_catalog_reinstall(root, directory, read(PENDING))
+
+
+def recover_interrupted_catalog_reinstall(root, directory, pending):
+    """Restore the pre-reinstall catalog roots after a guest/process interruption."""
+    if not isinstance(pending, dict) or pending.get('operation') != 'catalog-reinstall':
+        raise ValueError('Interrupted maintenance must be recovered before reinstalling catalogs')
+    if pending.get('root') != str(root):
+        raise ValueError('Interrupted catalog maintenance belongs to another application checkout')
+    token = str(pending.get('token') or '')
+    if not re.fullmatch('[0-9a-f]{32}', token):
+        raise ValueError('Interrupted catalog maintenance has an invalid recovery record')
+    backup = directory / (token + '-catalog-backup')
+    if str(backup) != str(pending.get('backup') or '') or backup.is_symlink():
+        raise ValueError('Interrupted catalog backup is unavailable; repair the ScenarioForge VM manually')
+    service = pending.get('service')
+    service_was_active = pending.get('service_was_active') is True
+    if service and not re.fullmatch(r'[A-Za-z0-9_.@-]+\.service', service):
+        raise ValueError('Interrupted catalog maintenance has an invalid service record')
+    if service_was_active:
+        run(['systemctl', 'stop', service], timeout=60)
+    if pending.get('status') == 'completed':
+        _catalog_cleanup(pending)
+        if service_was_active:
+            run(['systemctl', 'start', service], timeout=60)
+            run(['systemctl', 'is-active', '--quiet', service])
+        PENDING.unlink(missing_ok=True)
+        return
+    if not backup.is_dir():
+        raise ValueError('Interrupted catalog backup is unavailable; repair the ScenarioForge VM manually')
+    _restore_catalog_transaction(root, pending)
+    if service_was_active:
+        run(['systemctl', 'start', service], timeout=60)
+        run(['systemctl', 'is-active', '--quiet', service])
+    _catalog_cleanup(pending)
+    PENDING.unlink(missing_ok=True)
 
 
 def save(path, data):
@@ -357,13 +747,15 @@ def dispatch(data):
     token = data.get('token', '')
     if not re.fullmatch('[0-9a-f]{32}', token):
         raise ValueError('Invalid maintenance request ID')
-    if op == 'app_stage':
+    if op in ('app_stage', 'catalog_stage'):
         # Exclusive upload destination; retries cannot overwrite another request.
-        upload = directory / (token + '.bundle')
+        suffix = '.bundle' if op == 'app_stage' else '.catalogs.zip'
+        upload = directory / (token + suffix)
         if upload.exists() or upload.is_symlink():
-            raise ValueError('Upload already exists; start a fresh update request')
+            raise ValueError('Upload already exists; start a fresh maintenance request')
         return {'path': str(upload)}
-    if op not in ('app_update', 'app_rollback'):
+    if op not in ('app_update', 'app_rollback', 'catalog_reinstall',
+                  'catalog_prepare', 'catalog_install', 'catalog_finalize'):
         raise ValueError('Unknown maintenance operation')
     service = data.get('service')
     if service and not re.fullmatch(r'[A-Za-z0-9_.@-]+\.service', service):
@@ -378,6 +770,41 @@ def dispatch(data):
         current = identity(root, role)
         if data.get('expected_revision') != current['revision']:
             raise ValueError('Installed revision changed; inspect the application again')
+        if op in ('catalog_reinstall', 'catalog_prepare', 'catalog_install', 'catalog_finalize'):
+            if role != 'scenarioforge':
+                raise ValueError('Catalog reinstall is available only for ScenarioForge')
+            if op in ('catalog_reinstall', 'catalog_prepare') and pending:
+                recover_interrupted_catalog_reinstall(root, directory, pending)
+                pending = None
+            if op in ('catalog_install', 'catalog_finalize'):
+                if not pending or pending.get('token') != token or pending.get('root') != str(root):
+                    raise ValueError('Prepared catalog transaction is unavailable')
+                if pending.get('catalog_revision') != data.get('catalog_revision'):
+                    raise ValueError('Prepared catalog revision changed')
+                if op == 'catalog_install':
+                    result = install_catalogs(root, directory, pending)
+                else:
+                    result = finalize_catalog_reinstall(root, directory, pending)
+                return dict(identity(root, role), root=str(root), catalogs=result, update=read(journal))
+            archive = directory / (token + '.catalogs.zip')
+            if archive.is_symlink() or not archive.is_file():
+                raise ValueError('Catalog archive is missing')
+            if hashlib.sha256(archive.read_bytes()).hexdigest() != data.get('sha256'):
+                raise ValueError('Catalog archive checksum mismatch')
+            prepared = prepare_catalog_reinstall(
+                root,
+                directory,
+                archive,
+                token=token,
+                revision=data.get('catalog_revision'),
+                python=python,
+                service=service,
+            )
+            if op == 'catalog_prepare':
+                return dict(identity(root, role), root=str(root), **prepared, update=read(journal))
+            result = install_catalogs(root, directory, read(PENDING))
+            result = finalize_catalog_reinstall(root, directory, read(PENDING))
+            return dict(identity(root, role), root=str(root), catalogs=result, update=read(journal))
         if previous and previous['status'] in ('activating', 'restoring') and op != 'app_rollback':
             raise ValueError('Previous maintenance was interrupted; inspect guest state before another update')
         if PENDING.exists() and (op != 'app_rollback' or read(PENDING).get('root') != str(root)):

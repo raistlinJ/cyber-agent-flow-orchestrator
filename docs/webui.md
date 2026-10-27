@@ -238,6 +238,63 @@ if popups are blocked, the dashboard offers a new-tab link.
 
 ![Separate progress window with simulated execution](images/progress-window.png)
 
+### How the Visualize canvas gets progress
+
+```mermaid
+flowchart LR
+    SF[ScenarioForge<br/>challenge plan + criteria]
+    CAF[Cyber-Agent-Flow<br/>events, tools, outputs]
+    MON[Progress Monitor<br/>LLM reviews evidence]
+    ART[Saved run artifacts<br/>progress + assistance]
+    ORCH[Orchestrator<br/>builds visual snapshot]
+    SSE[SSE live stream]
+    UI[Visualize canvas]
+
+    SF --> ART
+    CAF --> ART
+    ART --> MON
+    MON --> ART
+    ART --> ORCH
+    ORCH --> SSE
+    SSE --> UI
+```
+
+The preparation and execution canvases use related but distinct evidence:
+
+1. **Lab preparation** comes from recorded orchestrator phases and preflight
+   checks for CAF, ScenarioForge, CORE, package transfer, SSH/gRPC and HITL
+   configuration. Green means that the listed check passed; opening the canvas
+   does not run a new VM or network probe.
+2. **Planned challenge nodes** come from the frozen ScenarioForge challenge
+   plan, dependencies and rubric criteria. A planned node is context, not proof
+   that CAF discovered or reached it.
+3. **Live CAF activity** comes from host-collected CAF events, including model
+   status, tool calls and tool results. Solid arrows use literal IP addresses or
+   CIDRs recorded in tool arguments. Thinking and responding indicators appear
+   only when CAF emits the corresponding event.
+4. **Intermediate progress** comes from the host-side Progress Monitor. At
+   between-turn checkpoints, its judge reviews a bounded snapshot of collected
+   execution evidence. Findings require citations into that evidence; agent
+   claims, private reference material and unreleased solutions do not establish
+   completion. Valid observations and accumulated criteria are saved in
+   `progress-monitor.json`.
+5. **Hints and solutions** come only from release events saved in
+   `assistance.json`. Unreleased coaching remains private, and receiving help
+   does not itself solve a challenge.
+6. **Final results** are scored independently over the completed trace. Once
+   available, final criterion findings replace provisional Monitor findings in
+   the node display.
+
+The orchestrator combines these saved artifacts into a bounded visualization
+snapshot. Active Progress windows receive updated snapshots through Server-Sent
+Events; reconnects resynchronize with a complete snapshot, and unavailable SSE
+falls back to polling. Blinking therefore means recent recorded activity. It is
+not packet capture, continuous VM introspection or proof that an action succeeded.
+
+If a Monitor checkpoint fails or times out, the canvas reports that the last
+supported observations are being shown. It preserves the previous validated
+state instead of guessing progress or clearing supported findings.
+
 The progress workspace keeps **Phase progress** and adds **Visualize**, an
 interactive attack graph built from the frozen ScenarioForge challenge plan.
 Select a trial or run configuration, zoom, drag to pan, use **Fit graph**, or
@@ -584,6 +641,18 @@ maintenance lock is held. No application restart is automatic: open a new CAF
 session or restart a long-running app as appropriate. CAF browser-saved settings,
 explicit CLI flags and process environment are not imported or overwritten by
 this file editor and can take precedence for interactive app sessions.
+
+On **Applications**, the ScenarioForge card includes a separate **Reinstall all
+catalogs** action. It purges and replaces the installed vulnerability,
+flag-generator, and flag-node-generator catalogs from the latest configured
+`flag-generators` repository revision. The confirmation warns that custom catalog
+changes will be lost. ScenarioForge is stopped during import, all three catalog
+counts are verified, and the previous directories are restored automatically if
+the import or service restart fails. Maintenance history shows the current step,
+overall completion, and every stage from host download through service restart.
+Archive transfer includes acknowledged bytes, percentage, and throughput. Active
+maintenance continues to update every two seconds when general dashboard refresh
+is set to **Never**.
 
 In PVE mode, **Choose your lab VMs** lists only your available QEMU VMs on the
 current node. Save your ScenarioForge, participant and CoreVM selections; they

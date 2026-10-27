@@ -85,9 +85,9 @@ $('download-console').addEventListener('click',()=>{const url=URL.createObjectUR
 const refreshPeriods=['0','1','2','5','10'];
 try{const saved=localStorage.getItem('caf-refresh-minutes');if(refreshPeriods.includes(saved))$('refresh-period').value=saved;}catch{}
 function autoRefreshEnabled(){return Number($('refresh-period').value)>0;}
-function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||(autoRefreshEnabled()&&(foregroundChecks||waitingForMaintenance))||redirecting;}
+function isBusy(){return !initialized||blockingRefresh||Boolean(operation)||waitingForMaintenance||(autoRefreshEnabled()&&foregroundChecks)||redirecting;}
 function syncBusy(){
- const busy=isBusy(), loading=busy||fetching||(autoRefreshEnabled()&&waitingForObservation);if(loading&&!wasBusy)busySince=performance.now();wasBusy=loading;
+ const busy=isBusy(), loading=busy||fetching||waitingForMaintenance||(autoRefreshEnabled()&&waitingForObservation);if(loading&&!wasBusy)busySince=performance.now();wasBusy=loading;
  $('experiment-controls').disabled=busy;$('cancel-experiment').disabled=Boolean(operation)||experimentCreating;
  $('dashboard-controls').disabled=busy;$('dashboard-controls').setAttribute('aria-busy',String(busy));$('sign-out').disabled=busy;
  const lastChange=(snapshot?.updates?.jobs||[]).find(job=>job.action!=='inspect'&&(snapshot.updates.applications||[]).some(app=>app.role===job.role&&app.vmid===job.vmid));
@@ -97,7 +97,7 @@ function syncBusy(){
  let label, percent=null;
  if(redirecting)label='Opening sign-in…';
  else if(operation)label=operation;
- else if(autoRefreshEnabled()&&waitingForMaintenance){const job=(snapshot?.updates?.jobs||[]).find(job=>['queued','running'].includes(job.status));label=job?.message||'Retrieving application state…';const transfer=job?.console?.transfer;if(transfer&&!transfer.verified&&label.startsWith('Transferring verified'))label+=` · ${transfer.percent}% of file acknowledged (${transfer.sent_bytes}/${transfer.total_bytes} bytes)`;}
+ else if(waitingForMaintenance){const job=(snapshot?.updates?.jobs||[]).find(job=>['queued','running'].includes(job.status));label=job?.message||'Retrieving application state…';const transfer=job?.console?.transfer;if(job?.progress)percent=job.progress.percent;if(transfer&&!transfer.verified&&(job?.progress?.current==='transfer'||(!job?.progress&&label.startsWith('Transferring verified')))){label+=` · ${transfer.percent}% (${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes)`;if(job?.progress?.current==='transfer'){const complete=job.progress.steps.filter(step=>step.status==='completed').length;percent=Math.round(100*(complete+Number(transfer.percent||0)/100)/job.progress.total);}}}
  else if(autoRefreshEnabled()&&waitingForObservation){if(snapshot?.loading){const info=snapshot.loading;percent=info.percent;label=`${info.status} · ${info.completed}/${info.total} VM checks complete · ${percent}%`;}else label='Checking VM power, guest access and applications…';}
  else if(fetching||!initialized)label=csrfToken?'Retrieving dashboard and verifying VM access…':'Checking your login session…';
  else if(failed){label='Loading failed. Use Refresh view to try again.';bar.hidden=true;}
@@ -377,7 +377,7 @@ function experimentMissingFields(){
  if(roles.some(role=>!snapshot.roles?.[role]))return 'Select and save '+(scenario?'ScenarioForge and participant':'ScenarioForge, participant and CoreVM')+' roles in Lab setup.';
  if(scenario){
   const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);
-  if(scenarioChoiceVM!==snapshot.roles.scenarioforge||!choice?.resolved_chain)return 'Choose a resolved scenario on the Scenario step.';
+  if(scenarioChoiceVM!==snapshot.roles.scenarioforge||!choice?.resolved_chain)return choice?.resolution_error||'Choose a resolved scenario on the Scenario step.';
   if(!$('scenario-allowed').value.trim())return 'Enter allowed target IPs or CIDRs on the Agent & network step.';
  }
  const taskError=taskValidationMessage();if(taskError)return 'Evaluation: '+taskError;
@@ -455,7 +455,7 @@ function wizardStepProblem(step){
  }
  if(step.id==='scenario'&&scenario){
   if(scenarioChoiceVM!==snapshot.roles?.scenarioforge||!$('scenario-selection').value)return 'Load and select a scenario from your ScenarioForge VM.';
-  if(!scenarioChoices.find(item=>item.id===$('scenario-selection').value)?.resolved_chain)return 'Resolve and save the scenario’s Flow chain in ScenarioForge first.';
+ const choice=scenarioChoices.find(item=>item.id===$('scenario-selection').value);if(!choice?.resolved_chain)return choice?.resolution_error||'Resolve and save the scenario’s Flow chain in ScenarioForge first.';
  }
  if(step.id==='caf'){
   if(scenario&&!$('scenario-allowed').value.trim())return 'Enter allowed target IPs or CIDRs.';
@@ -719,7 +719,7 @@ $('load-scenarios').addEventListener('click',async()=>{
   showScenarioChoices(result);
   const newest=scenarioChoices.find(item=>item.resolved_chain);
   if(newest){$('scenario-selection').value=newest.id;describeScenarioSelection();taskScenarioChanged();$('scenario-selection-info').textContent='Selected newest resolved scenario on VM '+result.vmid+': '+newest.path+' · '+newest.scenario+' · modified '+scenarioModifiedLabel(newest)+' · '+newest.chain_length+' Flow steps'+(result.truncated?' · searched the 50 newest matches':'');}
-  else $('scenario-selection-info').textContent=result.items.length?'Saved XML files were found on VM '+result.vmid+', but none has a resolved Flow chain. Finish and save Flag Sequencing, then Generate Preview Plan and reload.':'No saved XML found in '+result.roots.join(', ')+'.';
+  else $('scenario-selection-info').textContent=result.items.length?'Saved XML files were found on VM '+result.vmid+', but none is executable. In Flag Sequencing, run Generate so values are resolved, Save XML, then reload.':'No saved XML found in '+result.roots.join(', ')+'.';
  }catch(error){$('scenario-selection-info').textContent=error.message;}
  finally{operation=null;syncBusy();schedulePoll();}
 });
@@ -728,7 +728,7 @@ function showScenarioChoices(result){
  scenarioChoices=[...result.items].sort((left,right)=>scenarioModifiedTime(right)-scenarioModifiedTime(left)||String(left.scenario||'').localeCompare(String(right.scenario||''))||String(left.path||'').localeCompare(String(right.path||'')));scenarioChoiceVM=result.vmid;taskScenarioChanged();
  const select=$('scenario-selection');select.replaceChildren(new Option('Choose a saved scenario',''));
  $('scenario-allowed').value='';
- for(const item of scenarioChoices){const option=new Option(scenarioModifiedLabel(item)+' — '+item.scenario+' — '+item.path.split('/').pop()+(item.resolved_chain?'':' (resolve Flow chain first)'),item.id);option.disabled=!item.resolved_chain;select.add(option);}
+ for(const item of scenarioChoices){const pending=item.chain_saved?'resolve and save runtime values first':'resolve Flow chain first';const option=new Option(scenarioModifiedLabel(item)+' — '+item.scenario+' — '+item.path.split('/').pop()+(item.resolved_chain?'':` (${pending})`),item.id);option.disabled=!item.resolved_chain;select.add(option);}
 }
 async function sendScenario(file){
  if(isBusy())return;
@@ -822,6 +822,27 @@ function syncUpdateControls(loadingLabel){
   }
  }
 }
+function renderMaintenanceProgress(job,row){
+ const state=job.progress;if(!state?.steps?.length)return;
+ const transfer=job.console?.transfer;
+ const completed=state.steps.filter(step=>step.status==='completed').length;
+ const currentFraction=state.current==='transfer'&&transfer&&!transfer.verified?Math.max(0,Math.min(1,Number(transfer.percent||0)/100)):0;
+ const percent=job.status==='completed'?100:Math.round(100*(completed+currentFraction)/state.steps.length);
+ const block=el('div',null,'maintenance-progress');
+ const heading=el('div',null,'maintenance-progress-heading');
+ heading.append(el('strong',job.status==='completed'?`${state.total} / ${state.total} steps complete`:`Step ${Math.min(state.current_index||1,state.total)} / ${state.total}`),el('span',`${percent}% overall`));
+ const overall=el('progress');overall.max=100;overall.value=percent;overall.setAttribute('aria-label','Catalog reinstall overall progress');
+ block.append(heading,overall);
+ const list=el('ol',null,'maintenance-steps');
+ for(const step of state.steps){
+  const item=el('li',null,`maintenance-step ${step.status}`),mark=el('span',step.status==='completed'?'✓':step.status==='failed'?'!':step.status==='running'?'●':'','maintenance-step-mark'),copy=el('span',null,'maintenance-step-copy');
+  copy.append(el('strong',step.label));
+  if(step.id==='transfer'&&transfer){copy.append(el('small',`${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes · ${transfer.percent}%${transfer.bytes_per_second?` · ${(transfer.bytes_per_second/1024).toFixed(1)} KiB/s`:''}`));}
+  else if(step.status==='failed'&&step.detail)copy.append(el('small',step.detail));
+  item.append(mark,copy);list.append(item);
+ }
+ block.append(list);row.append(block);
+}
 function renderUpdates(data){
  const updates=data.updates;
  $('updates-panel').hidden=false;$('applications-unavailable').hidden=true;
@@ -870,13 +891,25 @@ function renderUpdates(data){
    const status=el('p',null,'small');status.id=`update-status-${app.role}`;card.append(status);input.setAttribute('aria-describedby',status.id);
    const actions=el('div',null,'update-actions');
    for(const [action,defaultTitle] of [['inspect','Check version'],['update','Update'],['rollback','Roll back']]){const force=action==='update'&&known?.installed.modified&&!known.installed.tools_config_replaceable,title=force?'Force update':defaultTitle;const button=el('button',title);button.type='button';button.dataset.updateRole=app.role;button.dataset.updateAction=action;button.setAttribute('aria-describedby',status.id);button.addEventListener('click',()=>{const inspection=force?(updates.jobs||[]).find(job=>job.role===app.role&&job.vmid===app.vmid&&job.action==='inspect'&&job.status==='completed'&&job.installed?.modified):null;maintain(app.role,action,input.value,action==='update'?known:null,inspection);});actions.append(button);}
-   card.append(actions);cards.append(card);
+   card.append(actions);
+   if(app.role==='scenarioforge'&&updates.catalogs){
+    const catalogBox=el('div',null,'catalog-maintenance');
+    catalogBox.append(el('h4','ScenarioForge catalogs'),el('p','Replace the installed vulnerability, flag-generator and flag-node-generator catalogs with the latest revision from the configured catalog repository.','small'));
+    const catalogButton=el('button','Reinstall all catalogs');catalogButton.type='button';catalogButton.dataset.updateRole=app.role;catalogButton.dataset.updateAction='reinstall-catalogs';catalogButton.setAttribute('aria-describedby',status.id);catalogButton.addEventListener('click',()=>reinstallCatalogs(app,updates.catalogs));catalogBox.append(catalogButton);
+    const catalogSource=updates.catalogs||{};catalogBox.append(el('p',`${catalogSource.url||'Configured catalog repository'} · ${catalogSource.ref||'main'}`,'small'));
+    card.append(catalogBox);
+   }else if(app.role==='scenarioforge'){
+    const catalogBox=el('div',null,'catalog-maintenance');
+    catalogBox.append(el('h4','ScenarioForge catalogs'),el('p','Restart the orchestrator server to enable catalog reinstall after updating its files.','small error'));
+    card.append(catalogBox);
+   }
+   cards.append(card);
   }
  }
  const jobs=$('update-jobs');jobs.replaceChildren();
  const latest=updates.jobs?.[0];
  if(latest){$('update-message').textContent=`Latest maintenance · ${latest.role} · VM ${latest.vmid} · ${latest.action}: ${latest.status}. ${latest.error||latest.message}`;$('update-message').classList.toggle('error',['failed','interrupted'].includes(latest.status));}
- for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));if(job.console?.transfer){const transfer=job.console.transfer,progress=el('progress');progress.max=100;progress.value=transfer.percent;progress.setAttribute('aria-label',`${job.role} source bundle upload`);row.append(el('p',`${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes acknowledged · ${transfer.percent}% · ${(transfer.bytes_per_second/1024).toFixed(1)} KiB/s · ${transfer.verified?'Upload checksum verified; see activation outcome below':['queued','running'].includes(job.status)?'Awaiting verified completion':'Transfer stopped; file not verified'}`,'small'),progress);if(!transfer.verified)row.append(el('p',`${transfer.sent_bytes?'Last acknowledgement':'Transfer started'}: ${transfer.updated_at}. Open the troubleshooting console below for command history.`,'small'));}if(job.revision)row.append(el('p',`Target revision: ${job.revision}`,'small'));if(job.action!=='inspect')row.append(el('p',job.status==='completed'?(job.unchanged?'Already up to date; no activation needed':'Activation completed'):['failed','interrupted'].includes(job.status)?'Activation not confirmed. Check version for the current installed revision.':'Activation pending','small'));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
+ for(const job of updates.jobs||[]){const row=el('article',null,'command');row.append(badge(job.status,job.status==='completed'?'good':job.status==='failed'?'warn':''),el('span',` ${job.role} · VM ${job.vmid} · ${job.action}`,'command-title'),el('p',job.message,'small'));renderMaintenanceProgress(job,row);if(job.console?.transfer&&!job.progress){const transfer=job.console.transfer,progress=el('progress');progress.max=100;progress.value=transfer.percent;progress.setAttribute('aria-label',`${job.role} source bundle upload`);row.append(el('p',`${transfer.sent_bytes.toLocaleString()} / ${transfer.total_bytes.toLocaleString()} bytes acknowledged · ${transfer.percent}% · ${(transfer.bytes_per_second/1024).toFixed(1)} KiB/s · ${transfer.verified?'Upload checksum verified; see activation outcome below':['queued','running'].includes(job.status)?'Awaiting verified completion':'Transfer stopped; file not verified'}`,'small'),progress);if(!transfer.verified)row.append(el('p',`${transfer.sent_bytes?'Last acknowledgement':'Transfer started'}: ${transfer.updated_at}. Open the troubleshooting console below for command history.`,'small'));}if(job.revision)row.append(el('p',`${job.action==='reinstall-catalogs'?'Catalog':'Target'} revision: ${job.revision}`,'small'));if(job.action!=='inspect'){const completed=job.action==='reinstall-catalogs'?'Catalog reinstall completed':job.unchanged?'Already up to date; no activation needed':'Activation completed',failed=job.action==='reinstall-catalogs'?'Catalog reinstall not confirmed. The guest restores the previous catalogs after a failed import.':'Activation not confirmed. Check version for the current installed revision.',pending=job.action==='reinstall-catalogs'?'Catalog reinstall pending':'Activation pending';row.append(el('p',job.status==='completed'?completed:['failed','interrupted'].includes(job.status)?failed:pending,'small'));}if(job.catalogs)row.append(el('p',`${job.catalogs.vulnerabilities||0} vulnerabilities · ${job.catalogs.flag_generators||0} flag generators · ${job.catalogs.flag_node_generators||0} flag-node generators`,'small'));if(job.error)row.append(el('p',job.error,'error'));const details=el('details'),summary=el('summary','Details');details.append(summary,el('pre',JSON.stringify(job,null,2)));row.append(details);jobs.append(row);}
  if(!(updates.jobs||[]).length)jobs.append(el('p','No application maintenance recorded for your account.','empty'));
 }
 async function maintain(role,action,ref,known=null,forceConfirmation=null){
@@ -897,6 +930,23 @@ async function maintain(role,action,ref,known=null,forceConfirmation=null){
  finally{maintenanceStarting=false;operation=null;syncBusy();schedulePoll();}
 }
 
+async function reinstallCatalogs(app,catalogSource){
+ if(isBusy()||maintenanceStarting)return;
+ if(rolesDirty){$('update-message').textContent='Save VM role changes before catalog maintenance.';return;}
+ const ref=catalogSource?.ref||'main';
+ const message=`Reinstall every ScenarioForge catalog on VM ${app.vmid} from ${catalogSource?.url||'the configured repository'} at ${ref}?\n\nThis purges the currently installed vulnerability, flag-generator and flag-node-generator catalogs. Custom catalog changes will be lost. The previous catalog directories are restored automatically if import or verification fails.`;
+ if(!window.confirm(message))return;
+ $('update-message').classList.remove('error');
+ maintenanceStarting=true;operation='Submitting ScenarioForge catalog reinstall…';syncBusy();if(snapshot)renderUpdates(snapshot);
+ try{
+  await finishDashboardRead();if(!csrfToken)await loadSession();
+  const response=await apiFetch('/api/applications',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({role:'scenarioforge',action:'reinstall-catalogs',ref,request_id:crypto.randomUUID().replaceAll('-',''),catalog_confirmation:'purge-installed-catalogs'})});
+  const result=await dashboardJSON(response);if(!response.ok){const detail=result.error||`Catalog reinstall request failed (HTTP ${response.status})`;if(response.status===400&&(/process_confirmation|force_confirmation|maintenance action is not enabled/.test(detail)))throw Error('The running orchestrator server does not support catalog reinstall yet. Restart the orchestrator server, reload Applications, and try again.');throw Error(detail);}
+  $('update-message').classList.remove('error');$('update-message').textContent=`Catalog reinstall ${result.id} submitted. Follow download, transfer and import status below.`;await refresh();
+ }catch(error){$('update-message').textContent=error.message;$('update-message').classList.add('error');}
+ finally{maintenanceStarting=false;operation=null;syncBusy();schedulePoll();}
+}
+
 // Progress reads collect an existing check/job without starting another VM probe.
 // Idle automatic refreshes start a new batch at the selected cadence.
 function schedulePoll(){
@@ -904,6 +954,7 @@ function schedulePoll(){
  if(fetching||operation||redirecting)return;
  const active=Boolean(snapshot?.refreshing||waitingForMaintenance||(snapshot?.runs||[]).some(runActive));
  const minutes=Number($('refresh-period').value);
+ if(waitingForMaintenance){pollTimer=setTimeout(()=>{if(!fetching&&!operation&&!redirecting)refresh(false,true);},2000);return;}
  if(!minutes){if((snapshot?.runs||[]).some(runActive))pollTimer=setTimeout(checkExperimentCompletion,5000);return;}
  pollTimer=setTimeout(()=>{if(autoRefreshEnabled()&&!fetching&&!operation&&!redirecting)refresh(!active,true);},active?5000:minutes*60000);
 }

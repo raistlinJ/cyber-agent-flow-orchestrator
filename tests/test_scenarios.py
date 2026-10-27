@@ -13,7 +13,7 @@ from test_pve_auth import pve
 from test_user_access import access, vm
 from test_workflow import lab
 
-XML = b'<Scenarios><Scenario name="Saved lab"><FlowState>{"chain":[{"id":"entry"}]}</FlowState></Scenario><Scenario name="Unresolved"/></Scenarios>'
+XML = b'<Scenarios><Scenario name="Saved lab"><FlowState>{"chain":[{"id":"entry"}],"flag_assignments":[{"node_id":"entry","id":"demo","resolved_outputs":{"Proof(token)":"ready"}}]}</FlowState></Scenario><Scenario name="Unresolved"/></Scenarios>'
 
 
 def test_listing_snapshot_and_stale_selection(tmp_path):
@@ -62,6 +62,22 @@ def test_unresolved_scenario_cannot_snapshot(tmp_path):
     with pytest.raises(ValueError, match='Flow chain'):
         guest.dispatch(dict(op='snapshot', roots=[str(tmp_path)], repo=str(tmp_path), path=str(source),
                             token='a'*32, selection_id=row['id']))
+
+
+def test_saved_chain_without_runtime_values_is_not_executable(tmp_path):
+    source = tmp_path / 'unresolved-runtime.xml'
+    state = dict(flow_enabled=True, chain_ids=['docker-1'], chain=[dict(id='docker-1')],
+                 flag_assignments=[dict(node_id='docker-1', id='generator')])
+    source.write_text('<Scenario name="Missing runtime"><FlowState>' +
+                      json.dumps(state) + '</FlowState></Scenario>')
+    row = guest.inspect(source)[0]
+    assert row['chain_saved'] is True
+    assert row['runtime_ready'] is False
+    assert row['resolved_chain'] is False
+    assert 'runtime values are missing' in row['resolution_error']
+    with pytest.raises(ValueError, match='runtime values are missing'):
+        guest.dispatch(dict(op='snapshot', roots=[str(tmp_path)], repo=str(tmp_path),
+                            path=str(source), token='a'*32, selection_id=row['id']))
 
 
 @pytest.mark.parametrize("real_workflow", [False, True])

@@ -364,7 +364,8 @@ class ScenarioExperiments:
                 raise SampleRequestError('ScenarioForge VM changed; reload its scenarios')
             item = next((row for row in catalogue['items'] if row['id'] == selection_id), None)
             if not item or (not item['resolved_chain'] and _sample_id is None):
-                raise SampleRequestError('Choose a scenario with a saved resolved Flow chain')
+                raise SampleRequestError((item or {}).get('resolution_error') or
+                                         'Choose a scenario with a saved resolved Flow chain')
             sf = self.cfg['scenarioforge']
             authored = definitions
             if authored is None and _sample_id is None:

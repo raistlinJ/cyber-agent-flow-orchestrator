@@ -241,6 +241,17 @@ def test_missing_ambiguous_or_unready_export_rejected(log):
         workflow.export_marker(log)
 
 
+def test_failed_command_surfaces_last_actionable_error():
+    log = '''[remote] Starting CLI execution...\n\
+2026-10-19 01:10:20,764 ERROR root - Flow is enabled, but XML has no resolved Flow runtime values. Run Generate (resolve) and Save XML before Execute.\n'''
+    assert workflow.command_failure_reason(log) == (
+        'Flow is enabled, but XML has no resolved Flow runtime values. '
+        'Run Generate (resolve) and Save XML before Execute.'
+    )
+    traceback = 'Traceback (most recent call last):\nPermissionError: [Errno 13] Permission denied: /private/path\n'
+    assert workflow.command_failure_reason(traceback).startswith('[Errno 13] Permission denied')
+
+
 def test_frozen_artifact_change_blocks_resume(lab):
     config, output, agent, _ = lab
     workflow.run(config, output, agent=agent)

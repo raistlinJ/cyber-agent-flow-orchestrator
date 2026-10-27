@@ -490,9 +490,9 @@ def handler(dashboard, *, auth, proxy_key, origin):
                 elif path == '/api/model-config' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
                     self.respond(200, dashboard.model_configs.exchange(auth.access(token, revalidate=False), data))
                 elif path == '/api/applications' and getattr(dashboard, 'scoped', False) and auth.provider.name in ('pve', 'fusion', 'desktop'):
-                    if (set(data) - {'process_confirmation', 'force_confirmation'} != {'role', 'action', 'ref', 'request_id'}
+                    if (set(data) - {'process_confirmation', 'force_confirmation', 'catalog_confirmation'} != {'role', 'action', 'ref', 'request_id'}
                             or any(not isinstance(v, str) for v in data.values())):
-                        raise UpdateError('Supply role, action, ref, request_id and optional process_confirmation or force_confirmation only')
+                        raise UpdateError('Supply role, action, ref, request_id and an allowed maintenance confirmation only')
                     self.respond(202, dashboard.maintain(auth.access(token, revalidate=False), data))
                 else:
                     self.respond(404, {'error': 'No such action is enabled'})
