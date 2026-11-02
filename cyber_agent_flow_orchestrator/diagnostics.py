@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
 
 from cyber_agent_flow_eval import integration as ev
@@ -29,14 +30,20 @@ class Trace:
         self.transfer = None
         self.last_write = 0
         self.write_failed = False
+        self._lock = threading.RLock()
 
     def emit(self, kind, message, *, force=False):
-        self.sequence += 1
-        self.events.append(dict(sequence=self.sequence, at=datetime.now(timezone.utc).isoformat(),
-                                kind=kind, message=clean(message)))
-        self.flush(force=force)
+        with self._lock:
+            self.sequence += 1
+            self.events.append(dict(sequence=self.sequence, at=datetime.now(timezone.utc).isoformat(),
+                                    kind=kind, message=clean(message)))
+            self.flush(force=force)
 
     def flush(self, *, force=False):
+        with self._lock:
+            self._flush(force=force)
+
+    def _flush(self, *, force=False):
         if force or time.monotonic() - self.last_write >= 1:
             try:
                 ev.write_json(self.path, dict(events=list(self.events), transfer=self.transfer,
@@ -53,6 +60,21 @@ class Trace:
 
     def instrument(self, agent):
         call, qm, put = agent.call, agent.qm, agent.put
+        previous_progress = getattr(agent, 'transfer_progress', None)
+
+        def transfer_progress(sent, total, transport):
+            if previous_progress:
+                previous_progress(sent, total, transport)
+            with self._lock:
+                if self.transfer is None:
+                    return
+                elapsed = time.monotonic() - self.transfer_start
+                self.transfer.update(sent_bytes=sent, total_bytes=total,
+                                     percent=round(100 * sent / max(1, total), 1),
+                                     elapsed_seconds=round(elapsed, 2), transport=transport,
+                                     bytes_per_second=round(sent / max(.001, elapsed), 1),
+                                     updated_at=datetime.now(timezone.utc).isoformat())
+                self.emit('transfer', f'Transferred {sent:,}/{total:,} bytes via {transport}; verifying at completion')
 
         def traced_qm(args, **options):
             # qm guest exec contains an entire Python script and an RPC JSON
@@ -100,7 +122,11 @@ class Trace:
             self.emit('transfer', f'Uploading {len(content)} bytes to VM {vmid}: {path}; waiting for first acknowledgement', force=True)
             try:
                 result = put(vmid, path, content)
-                self.transfer.update(verified=True, percent=100, sent_bytes=len(content))
+                elapsed = time.monotonic() - self.transfer_start
+                self.transfer.update(verified=True, percent=100, sent_bytes=len(content),
+                                     elapsed_seconds=round(elapsed, 2),
+                                     bytes_per_second=round(len(content) / max(.001, elapsed), 1),
+                                     updated_at=datetime.now(timezone.utc).isoformat())
                 self.emit('transfer', 'Upload complete; guest size and SHA-256 verified', force=True)
                 return result
             except Exception:
@@ -108,4 +134,5 @@ class Trace:
                 raise
 
         agent.qm, agent.call, agent.put = traced_qm, traced_call, traced_put
+        agent.transfer_progress = transfer_progress
         return agent

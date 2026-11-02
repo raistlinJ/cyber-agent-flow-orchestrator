@@ -20,7 +20,8 @@ def test_transfer_trace_tracks_acknowledgements_and_verification_without_payload
                 data = json.loads(input_data if input_data is not None else args[-1])
                 observed.append((data['op'], trace.transfer['sent_bytes']))
                 if data['op'] == 'write':
-                    self.output = {'written': len(base64.b64decode(data['content']))}
+                    self.output = ({'size': len(content), 'sha256': 'wrong' if mismatch else hashlib.sha256(content).hexdigest()}
+                                   if 'size' in data else {'written': len(base64.b64decode(data['content']))})
                 else:
                     self.output = {'size': len(content), 'sha256': 'wrong' if mismatch else hashlib.sha256(content).hexdigest()}
                 return {'pid': 123}
@@ -35,7 +36,7 @@ def test_transfer_trace_tracks_acknowledgements_and_verification_without_payload
     else:
         agent.put(101, '/tmp/source.bundle', content)
     record = json.loads(trace.path.read_text())
-    assert observed == [('write', 0), ('write', CHUNK), ('stat', len(content))]
+    assert observed == [('write', 0), ('write', CHUNK)]
     assert record['transfer']['sent_bytes'] == len(content)
     assert record['transfer']['verified'] is not mismatch
     assert record['transfer']['percent'] == 100
@@ -83,3 +84,37 @@ def test_optional_trace_write_failure_does_not_interrupt_operation(tmp_path, mon
     monkeypatch.setattr('cyber_agent_flow_orchestrator.diagnostics.ev.write_json', fail)
     trace.emit('status', 'Guest operation continues', force=True)
     assert trace.write_failed
+
+
+@pytest.mark.parametrize('fails', [False, True])
+def test_tls_transfer_trace_reports_progress_and_verifies_only_on_success(tmp_path, fails):
+    trace = Trace(tmp_path)
+    progress_seen = []
+
+    class Agent:
+        def call(self, *args, **kwargs): return {}
+        def qm(self, *args, **kwargs): return {}
+        def put(self, vmid, path, content):
+            import threading
+            def report():
+                self.transfer_progress(len(content), len(content), 'fusion-tls')
+                progress_seen.append(dict(trace.transfer))
+            worker = threading.Thread(target=report)
+            worker.start()
+            worker.join()
+            if fails:
+                raise ValueError('checksum mismatch')
+
+    agent = trace.instrument(Agent())
+    if fails:
+        with pytest.raises(ValueError, match='checksum mismatch'):
+            agent.put(9402, '/tmp/archive', b'PRIVATE_BUNDLE')
+    else:
+        agent.put(9402, '/tmp/archive', b'PRIVATE_BUNDLE')
+    assert progress_seen[0]['transport'] == 'fusion-tls'
+    assert progress_seen[0]['percent'] == 100
+    assert progress_seen[0]['verified'] is False
+    saved = json.loads(trace.path.read_text())
+    assert saved['transfer']['verified'] is not fails
+    assert saved['transfer']['bytes_per_second'] > 0
+    assert 'PRIVATE_BUNDLE' not in trace.path.read_text()

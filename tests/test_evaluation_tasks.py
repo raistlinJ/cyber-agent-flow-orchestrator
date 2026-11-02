@@ -30,7 +30,9 @@ def source(tmp_path):
     root = ET.Element('Scenarios')
     for name in ['Selected', 'Other']:
         node = ET.SubElement(ET.SubElement(root,'Scenario',name=name),'FlowState')
-        node.text = json.dumps({'chain':[{'id':'7','ipv4':'10.77.0.10'}], 'evaluation_tasks':[TASKS[0]], 'keep':'artifact-source'})
+        node.text = json.dumps({'flow_enabled':False,
+            'chain':[{'id':'7','ipv4':'10.77.0.10'}],
+            'evaluation_tasks':[TASKS[0]], 'keep':'artifact-source'})
     ET.ElementTree(root).write(path)
     return path
 
@@ -294,6 +296,7 @@ def test_create_without_explicit_tasks_freezes_effective_contract(pve, lab, tmp_
         node = root.find('./Scenario/FlowState')
         state = json.loads(node.text)
         del state['evaluation_tasks']
+        state['flow_enabled'] = True
         # No flag: completion must come from the scenario-derived rubric.
         state['flag_assignments'] = [dict(node_id='7', resolved_outputs={'Proof(token)': 'private-proof'})]
         node.text = json.dumps(state)

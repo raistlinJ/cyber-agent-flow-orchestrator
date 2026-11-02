@@ -229,3 +229,14 @@ time, assistance waiting and total worker duration. A solution-exhausted challen
 can be deferred while independent steps proceed; it remains unverified and does
 not unlock dependent steps. ScenarioForge packages with a challenge plan must pass
 the `challenge_access` documentation check as well as runtime readiness checks.
+
+### Evidence-grounded teammate assistance
+
+ScenarioForge's private challenge plan can separate a release into four fields:
+a cited monitor observation, an authored interpretation, an authored next
+action, and an authored success signal. The judge supplies only the observation
+from execution evidence. The remaining fields come from the frozen generator or
+vulnerability catalog, so the intervention is reproducible and the judge does
+not improvise an exploit. More than one ordered coaching entry may exist at a
+tier. The visualization shows these fields separately and preserves their
+provenance and citations in the run bundle.

@@ -238,6 +238,63 @@ if popups are blocked, the dashboard offers a new-tab link.
 
 ![Separate progress window with simulated execution](images/progress-window.png)
 
+### How the Visualize canvas gets progress
+
+```mermaid
+flowchart LR
+    SF[ScenarioForge<br/>challenge plan + criteria]
+    CAF[Cyber-Agent-Flow<br/>events, tools, outputs]
+    MON[Progress Monitor<br/>LLM reviews evidence]
+    ART[Saved run artifacts<br/>progress + assistance]
+    ORCH[Orchestrator<br/>builds visual snapshot]
+    SSE[SSE live stream]
+    UI[Visualize canvas]
+
+    SF --> ART
+    CAF --> ART
+    ART --> MON
+    MON --> ART
+    ART --> ORCH
+    ORCH --> SSE
+    SSE --> UI
+```
+
+The preparation and execution canvases use related but distinct evidence:
+
+1. **Lab preparation** comes from recorded orchestrator phases and preflight
+   checks for CAF, ScenarioForge, CORE, package transfer, SSH/gRPC and HITL
+   configuration. Green means that the listed check passed; opening the canvas
+   does not run a new VM or network probe.
+2. **Planned challenge nodes** come from the frozen ScenarioForge challenge
+   plan, dependencies and rubric criteria. A planned node is context, not proof
+   that CAF discovered or reached it.
+3. **Live CAF activity** comes from host-collected CAF events, including model
+   status, tool calls and tool results. Solid arrows use literal IP addresses or
+   CIDRs recorded in tool arguments. Thinking and responding indicators appear
+   only when CAF emits the corresponding event.
+4. **Intermediate progress** comes from the host-side Progress Monitor. At
+   between-turn checkpoints, its judge reviews a bounded snapshot of collected
+   execution evidence. Findings require citations into that evidence; agent
+   claims, private reference material and unreleased solutions do not establish
+   completion. Valid observations and accumulated criteria are saved in
+   `progress-monitor.json`.
+5. **Hints and solutions** come only from release events saved in
+   `assistance.json`. Unreleased coaching remains private, and receiving help
+   does not itself solve a challenge.
+6. **Final results** are scored independently over the completed trace. Once
+   available, final criterion findings replace provisional Monitor findings in
+   the node display.
+
+The orchestrator combines these saved artifacts into a bounded visualization
+snapshot. Active Progress windows receive updated snapshots through Server-Sent
+Events; reconnects resynchronize with a complete snapshot, and unavailable SSE
+falls back to polling. Blinking therefore means recent recorded activity. It is
+not packet capture, continuous VM introspection or proof that an action succeeded.
+
+If a Monitor checkpoint fails or times out, the canvas reports that the last
+supported observations are being shown. It preserves the previous validated
+state instead of guessing progress or clearing supported findings.
+
 The progress workspace keeps **Phase progress** and adds **Visualize**, an
 interactive attack graph built from the frozen ScenarioForge challenge plan.
 Select a trial or run configuration, zoom, drag to pan, use **Fit graph**, or
@@ -286,6 +343,9 @@ preparation-check details, status and legend sections also collapse. Pane sizes
 and main collapse choices persist in the browser, independently of experiment
 configuration. Clicking a node reopens its details panel.
 
+Run state, last-update time and streaming/polling status appear beside **Run
+monitor**, above the canvases. The dock has no status footer covering its content.
+
 The bottom panel provides **Selected node**, **Transcripts**, **Hints & solutions**
 and **Run log** tabs. The troubleshooting console is available in Phase progress.
 Each output scrolls
@@ -319,7 +379,7 @@ one line high, leaving the rest of the dock for output.
 Each pane scrolls independently. **Follow latest** pins new output to the bottom;
 scrolling up pauses following for that pane. **Latest** resumes it. These choices
 and scroll positions are remembered per selected trial during the window session.
-Updates reuse the existing five-second host status poll, including when dashboard
+Updates use the shared SSE host-status feed (with polling fallback), including when dashboard
 refresh is Never, with no extra guest calls. Transcript updates do not redraw the
 graph or replace unchanged log entries. On narrow screens the panes stack.
 Provider-emitted reasoning is shown when available; judge output remains visible
@@ -396,7 +456,7 @@ is explicitly an interface/configuration check, not an end-to-end target probe.
 Preparation is visible before trials or exported tasks exist, and does not
 reclassify when a later trial fails. Opening it adds no VM probes.
 
-The tab refreshes the same host-saved status every five seconds while active,
+The tab streams host-saved status changes over Server-Sent Events (SSE) while active,
 without extra VM probes or model calls from opening the graph. Selected challenge,
 trial and zoom survive updates. Update both the orchestrator and
 `cyber-agent-flow-eval` on the host for new observation records; existing runs can
@@ -416,8 +476,9 @@ continue to work independently.
   and when that stage was last recorded, when supported by the host evaluator.
 - Per-trial outcomes and scores, recent timestamped events, and a link to results.
 - Recorded trial errors appear directly below the trial table and in results.
-  Both windows refresh saved host data every 5 seconds during active execution
-  and every minute after completion; Refresh reloads immediately. These reads
+  Progress streams saved host data; Results refreshes every 5 seconds during active
+  execution. After completion, both follow the dashboard refresh preference
+  (one minute by default); Refresh reloads immediately. These reads
   do not start VM checks or fetch outputs from the participant. PVE session/access
   checks still apply.
 
@@ -446,7 +507,7 @@ or response bodies. Common credential fields are redacted. Previews cover up to
 80 log lines (up to 12,000 characters). Missing or unreadable diagnostics are
 reported explicitly; opening results does not attempt remote recovery.
 
-A compact status notice follows the active sample across all pages. The dedicated Progress workspace updates saved run data every five seconds
+A compact status notice follows the active sample across all pages. The dedicated Progress workspace streams changes to saved run data
 while execution is active, including when dashboard refresh is Never. It stops
 when execution finishes if automatic refresh is off. Run/trial elapsed clocks
 advance between reads.
@@ -580,6 +641,18 @@ maintenance lock is held. No application restart is automatic: open a new CAF
 session or restart a long-running app as appropriate. CAF browser-saved settings,
 explicit CLI flags and process environment are not imported or overwritten by
 this file editor and can take precedence for interactive app sessions.
+
+On **Applications**, the ScenarioForge card includes a separate **Reinstall all
+catalogs** action. It purges and replaces the installed vulnerability,
+flag-generator, and flag-node-generator catalogs from the latest configured
+`flag-generators` repository revision. The confirmation warns that custom catalog
+changes will be lost. ScenarioForge is stopped during import, all three catalog
+counts are verified, and the previous directories are restored automatically if
+the import or service restart fails. Maintenance history shows the current step,
+overall completion, and every stage from host download through service restart.
+Archive transfer includes acknowledged bytes, percentage, and throughput. Active
+maintenance continues to update every two seconds when general dashboard refresh
+is set to **Never**.
 
 In PVE mode, **Choose your lab VMs** lists only your available QEMU VMs on the
 current node. Save your ScenarioForge, participant and CoreVM selections; they
@@ -815,10 +888,36 @@ when the main console rolls over. Command previews show at most 60 lines, with
 common credentials redacted. These views only read saved host data. Existing runs
 can show their saved command logs and artifacts; new checkpoints require a new run.
 
-Active Progress and Results windows poll their saved run data every five seconds,
-independently of the dashboard Automatic refresh setting, including Never.
-These updates run silently without reopening the loading modal. With Never set,
-polling stops when the run finishes; dashboard VM observations remain unchanged.
+Active Progress windows use **Server-Sent Events (SSE)** for transcripts, phases,
+challenge observations, released hints and completion. One authenticated HTTPS
+connection receives an initial snapshot followed by changes. Opening another
+window for the same owned run shares its host-side watcher. Local telemetry file
+changes are checked/batched every 500ms; unchanged data is not rebuilt until the
+five-second state/lock check. No guest operations or model calls are added.
+
+Connections heartbeat while quiet, automatically reconnect with a fresh snapshot,
+and fall back to five-second polling if streaming is unavailable or stalled.
+Fallback retries streaming automatically; **Refresh** retries immediately.
+**Live updates · streaming**, reconnecting and polling labels identify the current
+transport. Stream capacity is bounded separately from normal requests. Sessions
+are checked before delivery and provider access is revalidated periodically;
+logout/revocation closes the feed. Closing a window stops only its subscription.
+
+Results windows retain five-second polling during active execution. Both views
+update independently of dashboard Automatic refresh, including **Never**, and
+updates do not reopen the loading modal. Completion arrives through the stream;
+with Never selected, all automatic run updates stop afterward. Other refresh
+intervals continue to apply to finished runs. Dashboard VM observations and the
+existing guest-to-host transcript collection cadence are unchanged: SSE can only
+send participant output after it reaches the orchestrator. Restart the
+orchestrator after installing this update; VM software updates are not needed.
+
+A trial error of **Guest wall-clock budget exceeded** or **Participant active-time
+budget exceeded** is controlled by **New experiment → Trial limits → Participant
+active time limit (seconds)**, saved as `runtime.execution.wall_seconds`. Its
+**No timeout** toggle saves `0`; maximum turns and other enabled timeouts still
+apply. The review page shows the chosen limit. Rerunning an existing experiment
+reuses its frozen settings; create a new experiment to use a different limit.
 
 When you save or use participant model settings, the orchestrator calls the
 provisioner's `/usr/local/sbin/update-llm-destination` utility. It updates the
@@ -914,3 +1013,18 @@ confirmation, then permanently removes the selected experiments’ private saved
 inputs and local outputs (results, logs and bundles). Active runs and experiments
 referenced by saved studies are protected; the server checks the complete
 selection before deleting anything. Deletion is scoped to the signed-in owner.
+
+
+Participant connectivity preflight allows up to 1,024 output tokens for its short
+synthetic response so reasoning-capable models can reach final text. It still
+requires usable text or a tool call within the existing probe time limit;
+reasoning-only output does not count as a successful probe. No real tool is
+executed during this check.
+
+### Structured assistance display
+
+Released coaching is shown as **What I observed** (only when the monitor cited
+direct execution output), **What that suggests**, **What I would do next**, and
+**What would confirm progress**. The low/medium/high tier is shown beside the
+unlock event. The run bundle retains the same fields, catalog provenance, and
+monitor citations.

@@ -22,6 +22,7 @@ DEFAULTS = {
     'group': 'caf-maintainers',
     'participant': {'url': 'https://github.com/raistlinJ/cyber-agent-flow.git', 'ref': 'main'},
     'scenarioforge': {'url': 'https://github.com/raistlinJ/scenarioforge.git', 'ref': 'main'},
+    'catalogs': {'url': 'https://github.com/raistlinJ/flag-generators.git', 'ref': 'main'},
 }
 
 
@@ -41,12 +42,12 @@ def settings(value):
         return None
     value = {} if value is None else value
     if not isinstance(value, dict) or set(value) - set(DEFAULTS):
-        raise ValueError('updates accepts group, participant and scenarioforge, or false')
+        raise ValueError('updates accepts group, participant, scenarioforge and catalogs, or false')
     result = deepcopy(DEFAULTS)
     result.update(value)
     if not isinstance(result['group'], str) or not re.fullmatch('[A-Za-z][A-Za-z0-9_.-]{0,63}', result['group']):
         raise ValueError('updates.group must be a PVE maintenance group')
-    for role in ('participant', 'scenarioforge'):
+    for role in ('participant', 'scenarioforge', 'catalogs'):
         source = result[role]
         if not isinstance(source, dict) or set(source) - {'url', 'ref'}:
             raise ValueError('Update sources accept url and ref')
@@ -109,6 +110,56 @@ def package(source, ref, base, destination, *, trace=None, allow_same=False):
     return revision, bundle
 
 
+def package_catalogs(source, ref, destination, *, trace=None, progress=None):
+    """Fetch and archive the three ScenarioForge catalog families on the host."""
+    repository = destination / 'catalog-source.git'
+
+    def git(*args, timeout=300):
+        argv = ['git', '-c', 'core.hooksPath=/dev/null', *args]
+        if trace:
+            from .guest_monitor import redact
+            trace.emit('command', redact(argv), force=True)
+        started = time.monotonic()
+        process = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=timeout,
+            env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'},
+        )
+        if trace:
+            trace.emit(
+                'response',
+                f'Host Git exit {process.returncode} after {time.monotonic()-started:.2f}s\n'
+                + process.stdout.decode(errors='replace')
+                + process.stderr.decode(errors='replace'),
+                force=True,
+            )
+        if process.returncode:
+            raise UpdateError(
+                'Host catalog download/package failed: '
+                + process.stderr.decode(errors='replace')[-1200:]
+            )
+        return process
+
+    git('init', '--bare', str(repository))
+    git('-C', str(repository), 'fetch', '--no-tags', source['url'], ref_name(ref))
+    revision = git('-C', str(repository), 'rev-parse', 'FETCH_HEAD^{commit}').stdout.decode().strip()
+    if not re.fullmatch('[0-9a-f]{40}', revision):
+        raise UpdateError('Unsupported catalog source revision')
+    if progress:
+        progress('package', 'Download complete; packaging the three catalog families')
+    archive = destination / 'scenarioforge-catalogs.zip'
+    git(
+        '-C', str(repository), 'archive', '--format=zip', f'--output={archive}', revision,
+        'pack.json', 'flag_generators', 'flag_node_generators', 'vulnhub',
+        timeout=600,
+    )
+    if not archive.is_file() or not archive.stat().st_size:
+        raise UpdateError('Catalog archive was not created')
+    return revision, archive
+
+
 class UpdateManager:
     def __init__(self, cfg, runtime, root, config=None):
         self.cfg, self.runtime, self.root = cfg, runtime, Path(root)
@@ -160,11 +211,21 @@ class UpdateManager:
                         pass  # A damaged optional trace must not hide the job result.
                 rows.append(row)
         return dict(can_update=permitted, group=self.config['group'], desktop=self.desktop, jobs=rows,
+                    catalogs=dict(self.config['catalogs']),
                     applications=[dict(role=role, vmid=roles.get(role), **self.config[role]) for role in ('participant', 'scenarioforge')])
 
-    def submit(self, access, role, action, ref, request_id, process_confirmation=None, force_confirmation=None):
-        if self.config is None or role not in ('participant', 'scenarioforge') or action not in ('inspect', 'update', 'rollback'):
+    def submit(self, access, role, action, ref, request_id, process_confirmation=None,
+               force_confirmation=None, catalog_confirmation=None):
+        actions = ('inspect', 'update', 'rollback', 'reinstall-catalogs')
+        if self.config is None or role not in ('participant', 'scenarioforge') or action not in actions:
             raise UpdateError('This application maintenance action is not enabled')
+        if action == 'reinstall-catalogs':
+            if role != 'scenarioforge':
+                raise UpdateError('Catalog reinstall is available only for ScenarioForge')
+            if catalog_confirmation != 'purge-installed-catalogs':
+                raise UpdateError('Confirm that installed catalogs will be replaced')
+        elif catalog_confirmation is not None:
+            raise UpdateError('Catalog confirmation is valid only for catalog reinstall')
         ref_name(ref)
         if not isinstance(request_id, str) or not re.fullmatch('[0-9a-f]{32}', request_id):
             raise UpdateError('Invalid maintenance request ID')
@@ -209,8 +270,9 @@ class UpdateManager:
                 raise UpdateError('Check version again before forcing an update')
             force_expected = {key: info[key] for key in ('revision', 'modified_file_count', 'modified_files')}
         python = self.runtime['engine']['python'] if role == 'participant' else self.cfg['scenarioforge'].get('python', root + '/.venv/bin/python')
+        source = self.config['catalogs'] if action == 'reinstall-catalogs' else self.config[role]
         job = dict(id=request_id, role=role, action=action, ref=ref, vmid=vmid, root=root,
-                   source=self.config[role]['url'],
+                   source=source['url'],
                    status='queued', created_at=now(), message='Waiting for maintenance worker')
         if approved:
             job.update(process_confirmation=process_confirmation, stop_processes=approved)
@@ -226,7 +288,28 @@ class UpdateManager:
                     raise UpdateError('Request ID already belongs to another process confirmation')
                 if old.get('force_confirmation') != force_confirmation:
                     raise UpdateError('Request ID already belongs to another force confirmation')
+                if bool(old.get('catalog_reinstall')) != (action == 'reinstall-catalogs'):
+                    raise UpdateError('Request ID already belongs to another catalog operation')
                 return {'id': request_id}
+            if action == 'reinstall-catalogs':
+                job['catalog_reinstall'] = True
+                labels = (
+                    ('inspect', 'Inspect ScenarioForge'),
+                    ('download', 'Download catalog source'),
+                    ('package', 'Package catalog families'),
+                    ('prepare', 'Prepare guest destination'),
+                    ('transfer', 'Transfer archive'),
+                    ('purge', 'Back up and purge installed catalogs'),
+                    ('install', 'Install and verify catalogs'),
+                    ('restart', 'Restart ScenarioForge'),
+                )
+                job['progress'] = {
+                    'current': None,
+                    'current_index': 0,
+                    'total': len(labels),
+                    'percent': 0,
+                    'steps': [dict(id=key, label=label, status='pending') for key, label in labels],
+                }
             self.jobs = {key: future for key, future in self.jobs.items() if not future.done()}
             if self.closed or access.username in self.jobs or len(self.jobs) >= 2:
                 raise UpdateError('An application maintenance worker is already busy; try again later')
@@ -241,6 +324,21 @@ class UpdateManager:
             job['message'] = message
             ev.write_json(directory / 'job.json', job)
             trace.emit('status', message, force=True)
+        def catalog_step(step, message, *, completed=False):
+            progress = job.get('progress')
+            if progress:
+                steps = progress['steps']
+                index = next(i for i, item in enumerate(steps) if item['id'] == step)
+                for prior in steps[:index]:
+                    if prior['status'] in ('pending', 'running'):
+                        prior['status'] = 'completed'
+                steps[index]['status'] = 'completed' if completed else 'running'
+                progress.update(
+                    current=None if completed and index == len(steps) - 1 else step,
+                    current_index=index + 1,
+                    percent=round(100 * (index + (1 if completed else 0)) / len(steps)),
+                )
+            save(message)
         def authorize(args):
             start = time.monotonic()
             label = 'Desktop inventory authorization' if self.desktop else 'PVE authorization'
@@ -258,9 +356,14 @@ class UpdateManager:
         with ev.lease(directory / '.lock'):
             try:
                 job['status'] = 'running'
-                save('Reading the installed application revision')
+                if job['action'] == 'reinstall-catalogs':
+                    catalog_step('inspect', 'Inspecting ScenarioForge and its installed revision')
+                else:
+                    save('Reading the installed application revision')
                 installed = agent.call(vmid, 'app_inspect', **args)
                 job['installed'] = installed
+                if job['action'] == 'reinstall-catalogs':
+                    catalog_step('inspect', 'ScenarioForge checkout and installed revision verified', completed=True)
                 if job['action'] == 'inspect':
                     job['status'] = 'completed'
                     save('Installed revision and compatibility checked')
@@ -269,7 +372,8 @@ class UpdateManager:
                 force_expected = job.get('force_expected')
                 if force_expected and any(installed.get(key) != value for key, value in force_expected.items()):
                     raise UpdateError('Tracked local edits changed after confirmation; check version again before forcing the update.')
-                if installed.get('modified') and not replace_tools and not force_expected:
+                if (job['action'] != 'reinstall-catalogs' and installed.get('modified')
+                        and not replace_tools and not force_expected):
                     raise UpdateError('Tracked local edits exist; review the changed files under Check version and preserve/commit them before retrying. No source bundle downloaded or transferred; application files unchanged.')
                 approved = job.get('stop_processes')
                 if approved:
@@ -311,6 +415,61 @@ class UpdateManager:
                             save('Transferring verified source bundle through the guest agent')
                             transfer.put(vmid, upload['path'], content)
                             update['sha256'] = job['bundle_sha256']
+                    if job['action'] == 'reinstall-catalogs':
+                        catalog_step('download', 'Downloading the latest ScenarioForge catalogs on the host')
+                        def catalog_package_progress(step, message):
+                            catalog_step(step, message)
+                        revision, archive = package_catalogs(
+                            self.config['catalogs'], job['ref'], directory, trace=trace,
+                            progress=catalog_package_progress,
+                        )
+                        catalog_step('package', 'Catalog archive packaged and validated', completed=True)
+                        job['catalog_revision'] = revision
+                        job['revision'] = revision
+                        if archive.stat().st_size > self.runtime['backend']['max_transfer_bytes']:
+                            raise UpdateError('Catalog archive exceeds the configured transfer limit')
+                        catalog_step('prepare', 'Preparing an exclusive upload destination on the ScenarioForge VM')
+                        upload = agent.call(vmid, 'catalog_stage', **args, token=job['id'])
+                        content = archive.read_bytes()
+                        job['bundle_sha256'] = hashlib.sha256(content).hexdigest()
+                        job['archive_bytes'] = len(content)
+                        catalog_step('prepare', 'Guest destination prepared; archive checksum recorded', completed=True)
+                        catalog_step('transfer', f'Transferring {len(content):,} catalog bytes through the guest agent')
+                        transfer = trace.instrument(ev.GuestAgent(self.runtime['backend'], authorize=authorize))
+                        transfer.put(vmid, upload['path'], content)
+                        catalog_step('transfer', 'Catalog archive transferred and checksum verified', completed=True)
+                        catalog_step('purge', 'Backing up and purging the currently installed catalogs')
+                        prepared = agent.call(
+                            vmid,
+                            'catalog_prepare',
+                            timeout=300,
+                            **update,
+                            catalog_revision=revision,
+                            sha256=job['bundle_sha256'],
+                        )
+                        job['catalog_expected'] = prepared.get('expected')
+                        catalog_step('purge', 'Previous catalogs backed up; installed catalog roots purged', completed=True)
+                        catalog_step('install', 'Installing all catalog families and verifying exact item counts')
+                        installed_catalogs = agent.call(
+                            vmid,
+                            'catalog_install',
+                            timeout=1800,
+                            **update,
+                            catalog_revision=revision,
+                        )
+                        job['catalogs'] = installed_catalogs.get('catalogs')
+                        catalog_step('install', 'Catalog import completed and all item counts verified', completed=True)
+                        catalog_step('restart', 'Restarting ScenarioForge and committing the catalog transaction')
+                        result = agent.call(
+                            vmid,
+                            'catalog_finalize',
+                            timeout=180,
+                            **update,
+                            catalog_revision=revision,
+                        )
+                        job.update(status='completed', installed=result, catalogs=result.get('catalogs'))
+                        catalog_step('restart', 'ScenarioForge restarted; all catalogs reinstalled and verified', completed=True)
+                        return
                     save('Validating and activating application source; preserving configuration and data')
                     if self.closed:
                         raise UpdateError('Server stopped before activation; application source was not changed')
@@ -319,6 +478,15 @@ class UpdateManager:
                     save('Application revision activated' if job['action'] == 'update' else 'Previous revision restored')
             except Exception as exc:
                 job.update(status='failed', error=str(exc))
+                progress = job.get('progress')
+                if progress:
+                    failed = next((step for step in progress['steps'] if step['status'] == 'running'), None)
+                    if failed is None:
+                        failed = next((step for step in progress['steps'] if step['status'] == 'pending'), None)
+                    if failed is not None:
+                        failed.update(status='failed', detail=str(exc))
+                        index = progress['steps'].index(failed)
+                        progress.update(current=failed['id'], current_index=index + 1)
                 save('Maintenance stopped; inspect details before retrying')
             finally:
                 job['ended_at'] = now()

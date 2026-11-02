@@ -1,11 +1,12 @@
 """Python TLS reverse proxy to a fixed, private, authenticated dashboard backend."""
 import asyncio
+from contextlib import suppress
 import logging
 from http.server import ThreadingHTTPServer
 import secrets
 import threading
 
-from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
+from aiohttp import ClientError, ClientSession, ClientTimeout, DummyCookieJar, web
 
 from .auth import Auth
 from .tls import settings, context, ensure_certificate
@@ -26,6 +27,8 @@ async def api_errors(request, handler):
 
 
 def upstream_timeout(path):
+    if path.startswith('/api/runs/') and path.endswith('/stream'):
+        return ClientTimeout(total=None, sock_connect=10, sock_read=30)
     if path == '/api/experiments/analyze-rerun':
         # CAF analysis uses the frozen judge/analysis budget (up to one hour),
         # while independent status reads keep the browser informed.
@@ -40,6 +43,7 @@ def upstream_timeout(path):
 def application(upstream_port, proxy_key, config):
     app = web.Application(client_max_size=32 * 1024 * 1024, middlewares=[api_errors])
     slots = asyncio.Semaphore(64)
+    stream_slots = asyncio.Semaphore(32)
     upstream = f'http://127.0.0.1:{upstream_port}'
 
     async def client_lifetime(app):
@@ -58,13 +62,15 @@ def application(upstream_port, proxy_key, config):
             raise web.HTTPMethodNotAllowed(request.method, ['GET', 'POST'])
         if request.headers.get('Upgrade'):
             raise web.HTTPBadRequest(text='Protocol upgrades are not supported')
-        if slots.locked():
+        streaming = request.path.startswith('/api/runs/') and request.path.endswith('/stream')
+        capacity = stream_slots if streaming else slots
+        if capacity.locked():
             raise web.HTTPServiceUnavailable(text='Server busy')
         # The client cannot select an upstream or supply trusted proxy headers.
         headers = {k: request.headers[k] for k in ('Cookie', 'Origin', 'Content-Type', 'X-CSRF-Token') if k in request.headers}
         headers.update({'Host': config['authority'], 'X-Orchestrator-Proxy-Key': proxy_key,
                         'X-Forwarded-Proto': 'https', 'X-Forwarded-For': request.remote or 'unknown'})
-        async with slots:
+        async with capacity:
             try:
                 limit = 32 * 1024 * 1024 if request.path == '/api/scenarios/upload' else 128 * 1024 if request.path == '/api/experiments/create' else 8192
                 if request.content_length is not None and request.content_length > limit:
@@ -76,6 +82,32 @@ def application(upstream_port, proxy_key, config):
                                                        headers=headers, data=body if request.method == 'POST' else None,
                                                        allow_redirects=False,
                                                        timeout=upstream_timeout(request.path)) as response:
+                    if streaming and response.status == 200 and response.content_type == 'text/event-stream':
+                        result = web.StreamResponse(status=200, headers={
+                            'Content-Type': 'text/event-stream; charset=utf-8',
+                            'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no',
+                            'X-Content-Type-Options': 'nosniff',
+                            'Strict-Transport-Security': 'max-age=31536000',
+                        })
+                        for value in response.headers.getall('Set-Cookie', []):
+                            result.headers.add('Set-Cookie', value)
+                        await result.prepare(request)
+                        pending = asyncio.create_task(response.content.readany())
+                        try:
+                            while request.transport is not None and not request.transport.is_closing():
+                                done, _ = await asyncio.wait({pending}, timeout=1)
+                                if not done: continue
+                                chunk = pending.result()
+                                if not chunk: break
+                                await result.write(chunk)
+                                pending = asyncio.create_task(response.content.readany())
+                            await result.write_eof()
+                        except (ClientError, ConnectionError, asyncio.CancelledError, TimeoutError):
+                            pass
+                        finally:
+                            pending.cancel()
+                            with suppress(asyncio.CancelledError, ClientError, ConnectionError, TimeoutError): await pending
+                        return result
                     if request.path.endswith('/artifact') and response.status == 200:
                         result = web.StreamResponse(status=response.status)
                         for key in ('Content-Type', 'Content-Length', 'Content-Disposition', 'Cache-Control',

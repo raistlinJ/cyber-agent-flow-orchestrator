@@ -150,7 +150,15 @@ function openLatestVisualHint(){
 }
 function openReleaseKeys(holder){return new Set([...holder.querySelectorAll('details[open][data-release-key]')].map(item=>item.dataset.releaseKey));}
 function visualReleaseDetails(event,className,label,opened){
- const key=visualReleaseKey(event),details=el('details',null,className+' '+(event.solution?'solution':'hint'));details.dataset.releaseKey=key;details.open=opened.has(key);const summary=el('summary');summary.append(unlockIconSVG(),el('span',label));details.append(summary,el('pre',event.text+(event.truncated?'\n[Shortened; full released text is in the run bundle.]':'')));return details;
+ const key=visualReleaseKey(event),details=el('details',null,className+' '+(event.solution?'solution':'hint'));details.dataset.releaseKey=key;details.open=opened.has(key);const summary=el('summary'),tier=event.tier?' · '+event.tier+' assistance':'';summary.append(unlockIconSVG(),el('span',label+tier));details.append(summary);
+ if(event.solution||!event.next_action){details.append(el('pre',event.text+(event.truncated?'\n[Shortened; full released text is in the run bundle.]':'')));return details;}
+ const body=el('div',null,'released-coaching');
+ const observation=event.monitor_observation?.summary;if(observation)body.append(el('p','What I observed: '+observation));
+ if(event.interpretation)body.append(el('p','What that suggests: '+event.interpretation));
+ body.append(el('p','What I would do next: '+event.next_action));
+ if(event.success_signal)body.append(el('p','What would confirm progress: '+event.success_signal));
+ if(event.truncated)body.append(el('p','Shortened here; the complete release is in the run bundle.','small'));
+ details.append(body);return details;
 }
 
 /* A persistent canvas with independently scrollable inspection panels. Updates never
@@ -211,7 +219,7 @@ function initVisualEditor(){
  $('visual-step-open').addEventListener('click',()=>{const phase=currentVisualStep(visualState.run);if(phase){setProgressDisplay('phases');setProgressPhase(phase.id,{follow:true});}});
  initEditorSash('editor-sidebar-sash',true);initEditorSash('editor-panel-sash',false);
  new ResizeObserver(resizeVisualEditor).observe($('debug-console'));new ResizeObserver(resizeVisualEditor).observe(document.querySelector('.visual-header'));window.addEventListener('resize',resizeVisualEditor);
- const status=()=>{const text=$('run-status').textContent;if($('visual-editor-status').textContent!==text)$('visual-editor-status').textContent=text;$('visual-editor-trial').textContent=$('visual-trial').selectedOptions[0]?.textContent||'Lab preparation';};new MutationObserver(status).observe($('run-status'),{childList:true,subtree:true,characterData:true});$('visual-trial').addEventListener('change',status);
+ const status=()=>{const text=$('run-status').textContent;if($('visual-editor-status').textContent!==text)$('visual-editor-status').textContent=text;};new MutationObserver(status).observe($('run-status'),{childList:true,subtree:true,characterData:true});$('visual-trial').addEventListener('change',status);
  applyVisualEditor();status();
 }
 function setVisualEditorCollapsed(name,collapsed){

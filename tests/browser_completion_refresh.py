@@ -23,6 +23,8 @@ def main():
             with secure_server(dashboard,root/'web',auth=make_auth(pve)) as server:
                 browser=pw.chromium.launch(channel='chrome',headless=True)
                 context=browser.new_context(ignore_https_errors=True)
+                # Exercise the polling fallback explicitly; SSE has dedicated integration coverage.
+                context.add_init_script("window.EventSource=undefined")
                 page=context.new_page()
                 errors, dashboard_reads, run_reads=[],[],[]
                 context.on('page',lambda tab:tab.on('pageerror',lambda e:errors.append(str(e))))
@@ -54,7 +56,7 @@ def main():
                 for view in ('progress','results'):
                     tab=context.new_page()
                     tab.goto(server['origin']+'/run?view='+view+'&run=demo')
-                    expect(tab.locator('#run-status')).to_contain_text('Live run updates every 5 seconds')
+                    expect(tab.locator('#run-status')).to_contain_text('Live updates · polling every 5 seconds')
                     expect(tab.locator('#loading-modal')).not_to_be_visible()
                     tab.clock.install()
                     tab.evaluate("dispatchEvent(new StorageEvent('storage',{key:'caf-refresh-minutes',newValue:'0'}))")

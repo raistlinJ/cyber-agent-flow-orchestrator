@@ -36,6 +36,23 @@ transport errors omit command arguments and redact passwords. RPC input is copie
 into a unique owner-only guest directory, deleted after reading, and replies are
 published atomically. Polling never resends an acknowledged guest command.
 
+Large uploads (1 MiB and above) and downloads automatically use a temporary TLS
+connection over an existing VMware host adapter when available. VMware Tools
+authorizes and launches the transfer helper; bulk data bypasses its slower copy
+RPC. The helper trusts only the temporary certificate passed through that control
+channel. Transfers have a single-use token, byte limits and SHA-256 verification;
+uploads become visible only after verification. The listener closes after each
+transfer. No guest daemon, SSH, shared folder, route change or reprovisioning is
+required. Maintenance progress reports bytes, percentage and transfer speed.
+
+The evaluator discovers the adapter from the VMX and Fusion networking settings.
+If that adapter cannot be used or the guest cannot connect, it falls back to
+VMware Tools. For an unusual adapter layout, an inventory VM entry can specify
+`"transfer_host": "192.168.20.1"` (the Mac's VMware adapter address), or
+`"transfer_host": false` to use only Tools. This address is separate from the
+localhost-only WebUI bind address. Application-specific RPC helpers retain their
+own transfer protocol.
+
 Host VM locks are keyed to the VMX path under your Mac user's cache directory;
 preflight does not treat an old Proxmox run or a different Fusion lab with the
 same local IDs as owning these guest services. Keep a separate imported profile

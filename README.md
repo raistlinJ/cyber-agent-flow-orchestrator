@@ -441,6 +441,14 @@ or app-to-participant connection is required. Updates preserve local runtime dat
 and use the existing Python environment. Changed dependency manifests or conflicting
 local edits block activation.
 
+The ScenarioForge card also provides **Reinstall all catalogs**. After an explicit
+confirmation, it purges and imports the latest configured vulnerability,
+flag-generator, and flag-node-generator catalogs from the `flag-generators`
+repository. The guest restores its previous catalogs if import, verification, or
+service restart fails. Maintenance history tracks inspect, download, packaging,
+guest preparation, byte/percentage transfer, backup/purge, install/verification,
+and restart as separate live steps, even when dashboard refresh is **Never**.
+
 If an application is running, **Check version** lists its blocking PIDs. Choose
 **Update** to review and confirm that list. The updater requests
 a graceful stop before activation; it never force-kills a process. Listed terminals
@@ -724,10 +732,16 @@ For editable challenge rubrics, evidence-based judging, controlled conditions, l
 
 ScenarioForge task loading can draft an editable, Judge-based challenge scaffold from resolved Flow data and guide solutions. Progressive hints can use separate intermediate evidence reviews to select the current unfinished step. See [scaffolds and intermediate progress](docs/rubric-experiments.md#scenario-derived-scaffold-and-intermediate-progress) for configuration, limits and audit files.
 
+Catalog-backed tasks also carry structured teammate coaching. Live progress
+shows the monitor's cited observation separately from the authored
+interpretation, next action, and success signal, together with the hint tier and
+source. Up to twelve ordered entries can be released for the current challenge;
+the facilitator walkthrough and answer remain a separately gated solution.
+
 
 While an experiment runs, open **Progress → step 9 → Cyber-agent-flow transcript**
 to view emitted prompts, responses, tool calls/results and status. The scrollable
-dropdown updates every five seconds even when dashboard refresh is set to Never.
+transcript streams new host-collected output even when dashboard refresh is set to Never.
 Choose among the latest ten trial attempts. Scrolling up pauses automatic scrolling;
 return to the bottom to follow new events. Common credential fields are redacted,
 and displayed history is bounded; the full transcript remains in the run bundle.
@@ -740,7 +754,8 @@ frozen challenge dependency graph with green solved, amber partial, blue targete
 and grey other states. Select a challenge for cited discoveries, completion
 criteria and released hints/solutions; pan, zoom, switch trials or focus on CAF's
 latest monitor-observed activity. The judge's intermediate Monitor observations
-are separate from the final score. See [visual progress](docs/webui.md#loading-and-progress).
+are separate from the final score. See [how the Visualize canvas gets progress](docs/webui.md#how-the-visualize-canvas-gets-progress)
+and the complete [visual progress reference](docs/webui.md#loading-and-progress).
 
 
 Every experiment time-limit field has a **No timeout** option: participant active
@@ -762,3 +777,12 @@ IP/range targets pulse while CAF interacts with them, without changing completio
 colors. Tool events supply activity; cited Monitor findings supply challenge
 context. Highlights expire when execution ends or updates go stale, with static
 outlines for reduced-motion preferences.
+
+
+Active **Progress** windows use Server-Sent Events (SSE) for incremental status,
+CAF/judge transcripts, hints and visualization updates. A shared host-file watcher
+batches changes every 500ms without adding VM probes. Connections reconnect with
+a fresh snapshot and fall back to five-second polling when necessary. The
+**Never** refresh preference still allows live run updates and stops automatic
+updates after completion. Guest-to-host transcript collection is unchanged.
+Restart the orchestrator to enable the streaming endpoint; no VM update is needed.

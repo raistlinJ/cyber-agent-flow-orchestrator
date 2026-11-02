@@ -62,8 +62,8 @@ def main(argv=None):
     provision.add_argument('provision_config')
     provision.add_argument('--workflow', help='Base workflow; defaults to workflow.yaml')
     provision.add_argument('--output', required=True, help='New profile directory; existing files are never replaced')
-    maintenance = commands.add_parser('user-app', help='Check, update or roll back a selected application through QGA')
-    maintenance.add_argument('action', choices=['inspect', 'update', 'rollback'])
+    maintenance = commands.add_parser('user-app', help='Maintain a selected application or reinstall ScenarioForge catalogs through QGA')
+    maintenance.add_argument('action', choices=['inspect', 'update', 'rollback', 'reinstall-catalogs'])
     maintenance.add_argument('--role', required=True, choices=['participant', 'scenarioforge'])
     maintenance.add_argument('--ref', help='Branch, tag or commit (default: configured update ref)')
     maintenance.add_argument('--config', default='workflow.yaml')
@@ -132,7 +132,15 @@ def main(argv=None):
             cfg, runtime, _, _ = load(args.config)
             manager = UpdateManager(cfg, runtime, args.runs_root, web_settings['updates'])
             try:
-                reply = manager.submit(access, args.role, args.action, args.ref or manager.config[args.role]['ref'], uuid.uuid4().hex)
+                source_key = 'catalogs' if args.action == 'reinstall-catalogs' else args.role
+                reply = manager.submit(
+                    access,
+                    args.role,
+                    args.action,
+                    args.ref or manager.config[source_key]['ref'],
+                    uuid.uuid4().hex,
+                    **({'catalog_confirmation': 'purge-installed-catalogs'} if args.action == 'reinstall-catalogs' else {}),
+                )
                 manager.jobs[access.username].result()
                 result = ev.read_json(Workspace(args.runs_root, access.username).path / 'updates' / reply['id'] / 'job.json')
                 print(json.dumps(result, indent=2))
